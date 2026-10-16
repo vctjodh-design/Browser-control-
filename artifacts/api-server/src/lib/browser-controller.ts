@@ -11,6 +11,8 @@ const MAX_SESSIONS = 3;
 const MAX_TABS_PER_SESSION = 8;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const VIEWPORT = { width: 1440, height: 900 };
+const MAX_PAGE_TEXT_LENGTH = 50_000;
+const MAX_PAGE_LINKS = 200;
 
 export class BrowserOperationError extends Error {
   constructor(
@@ -128,11 +130,128 @@ export async function getBrowserState(sessionId: string) {
       active: id === session.activeTabId,
     })),
   );
-  const screenshot = await activePage.screenshot({
-    type: "png",
-    animations: "disabled",
-    timeout: 15_000,
-  });
+  const [screenshot, pageContent, title] = await Promise.all([
+    activePage.screenshot({
+      type: "png",
+      animations: "disabled",
+      timeout: 15_000,
+    }),
+    activePage.evaluate(() => {
+      const doc = (globalThis as unknown as { document: any }).document;
+      const getStyle = (
+        globalThis as unknown as {
+          getComputedStyle: (element: any) => any;
+        }
+      ).getComputedStyle;
+      const normalize = (value: string) =>
+        value
+          .replace(/\u00a0/g, " ")
+          .replace(/[ \t]+\n/g, "\n")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
+      const body = doc.body;
+      const isVisible = (element: any) => {
+        const style = getStyle(element);
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          style.visibility !== "collapse" &&
+          element.getClientRects().length > 0
+        );
+      };
+      const text = normalize(body?.innerText ?? "").slice(
+        0,
+        50_000,
+      );
+      const description = normalize(
+        doc
+          .querySelector('meta[name="description"]')
+          ?.getAttribute("content") ?? "",
+      ).slice(0, 2_000);
+      const headingElements = (
+        Array.from(body?.querySelectorAll("h1,h2,h3,h4,h5,h6") ?? []) as any[]
+      ).filter(isVisible);
+      const headings = headingElements.slice(0, 100).flatMap((element) => {
+        const headingText = normalize(element.innerText ?? "");
+        if (!headingText) return [];
+        return [
+          {
+            level: Number(element.tagName.slice(1)),
+            text: headingText.slice(0, 500),
+          },
+        ];
+      });
+
+      const markdownBlocks = (
+        Array.from(
+          body?.querySelectorAll(
+            "h1,h2,h3,h4,h5,h6,p,li,blockquote,pre",
+          ) ?? [],
+        ) as any[]
+      )
+        .filter(isVisible)
+        .flatMap((element) => {
+          const tag = element.tagName.toLowerCase();
+          if (
+            (tag === "p" && element.parentElement?.closest("li,blockquote,pre")) ||
+            (tag === "blockquote" &&
+              element.parentElement?.closest("blockquote")) ||
+            (tag === "pre" && element.parentElement?.closest("pre"))
+          ) {
+            return [];
+          }
+          const blockText = normalize(
+            element.innerText ?? element.textContent ?? "",
+          );
+          if (!blockText) return [];
+          if (/^h[1-6]$/.test(tag)) {
+            return [`${"#".repeat(Number(tag.slice(1)))} ${blockText}`];
+          }
+          if (tag === "li") return [`- ${blockText}`];
+          if (tag === "blockquote") {
+            return [blockText.split("\n").map((line) => `> ${line}`).join("\n")];
+          }
+          if (tag === "pre") return [`\`\`\`\n${blockText}\n\`\`\``];
+          return [blockText];
+        });
+      const markdown = (
+        markdownBlocks.length > 0 ? markdownBlocks.join("\n\n") : text
+      ).slice(0, 50_000);
+
+      const seenLinks = new Set<string>();
+      const links = (
+        Array.from(body?.querySelectorAll("a[href]") ?? []) as any[]
+      )
+        .filter(isVisible)
+        .flatMap((element) => {
+          const anchor = element as any;
+          let target: URL;
+          try {
+            target = new URL(anchor.href, doc.baseURI);
+          } catch {
+            return [];
+          }
+          if (
+            (target.protocol !== "http:" && target.protocol !== "https:") ||
+            target.username ||
+            target.password ||
+            target.href.length > 2_048 ||
+            seenLinks.has(target.href)
+          ) {
+            return [];
+          }
+          seenLinks.add(target.href);
+          const linkText = normalize(
+            anchor.innerText || anchor.getAttribute("aria-label") || "",
+          ).slice(0, 300);
+          return [{ text: linkText || target.href, href: target.href }];
+        })
+        .slice(0, 200);
+
+      return { description, text, markdown, headings, links };
+    }),
+    activePage.title().catch(() => ""),
+  ]);
 
   return {
     sessionId,
@@ -140,7 +259,8 @@ export async function getBrowserState(sessionId: string) {
     tabs: tabs.filter((tab) => session.tabs.has(tab.id)),
     screenshot: `data:image/png;base64,${screenshot.toString("base64")}`,
     currentUrl: activePage.url(),
-    title: await activePage.title().catch(() => ""),
+    title,
+    pageContent,
     viewportWidth: VIEWPORT.width,
     viewportHeight: VIEWPORT.height,
   };

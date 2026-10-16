@@ -275,6 +275,42 @@ components:
         active:
           type: boolean
       required: [id, url, title, active]
+    BrowserPageHeading:
+      type: object
+      properties:
+        level:
+          type: integer
+          minimum: 1
+          maximum: 6
+        text:
+          type: string
+      required: [level, text]
+    BrowserPageLink:
+      type: object
+      properties:
+        text:
+          type: string
+        href:
+          type: string
+      required: [text, href]
+    BrowserPageContent:
+      type: object
+      properties:
+        description:
+          type: string
+        text:
+          type: string
+        markdown:
+          type: string
+        headings:
+          type: array
+          items:
+            $ref: "#/components/schemas/BrowserPageHeading"
+        links:
+          type: array
+          items:
+            $ref: "#/components/schemas/BrowserPageLink"
+      required: [description, text, markdown, headings, links]
     BrowserState:
       type: object
       properties:
@@ -293,6 +329,8 @@ components:
           type: string
         title:
           type: string
+        pageContent:
+          $ref: "#/components/schemas/BrowserPageContent"
         viewportWidth:
           type: integer
         viewportHeight:
@@ -304,6 +342,7 @@ components:
         - screenshot
         - currentUrl
         - title
+        - pageContent
         - viewportWidth
         - viewportHeight
     CreateBrowserSessionInput:

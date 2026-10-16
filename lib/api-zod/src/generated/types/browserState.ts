@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { BrowserPageContent } from './browserPageContent';
 import type { BrowserTab } from './browserTab';
 
 export interface BrowserState {
@@ -15,6 +16,7 @@ export interface BrowserState {
   screenshot: string;
   currentUrl: string;
   title: string;
+  pageContent: BrowserPageContent;
   viewportWidth: number;
   viewportHeight: number;
 }

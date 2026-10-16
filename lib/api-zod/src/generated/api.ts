@@ -28,6 +28,10 @@ export const CreateBrowserSessionBody = zod.object({
   "url": zod.string().min(1).max(createBrowserSessionBodyUrlMax).optional()
 })
 
+export const createBrowserSessionResponsePageContentHeadingsItemLevelMax = 6;
+
+
+
 export const CreateBrowserSessionResponse = zod.object({
   "sessionId": zod.string(),
   "activeTabId": zod.string(),
@@ -40,6 +44,19 @@ export const CreateBrowserSessionResponse = zod.object({
   "screenshot": zod.string().describe('Screenshot as a PNG data URL'),
   "currentUrl": zod.string(),
   "title": zod.string(),
+  "pageContent": zod.object({
+  "description": zod.string(),
+  "text": zod.string(),
+  "markdown": zod.string(),
+  "headings": zod.array(zod.object({
+  "level": zod.number().int().min(1).max(createBrowserSessionResponsePageContentHeadingsItemLevelMax),
+  "text": zod.string()
+})),
+  "links": zod.array(zod.object({
+  "text": zod.string(),
+  "href": zod.string()
+}))
+}),
   "viewportWidth": zod.number().int(),
   "viewportHeight": zod.number().int()
 })
@@ -51,6 +68,10 @@ export const CreateBrowserSessionResponse = zod.object({
 export const GetBrowserSessionParams = zod.object({
   "sessionId": zod.coerce.string()
 })
+
+export const getBrowserSessionResponsePageContentHeadingsItemLevelMax = 6;
+
+
 
 export const GetBrowserSessionResponse = zod.object({
   "sessionId": zod.string(),
@@ -64,6 +85,19 @@ export const GetBrowserSessionResponse = zod.object({
   "screenshot": zod.string().describe('Screenshot as a PNG data URL'),
   "currentUrl": zod.string(),
   "title": zod.string(),
+  "pageContent": zod.object({
+  "description": zod.string(),
+  "text": zod.string(),
+  "markdown": zod.string(),
+  "headings": zod.array(zod.object({
+  "level": zod.number().int().min(1).max(getBrowserSessionResponsePageContentHeadingsItemLevelMax),
+  "text": zod.string()
+})),
+  "links": zod.array(zod.object({
+  "text": zod.string(),
+  "href": zod.string()
+}))
+}),
   "viewportWidth": zod.number().int(),
   "viewportHeight": zod.number().int()
 })
@@ -94,6 +128,10 @@ export const NavigateBrowserBody = zod.object({
   "url": zod.string().min(1).max(navigateBrowserBodyUrlMax)
 })
 
+export const navigateBrowserResponsePageContentHeadingsItemLevelMax = 6;
+
+
+
 export const NavigateBrowserResponse = zod.object({
   "sessionId": zod.string(),
   "activeTabId": zod.string(),
@@ -106,6 +144,19 @@ export const NavigateBrowserResponse = zod.object({
   "screenshot": zod.string().describe('Screenshot as a PNG data URL'),
   "currentUrl": zod.string(),
   "title": zod.string(),
+  "pageContent": zod.object({
+  "description": zod.string(),
+  "text": zod.string(),
+  "markdown": zod.string(),
+  "headings": zod.array(zod.object({
+  "level": zod.number().int().min(1).max(navigateBrowserResponsePageContentHeadingsItemLevelMax),
+  "text": zod.string()
+})),
+  "links": zod.array(zod.object({
+  "text": zod.string(),
+  "href": zod.string()
+}))
+}),
   "viewportWidth": zod.number().int(),
   "viewportHeight": zod.number().int()
 })
@@ -140,6 +191,10 @@ export const PerformBrowserActionBody = zod.object({
   "deltaY": zod.number().min(performBrowserActionBodyDeltaYMin).max(performBrowserActionBodyDeltaYMax).optional()
 })
 
+export const performBrowserActionResponsePageContentHeadingsItemLevelMax = 6;
+
+
+
 export const PerformBrowserActionResponse = zod.object({
   "sessionId": zod.string(),
   "activeTabId": zod.string(),
@@ -152,6 +207,19 @@ export const PerformBrowserActionResponse = zod.object({
   "screenshot": zod.string().describe('Screenshot as a PNG data URL'),
   "currentUrl": zod.string(),
   "title": zod.string(),
+  "pageContent": zod.object({
+  "description": zod.string(),
+  "text": zod.string(),
+  "markdown": zod.string(),
+  "headings": zod.array(zod.object({
+  "level": zod.number().int().min(1).max(performBrowserActionResponsePageContentHeadingsItemLevelMax),
+  "text": zod.string()
+})),
+  "links": zod.array(zod.object({
+  "text": zod.string(),
+  "href": zod.string()
+}))
+}),
   "viewportWidth": zod.number().int(),
   "viewportHeight": zod.number().int()
 })
@@ -172,6 +240,10 @@ export const CreateBrowserTabBody = zod.object({
   "url": zod.string().max(createBrowserTabBodyUrlMax)
 })
 
+export const createBrowserTabResponsePageContentHeadingsItemLevelMax = 6;
+
+
+
 export const CreateBrowserTabResponse = zod.object({
   "sessionId": zod.string(),
   "activeTabId": zod.string(),
@@ -184,6 +256,19 @@ export const CreateBrowserTabResponse = zod.object({
   "screenshot": zod.string().describe('Screenshot as a PNG data URL'),
   "currentUrl": zod.string(),
   "title": zod.string(),
+  "pageContent": zod.object({
+  "description": zod.string(),
+  "text": zod.string(),
+  "markdown": zod.string(),
+  "headings": zod.array(zod.object({
+  "level": zod.number().int().min(1).max(createBrowserTabResponsePageContentHeadingsItemLevelMax),
+  "text": zod.string()
+})),
+  "links": zod.array(zod.object({
+  "text": zod.string(),
+  "href": zod.string()
+}))
+}),
   "viewportWidth": zod.number().int(),
   "viewportHeight": zod.number().int()
 })
@@ -197,6 +282,10 @@ export const ActivateBrowserTabParams = zod.object({
   "tabId": zod.coerce.string()
 })
 
+export const activateBrowserTabResponsePageContentHeadingsItemLevelMax = 6;
+
+
+
 export const ActivateBrowserTabResponse = zod.object({
   "sessionId": zod.string(),
   "activeTabId": zod.string(),
@@ -209,6 +298,19 @@ export const ActivateBrowserTabResponse = zod.object({
   "screenshot": zod.string().describe('Screenshot as a PNG data URL'),
   "currentUrl": zod.string(),
   "title": zod.string(),
+  "pageContent": zod.object({
+  "description": zod.string(),
+  "text": zod.string(),
+  "markdown": zod.string(),
+  "headings": zod.array(zod.object({
+  "level": zod.number().int().min(1).max(activateBrowserTabResponsePageContentHeadingsItemLevelMax),
+  "text": zod.string()
+})),
+  "links": zod.array(zod.object({
+  "text": zod.string(),
+  "href": zod.string()
+}))
+}),
   "viewportWidth": zod.number().int(),
   "viewportHeight": zod.number().int()
 })
@@ -222,6 +324,10 @@ export const CloseBrowserTabParams = zod.object({
   "tabId": zod.coerce.string()
 })
 
+export const closeBrowserTabResponsePageContentHeadingsItemLevelMax = 6;
+
+
+
 export const CloseBrowserTabResponse = zod.object({
   "sessionId": zod.string(),
   "activeTabId": zod.string(),
@@ -234,6 +340,19 @@ export const CloseBrowserTabResponse = zod.object({
   "screenshot": zod.string().describe('Screenshot as a PNG data URL'),
   "currentUrl": zod.string(),
   "title": zod.string(),
+  "pageContent": zod.object({
+  "description": zod.string(),
+  "text": zod.string(),
+  "markdown": zod.string(),
+  "headings": zod.array(zod.object({
+  "level": zod.number().int().min(1).max(closeBrowserTabResponsePageContentHeadingsItemLevelMax),
+  "text": zod.string()
+})),
+  "links": zod.array(zod.object({
+  "text": zod.string(),
+  "href": zod.string()
+}))
+}),
   "viewportWidth": zod.number().int(),
   "viewportHeight": zod.number().int()
 })

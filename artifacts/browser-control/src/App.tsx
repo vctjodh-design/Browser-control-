@@ -39,10 +39,44 @@ import { Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 
 const queryClient = new QueryClient();
 
+type OutputMode = 'screenshot' | 'markdown' | 'text' | 'json' | 'links';
+const OUTPUT_MODES: { id: OutputMode; label: string }[] = [
+  { id: 'screenshot', label: 'Screenshot' },
+  { id: 'markdown', label: 'Markdown' },
+  { id: 'text', label: 'Text' },
+  { id: 'json', label: 'JSON' },
+  { id: 'links', label: 'Links' },
+];
+
 function normalizeUrl(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return '';
   return /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function getOutputText(state: BrowserState, mode: OutputMode) {
+  switch (mode) {
+    case 'markdown':
+      return state.pageContent.markdown;
+    case 'text':
+      return state.pageContent.text;
+    case 'json':
+      return JSON.stringify({
+        title: state.title,
+        url: state.currentUrl,
+        description: state.pageContent.description,
+        headings: state.pageContent.headings,
+        text: state.pageContent.text,
+        markdown: state.pageContent.markdown,
+        links: state.pageContent.links,
+      }, null, 2);
+    case 'links':
+      return state.pageContent.links
+        .map((link) => `${link.text} — ${link.href}`)
+        .join('\n');
+    default:
+      return '';
+  }
 }
 
 function readableError(error: unknown) {
@@ -61,6 +95,8 @@ function BrowserConsole() {
   const [typeText, setTypeText] = useState('');
   const [keyText, setKeyText] = useState('');
   const [showKeyControls, setShowKeyControls] = useState(false);
+  const [outputMode, setOutputMode] = useState<OutputMode>('screenshot');
+  const [copyStatus, setCopyStatus] = useState('');
   const imageRef = useRef<HTMLImageElement>(null);
   const sessionQueryKey = getGetBrowserSessionQueryKey(sessionId);
   const sessionQuery = useGetBrowserSession(sessionId, {
@@ -79,6 +115,7 @@ function BrowserConsole() {
   const busy = createSession.isPending || closeSession.isPending || navigate.isPending ||
     performAction.isPending || createTab.isPending || activateTab.isPending || closeTab.isPending;
   const activeTab = state?.tabs.find((tab) => tab.id === state.activeTabId) ?? state?.tabs.find((tab) => tab.active);
+  const outputText = state ? getOutputText(state, outputMode) : '';
 
   useEffect(() => {
     if (state?.currentUrl) setAddress(state.currentUrl);
@@ -165,6 +202,22 @@ function BrowserConsole() {
     link.href = state.screenshot;
     link.download = `browser-capture-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
     link.click();
+  };
+
+  const copyOutput = async () => {
+    try {
+      await navigator.clipboard.writeText(outputText);
+      setCopyStatus('Copied');
+    } catch {
+      setCopyStatus('Copy failed');
+    }
+    window.setTimeout(() => setCopyStatus(''), 1500);
+  };
+
+  const openExtractedLink = (url: string) => {
+    if (!sessionId || busy) return;
+    setAddress(url);
+    navigate.mutate({ sessionId, data: { url } }, { onSuccess: acceptState });
   };
 
   const primaryError = readableError(createSession.error) || readableError(closeSession.error) ||
@@ -340,14 +393,83 @@ function BrowserConsole() {
                   <div className="min-w-0 truncate text-[10px] font-semibold text-[#67716d]" data-testid="text-page-title">{state.title || activeTab?.title || 'Untitled page'}</div>
                   <div className="mono shrink-0 text-[9px] text-[#91968e]" data-testid="text-viewport-size">{state.viewportWidth} × {state.viewportHeight}</div>
                 </div>
-                <div className="flex flex-1 items-center justify-center overflow-auto bg-[#dadbd5] p-3 sm:p-5 lg:p-7" onWheel={scrollPreview} aria-label="Browser screenshot area">
-                  {state.screenshot ? (
-                    <img ref={imageRef} src={state.screenshot} alt={`Remote browser showing ${state.currentUrl || 'the current page'}`} onClick={clickPreview} draggable={false} className="block h-auto max-h-[calc(100dvh-260px)] w-full cursor-crosshair object-contain shadow-[0_8px_24px_rgba(35,49,53,.17)]" data-testid="img-browser-screenshot" />
+                <div className="flex min-h-11 items-center justify-between gap-2 border-b border-[#d2d2ca] bg-[#f4f3ed] px-2 sm:px-4">
+                  <div role="tablist" aria-label="Page output format" className="flex min-w-0 items-center gap-1 overflow-x-auto py-1">
+                    {OUTPUT_MODES.map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={outputMode === mode.id}
+                        aria-controls="browser-output-panel"
+                        onClick={() => { setOutputMode(mode.id); setCopyStatus(''); }}
+                        className={`shrink-0 rounded-md px-2.5 py-1.5 text-[10px] font-bold transition sm:px-3 ${outputMode === mode.id ? 'bg-[#dfe8e1] text-[#416a5d]' : 'text-[#737c76] hover:bg-[#e9e9e2] hover:text-[#394b50]'}`}
+                        data-testid={`tab-output-${mode.id}`}
+                      >
+                        {mode.label}{mode.id === 'links' ? ` (${state.pageContent.links.length})` : ''}
+                      </button>
+                    ))}
+                  </div>
+                  {outputMode !== 'screenshot' && (
+                    <button
+                      type="button"
+                      onClick={copyOutput}
+                      disabled={!outputText}
+                      className="shrink-0 rounded-md border border-[#d5d6ce] bg-[#fbfaf6] px-2.5 py-1.5 text-[10px] font-bold text-[#596963] hover:bg-white disabled:opacity-40"
+                      title="Copy the selected output"
+                      data-testid="button-copy-output"
+                    >
+                      {copyStatus || 'Copy output'}
+                    </button>
+                  )}
+                </div>
+                <div
+                  id="browser-output-panel"
+                  role="tabpanel"
+                  aria-label={`${OUTPUT_MODES.find((mode) => mode.id === outputMode)?.label ?? 'Page'} output`}
+                  className={`flex flex-1 overflow-auto p-3 sm:p-5 lg:p-7 ${outputMode === 'screenshot' ? 'items-center justify-center bg-[#dadbd5]' : 'items-start bg-[#eeede7]'}`}
+                  onWheel={outputMode === 'screenshot' ? scrollPreview : undefined}
+                >
+                  {outputMode === 'screenshot' ? (
+                    state.screenshot ? (
+                      <img ref={imageRef} src={state.screenshot} alt={`Remote browser showing ${state.currentUrl || 'the current page'}`} onClick={clickPreview} draggable={false} className="block h-auto max-h-[calc(100dvh-260px)] w-full cursor-crosshair object-contain shadow-[0_8px_24px_rgba(35,49,53,.17)]" data-testid="img-browser-screenshot" />
+                    ) : (
+                      <div className="flex min-h-[280px] w-full flex-col items-center justify-center rounded-xl border border-dashed border-[#c0c4bd] bg-[#e3e4de] px-6 text-center">
+                        <div className="mb-4 grid size-11 place-items-center rounded-2xl bg-[#d8e4dc] text-[#487866]"><Globe2 size={21} /></div>
+                        <p className="text-[14px] font-extrabold tracking-[-.025em] text-[#53615e]">This tab is ready when you are.</p>
+                        <p className="mt-1.5 max-w-[300px] text-[11px] leading-5 text-[#7c8580]">Enter an address above to load a page. The screenshot will appear here.</p>
+                      </div>
+                    )
+                  ) : outputMode === 'links' ? (
+                    state.pageContent.links.length > 0 ? (
+                      <div className="flex w-full flex-col gap-2" data-testid="list-page-links">
+                        {state.pageContent.links.map((link, index) => (
+                          <button
+                            key={`${link.href}-${index}`}
+                            type="button"
+                            onClick={() => openExtractedLink(link.href)}
+                            disabled={busy}
+                            className="flex w-full items-center justify-between gap-4 rounded-lg border border-[#d9d9d1] bg-[#fbfaf6] px-3.5 py-3 text-left transition hover:border-[#c9d6cb] hover:bg-white disabled:opacity-50"
+                            data-testid={`button-page-link-${index}`}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-[11px] font-bold text-[#485b58]">{link.text}</span>
+                              <span className="mono mt-1 block break-all text-[9px] text-[#878e86]">{link.href}</span>
+                            </span>
+                            <ArrowUpRight size={14} className="shrink-0 text-[#668674]" />
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex min-h-[280px] w-full items-center justify-center rounded-xl border border-dashed border-[#c9cbc2] bg-[#f5f4ee] px-6 text-center text-[12px] text-[#7c8580]">
+                        No links were found on this page.
+                      </div>
+                    )
+                  ) : outputText ? (
+                    <pre className="min-h-[280px] w-full whitespace-pre-wrap break-words rounded-xl border border-[#d9d9d1] bg-[#fbfaf6] p-4 text-[11px] leading-6 text-[#354b50] selection:bg-[#dfe8e1] sm:p-6" data-testid={`output-${outputMode}`}>{outputText}</pre>
                   ) : (
-                    <div className="flex min-h-[280px] w-full flex-col items-center justify-center rounded-xl border border-dashed border-[#c0c4bd] bg-[#e3e4de] px-6 text-center">
-                      <div className="mb-4 grid size-11 place-items-center rounded-2xl bg-[#d8e4dc] text-[#487866]"><Globe2 size={21} /></div>
-                      <p className="text-[14px] font-extrabold tracking-[-.025em] text-[#53615e]">This tab is ready when you are.</p>
-                      <p className="mt-1.5 max-w-[300px] text-[11px] leading-5 text-[#7c8580]">Enter an address above to load a page. The screenshot will appear here.</p>
+                    <div className="flex min-h-[280px] w-full items-center justify-center rounded-xl border border-dashed border-[#c9cbc2] bg-[#f5f4ee] px-6 text-center text-[12px] text-[#7c8580]">
+                      No page content to show yet. Navigate to a website to extract its {outputMode === 'markdown' ? 'Markdown' : 'text'}.
                     </div>
                   )}
                 </div>

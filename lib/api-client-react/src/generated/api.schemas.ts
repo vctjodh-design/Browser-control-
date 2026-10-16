@@ -20,6 +20,28 @@ export interface BrowserTab {
   active: boolean;
 }
 
+export interface BrowserPageHeading {
+  /**
+     * @minimum 1
+     * @maximum 6
+     */
+  level: number;
+  text: string;
+}
+
+export interface BrowserPageLink {
+  text: string;
+  href: string;
+}
+
+export interface BrowserPageContent {
+  description: string;
+  text: string;
+  markdown: string;
+  headings: BrowserPageHeading[];
+  links: BrowserPageLink[];
+}
+
 export interface BrowserState {
   sessionId: string;
   activeTabId: string;
@@ -28,6 +50,7 @@ export interface BrowserState {
   screenshot: string;
   currentUrl: string;
   title: string;
+  pageContent: BrowserPageContent;
   viewportWidth: number;
   viewportHeight: number;
 }
