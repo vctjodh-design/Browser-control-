@@ -185,6 +185,17 @@ export async function createBrowserSession(url?: string) {
       throw new BrowserOperationError(error.message, 400);
     }
     if (error instanceof BrowserOperationError) throw error;
+    const chromiumErrorCode =
+      error instanceof Error
+        ? error.message.match(/\bnet::(ERR_[A-Z0-9_]+)\b/)?.[1]
+        : undefined;
+    logger.warn(
+      {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        chromiumErrorCode,
+      },
+      "A browser page failed to load",
+    );
     throw new BrowserOperationError(
       "The page did not finish loading. Check the address and try again.",
       502,
