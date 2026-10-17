@@ -240,7 +240,7 @@ function BrowserConsole() {
 
   const onStart = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (busy || health.isError) return;
+    if (busy) return;
     const url = normalizeUrl(address);
     createSession.mutate({
       data: {
@@ -525,7 +525,7 @@ function BrowserConsole() {
                     testId="toggle-sync-tabs-start"
                   />
                   <p className="text-[10px] leading-[1.65] text-[#858982]">You can enter a domain or a complete URL. Sites may block automated browsing.</p>
-                  <button type="submit" disabled={busy || health.isError || health.isLoading} className="mt-2 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#d96f51] px-4 text-[12px] font-extrabold text-white shadow-[0_5px_12px_rgba(173,79,52,.16)] transition hover:bg-[#c95f43] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-start-session">
+                  <button type="submit" disabled={busy} className="mt-2 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#d96f51] px-4 text-[12px] font-extrabold text-white shadow-[0_5px_12px_rgba(173,79,52,.16)] transition hover:bg-[#c95f43] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-start-session">
                     {createSession.isPending ? <><LoaderCircle size={15} className="animate-spin" /> {syncTabs ? 'Opening 25 synced tabs…' : 'Opening browser…'}</> : <>Start browser session <ArrowRight size={15} /></>}
                   </button>
                 </form>
