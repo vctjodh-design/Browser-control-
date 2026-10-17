@@ -71,7 +71,8 @@ function safeLogoUrl(value: string | null): string | null {
     if (
       url.protocol !== "https:" ||
       (url.hostname !== "kickoffscore.com" &&
-        url.hostname !== "api.kickoffscore.com")
+        url.hostname !== "api.kickoffscore.com" &&
+        url.hostname !== "media.api-sports.io")
     ) {
       return null;
     }
@@ -79,6 +80,118 @@ function safeLogoUrl(value: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+function normalizeTeamName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function fixturePairKey(homeTeam: string, awayTeam: string): string {
+  return `${normalizeTeamName(homeTeam)}\u0000${normalizeTeamName(awayTeam)}`;
+}
+
+type EmbeddedMatchDetails = {
+  homeLogo: string | null;
+  awayLogo: string | null;
+  status: string | null;
+  homeScore: number | null;
+  awayScore: number | null;
+};
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function extractEmbeddedMatchDetails(
+  html: string,
+): Map<string, EmbeddedMatchDetails> {
+  for (const script of html.matchAll(
+    /<script\b[^>]*>([\s\S]*?)<\/script>/gi,
+  )) {
+    const body = script[1] ?? "";
+    if (!body.includes("initialMatches") || !body.includes("self.__next_f.push")) {
+      continue;
+    }
+
+    const push = body.match(/self\.__next_f\.push\((\[[\s\S]*\])\);?/);
+    if (!push?.[1]) continue;
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(push[1]);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(payload) || typeof payload[1] !== "string") continue;
+
+    for (const line of (payload[1] as string).split("\n")) {
+      if (!line.includes("initialMatches")) continue;
+      const separator = line.indexOf(":");
+      if (separator < 0) continue;
+
+      let segment: unknown;
+      try {
+        segment = JSON.parse(line.slice(separator + 1));
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(segment) || !segment[3] || typeof segment[3] !== "object") {
+        continue;
+      }
+
+      const initialMatches = (
+        segment[3] as { initialMatches?: unknown }
+      ).initialMatches;
+      if (!Array.isArray(initialMatches)) continue;
+
+      const detailsByPair = new Map<string, EmbeddedMatchDetails>();
+      for (const item of initialMatches) {
+        if (!item || typeof item !== "object") continue;
+
+        const match = item as {
+          teams?: {
+            home?: { name?: unknown; logo?: unknown };
+            away?: { name?: unknown; logo?: unknown };
+          };
+          fixture?: { status?: { long?: unknown } };
+          goals?: { home?: unknown; away?: unknown };
+          score?: { fulltime?: { home?: unknown; away?: unknown } };
+        };
+        const home = match.teams?.home;
+        const away = match.teams?.away;
+        if (typeof home?.name !== "string" || typeof away?.name !== "string") {
+          continue;
+        }
+
+        const homeScore =
+          numberOrNull(match.goals?.home) ??
+          numberOrNull(match.score?.fulltime?.home);
+        const awayScore =
+          numberOrNull(match.goals?.away) ??
+          numberOrNull(match.score?.fulltime?.away);
+        detailsByPair.set(fixturePairKey(home.name, away.name), {
+          homeLogo:
+            typeof home.logo === "string" ? safeLogoUrl(home.logo) : null,
+          awayLogo:
+            typeof away.logo === "string" ? safeLogoUrl(away.logo) : null,
+          status:
+            typeof match.fixture?.status?.long === "string"
+              ? match.fixture.status.long
+              : null,
+          homeScore,
+          awayScore,
+        });
+      }
+      return detailsByPair;
+    }
+  }
+
+  return new Map();
 }
 
 function readStatusAndKickoff(prefix: string, matchHtml: string) {
@@ -119,6 +232,7 @@ function parseFixturePage(
   date: string,
   sourceUrl: string,
 ): FixturePage {
+  const embeddedDetails = extractEmbeddedMatchDetails(html);
   const cardDetails = new Map<
     string,
     {
@@ -211,24 +325,30 @@ function parseFixturePage(
     const rowScore = rowHtml.match(
       /<span\b[^>]*>\s*(\d{1,3})\s*[-–]\s*(\d{1,3})\s*<\/span>/i,
     );
-    const card = cardDetails.get(new URL(href, KICKOFFSCORE_ORIGIN).toString());
+    const matchUrl = new URL(href, KICKOFFSCORE_ORIGIN).toString();
+    const embedded = embeddedDetails.get(
+      fixturePairKey(matchup[1], matchup[2]),
+    );
+    const card = cardDetails.get(matchUrl);
     const homeScore = rowScore
       ? Number(rowScore[1])
-      : card?.homeScore ?? null;
+      : embedded?.homeScore ?? card?.homeScore ?? null;
     const awayScore = rowScore
       ? Number(rowScore[2])
-      : card?.awayScore ?? null;
+      : embedded?.awayScore ?? card?.awayScore ?? null;
     const hasScore = homeScore !== null && awayScore !== null;
-    const matchUrl = new URL(href, KICKOFFSCORE_ORIGIN).toString();
 
     fixturesByUrl.set(matchUrl, {
       competition,
       homeTeam: matchup[1].trim(),
       awayTeam: matchup[2].trim(),
-      homeLogo: card?.homeLogo ?? null,
-      awayLogo: card?.awayLogo ?? null,
+      homeLogo: embedded?.homeLogo ?? card?.homeLogo ?? null,
+      awayLogo: embedded?.awayLogo ?? card?.awayLogo ?? null,
       kickoff: card?.kickoff && card.kickoff !== "—" ? card.kickoff : kickoff,
-      status: card?.status ?? inferFixtureStatus(startTime, hasScore),
+      status:
+        embedded?.status ??
+        card?.status ??
+        inferFixtureStatus(startTime, hasScore),
       homeScore,
       awayScore,
       matchUrl,

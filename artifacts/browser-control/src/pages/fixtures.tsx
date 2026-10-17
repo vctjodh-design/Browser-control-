@@ -54,6 +54,50 @@ function normalizeSearchTerm(value: string) {
   return value.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
+type Fixture = {
+  competition: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeLogo: string | null;
+  awayLogo: string | null;
+  kickoff: string;
+  status: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  matchUrl: string;
+};
+
+function groupFixturesByCountry(fixtures: Fixture[]) {
+  const countries = new Map<string, Map<string, Fixture[]>>();
+
+  for (const fixture of fixtures) {
+    const separator = fixture.competition.indexOf(':');
+    const country = separator >= 0
+      ? fixture.competition.slice(0, separator).trim()
+      : 'Other competitions';
+    const league = separator >= 0
+      ? fixture.competition.slice(separator + 1).trim()
+      : fixture.competition.trim();
+    const leagues = countries.get(country) ?? new Map<string, Fixture[]>();
+    const leagueFixtures = leagues.get(league) ?? [];
+    leagueFixtures.push(fixture);
+    leagues.set(league, leagueFixtures);
+    countries.set(country, leagues);
+  }
+
+  return Array.from(countries, ([country, leagues]) => {
+    const groupedLeagues = Array.from(leagues, ([name, matches]) => ({
+      name,
+      fixtures: matches,
+    }));
+    return {
+      country,
+      leagues: groupedLeagues,
+      matchCount: groupedLeagues.reduce((total, league) => total + league.fixtures.length, 0),
+    };
+  });
+}
+
 function TeamMark({ name, logo }: { name: string; logo: string | null }) {
   return (
     <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-[#e1e1d9] bg-[#f4f4ed] text-[11px] font-extrabold tracking-tight text-[#75817b]">
@@ -62,21 +106,8 @@ function TeamMark({ name, logo }: { name: string; logo: string | null }) {
   );
 }
 
-function FixtureRow({ fixture, index }: {
-  fixture: {
-    competition: string;
-    homeTeam: string;
-    awayTeam: string;
-    homeLogo: string | null;
-    awayLogo: string | null;
-    kickoff: string;
-    status: string;
-    homeScore: number | null;
-    awayScore: number | null;
-    matchUrl: string;
-  };
-  index: number;
-}) {
+function FixtureRow({ fixture }: { fixture: Fixture }) {
+  const matchId = fixture.matchUrl.split('/').pop() ?? fixture.matchUrl;
   const hasScore = fixture.homeScore !== null && fixture.awayScore !== null;
   const status = fixture.status.trim() || 'Scheduled';
   const statusLower = status.toLowerCase();
@@ -84,36 +115,35 @@ function FixtureRow({ fixture, index }: {
   const isComplete = statusLower.includes('full') || statusLower.includes('finished') || statusLower.includes('ft');
 
   return (
-    <article className="group grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-4 border-b border-[#e7e5dc] px-4 py-4 transition-colors last:border-b-0 hover:bg-[#fbfaf5] sm:grid-cols-[minmax(190px,1fr)_minmax(250px,1.35fr)_minmax(130px,.7fr)_auto] sm:gap-5 sm:px-5" data-testid={`fixture-row-${index}`}>
+    <article className="group grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-4 border-b border-[#e7e5dc] px-4 py-4 transition-colors last:border-b-0 hover:bg-[#fbfaf5] sm:grid-cols-[minmax(86px,.45fr)_minmax(250px,1.35fr)_minmax(130px,.7fr)_auto] sm:gap-5 sm:px-5" data-testid={`fixture-row-${matchId}`}>
       <div className="min-w-0">
-        <p className="truncate text-[10px] font-extrabold uppercase tracking-[.13em] text-[#9a7867]" data-testid={`text-competition-${index}`}>{fixture.competition}</p>
-        <p className="mono mt-1.5 text-[10px] text-[#8b928a]" data-testid={`text-kickoff-${index}`}>{fixture.kickoff}</p>
+        <p className="mono text-[10px] text-[#8b928a]" data-testid={`text-kickoff-${matchId}`}>{fixture.kickoff}</p>
       </div>
 
       <div className="col-span-2 flex min-w-0 items-center justify-between gap-3 sm:col-span-1">
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
           <TeamMark name={fixture.homeTeam} logo={fixture.homeLogo} />
-          <span className="truncate text-[12px] font-bold tracking-[-.02em] text-[#354750]" data-testid={`text-home-team-${index}`}>{fixture.homeTeam}</span>
+          <span className="truncate text-[12px] font-bold tracking-[-.02em] text-[#354750]" data-testid={`text-home-team-${matchId}`}>{fixture.homeTeam}</span>
         </div>
         <div className="flex min-w-[42px] flex-col items-center">
           {hasScore ? (
-            <span className="mono text-[14px] font-medium tracking-[-.06em] text-[#293b45]" data-testid={`text-score-${index}`}>
+            <span className="mono text-[14px] font-medium tracking-[-.06em] text-[#293b45]" data-testid={`text-score-${matchId}`}>
               {fixture.homeScore}<span className="mx-1 text-[#a2a69c]">:</span>{fixture.awayScore}
             </span>
           ) : (
             <span className="mono text-[10px] text-[#a0a39b]">VS</span>
           )}
-          <span className={`mt-1 rounded-full px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-[.1em] ${isLive ? 'bg-[#f8e7de] text-[#b65c42]' : isComplete ? 'bg-[#e9eee8] text-[#64806d]' : 'bg-[#efeee8] text-[#7d837b]'}`} data-testid={`status-match-${index}`}>
+          <span className={`mt-1 rounded-full px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-[.1em] ${isLive ? 'bg-[#f8e7de] text-[#b65c42]' : isComplete ? 'bg-[#e9eee8] text-[#64806d]' : 'bg-[#efeee8] text-[#7d837b]'}`} data-testid={`status-match-${matchId}`}>
             {status}
           </span>
         </div>
         <div className="flex min-w-0 flex-1 items-center justify-end gap-2.5 text-right">
-          <span className="truncate text-[12px] font-bold tracking-[-.02em] text-[#354750]" data-testid={`text-away-team-${index}`}>{fixture.awayTeam}</span>
+          <span className="truncate text-[12px] font-bold tracking-[-.02em] text-[#354750]" data-testid={`text-away-team-${matchId}`}>{fixture.awayTeam}</span>
           <TeamMark name={fixture.awayTeam} logo={fixture.awayLogo} />
         </div>
       </div>
 
-      <a href={fixture.matchUrl} target="_blank" rel="noreferrer" className="col-start-2 row-start-1 inline-flex items-center justify-end gap-1.5 text-[10px] font-extrabold text-[#668074] transition hover:text-[#d06c4f] sm:col-start-auto sm:row-start-auto sm:justify-start" aria-label={`Open ${fixture.homeTeam} versus ${fixture.awayTeam} match details on KickoffScore`} data-testid={`link-match-${index}`}>
+      <a href={fixture.matchUrl} target="_blank" rel="noreferrer" className="col-start-2 row-start-1 inline-flex items-center justify-end gap-1.5 text-[10px] font-extrabold text-[#668074] transition hover:text-[#d06c4f] sm:col-start-auto sm:row-start-auto sm:justify-start" aria-label={`Open ${fixture.homeTeam} versus ${fixture.awayTeam} match details on KickoffScore`} data-testid={`link-match-${matchId}`}>
         Match details <ExternalLink size={12} />
       </a>
     </article>
@@ -134,6 +164,7 @@ export default function FixturesPage() {
         ).includes(normalizedSearch),
       )
     : allFixtures;
+  const countryGroups = groupFixturesByCountry(filteredFixtures);
 
   return (
     <main className="screen-noise min-h-[100dvh] bg-[#f2f0e8] text-[#243443]">
@@ -288,8 +319,24 @@ export default function FixturesPage() {
           ) : data?.fixtures.length ? (
             filteredFixtures.length ? (
               <div data-testid="list-fixtures">
-                {filteredFixtures.map((fixture, index) => (
-                  <FixtureRow key={`${fixture.matchUrl}-${index}`} fixture={fixture} index={index} />
+                {countryGroups.map((countryGroup) => (
+                  <section key={countryGroup.country} data-testid={`country-group-${countryGroup.country}`}>
+                    <div className="flex items-center justify-between gap-3 border-b border-[#dbe0d8] bg-[#edf1eb] px-4 py-2.5 sm:px-5">
+                      <h3 className="text-[11px] font-extrabold uppercase tracking-[.13em] text-[#536f62]">{countryGroup.country}</h3>
+                      <span className="text-[10px] font-semibold text-[#78817b]">{countryGroup.matchCount} {countryGroup.matchCount === 1 ? 'match' : 'matches'}</span>
+                    </div>
+                    {countryGroup.leagues.map((league) => (
+                      <section key={`${countryGroup.country}-${league.name}`} data-testid={`league-group-${countryGroup.country}-${league.name}`}>
+                        <div className="flex items-center justify-between gap-3 border-b border-[#e1dfd7] bg-[#f4f3ed] px-4 py-2.5 sm:px-5">
+                          <h4 className="text-[11px] font-extrabold tracking-[-.01em] text-[#344550]">{league.name}</h4>
+                          <span className="text-[10px] font-semibold text-[#858982]">{league.fixtures.length} {league.fixtures.length === 1 ? 'match' : 'matches'}</span>
+                        </div>
+                        {league.fixtures.map((fixture) => (
+                          <FixtureRow key={fixture.matchUrl} fixture={fixture} />
+                        ))}
+                      </section>
+                    ))}
+                  </section>
                 ))}
               </div>
             ) : (
