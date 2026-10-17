@@ -51,12 +51,44 @@ const OUTPUT_MODES: { id: OutputMode; label: string }[] = [
   { id: 'json', label: 'JSON' },
   { id: 'links', label: 'Links' },
 ];
+const SYNCED_TAB_LIMIT = 25;
 type BrowserPoint = { x: number; y: number };
 
 function normalizeUrl(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return '';
   return /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function SyncTabsOption({
+  checked,
+  onChange,
+  disabled,
+  testId,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+  testId: string;
+}) {
+  return (
+    <label className={`flex min-w-0 items-start gap-2.5 rounded-lg border px-3 py-2 ${checked ? 'border-[#bdd0c3] bg-[#edf3ed]' : 'border-[#deddd4] bg-[#f9f8f3]'} ${disabled ? 'opacity-50' : 'cursor-pointer'}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        disabled={disabled}
+        className="mt-0.5 size-3.5 shrink-0 accent-[#d96f51]"
+        data-testid={testId}
+      />
+      <span className="min-w-0">
+        <span className="block text-[10px] font-extrabold text-[#536763]">Sync activity across up to {SYNCED_TAB_LIMIT} tabs</span>
+        <span className="mt-0.5 block text-[9px] leading-4 text-[#858982]">
+          {checked ? 'Navigation opens copies; clicks, typing, and scrolling are mirrored.' : 'Off: actions affect only the active tab.'}
+        </span>
+      </span>
+    </label>
+  );
 }
 
 function getOutputText(state: BrowserState, mode: OutputMode) {
@@ -101,6 +133,7 @@ function BrowserConsole() {
   const [keyText, setKeyText] = useState('');
   const [showKeyControls, setShowKeyControls] = useState(false);
   const [outputMode, setOutputMode] = useState<OutputMode>('screenshot');
+  const [syncTabs, setSyncTabs] = useState(false);
   const [copyStatus, setCopyStatus] = useState('');
   const [pointerPosition, setPointerPosition] = useState<BrowserPoint | null>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -142,7 +175,7 @@ function BrowserConsole() {
   };
   const sendAction = (data: BrowserActionInput) => {
     if (!sessionId || busy) return;
-    performAction.mutate({ sessionId, data }, { onSuccess: acceptState });
+    performAction.mutate({ sessionId, data: { ...data, syncTabs } }, { onSuccess: acceptState });
   };
 
   const pumpMouseMoves = (): Promise<void> => {
@@ -157,7 +190,10 @@ function BrowserConsole() {
         const last = lastRemoteMousePositionRef.current;
         if (last?.x === point.x && last.y === point.y) continue;
         try {
-          await moveMouse.mutateAsync({ sessionId: moveSessionId, data: point });
+          await moveMouse.mutateAsync({
+            sessionId: moveSessionId,
+            data: { ...point, syncTabs },
+          });
           lastRemoteMousePositionRef.current = point;
         } catch {
           pendingMousePositionRef.current = null;
@@ -206,7 +242,12 @@ function BrowserConsole() {
     event.preventDefault();
     if (busy || health.isError) return;
     const url = normalizeUrl(address);
-    createSession.mutate({ data: url ? { url } : {} }, {
+    createSession.mutate({
+      data: {
+        ...(url ? { url } : {}),
+        ...(url && syncTabs ? { tabCount: SYNCED_TAB_LIMIT } : {}),
+      },
+    }, {
       onSuccess: (next) => {
         acceptState(next);
         setAddress(next.currentUrl);
@@ -218,7 +259,36 @@ function BrowserConsole() {
     event.preventDefault();
     const url = normalizeUrl(address);
     if (!sessionId || !url || busy) return;
-    navigate.mutate({ sessionId, data: { url } }, { onSuccess: acceptState });
+    navigate.mutate({
+      sessionId,
+      data: {
+        url,
+        syncTabs,
+        ...(syncTabs ? { tabCount: SYNCED_TAB_LIMIT } : {}),
+      },
+    }, { onSuccess: acceptState });
+  };
+
+  const changeSyncTabs = (enabled: boolean) => {
+    setSyncTabs(enabled);
+    if (
+      !enabled ||
+      !sessionId ||
+      !state?.currentUrl ||
+      !/^https?:\/\//i.test(state.currentUrl) ||
+      busy
+    ) {
+      return;
+    }
+    setAddress(state.currentUrl);
+    navigate.mutate({
+      sessionId,
+      data: {
+        url: state.currentUrl,
+        syncTabs: true,
+        tabCount: SYNCED_TAB_LIMIT,
+      },
+    }, { onSuccess: acceptState });
   };
 
   const onNewTab = () => {
@@ -235,6 +305,7 @@ function BrowserConsole() {
         setAddress('');
         setTypeText('');
         setKeyText('');
+        setSyncTabs(false);
       },
     });
   };
@@ -331,7 +402,14 @@ function BrowserConsole() {
   const openExtractedLink = (url: string) => {
     if (!sessionId || busy) return;
     setAddress(url);
-    navigate.mutate({ sessionId, data: { url } }, { onSuccess: acceptState });
+    navigate.mutate({
+      sessionId,
+      data: {
+        url,
+        syncTabs,
+        ...(syncTabs ? { tabCount: SYNCED_TAB_LIMIT } : {}),
+      },
+    }, { onSuccess: acceptState });
   };
 
   const primaryError = readableError(createSession.error) || readableError(closeSession.error) ||
@@ -440,9 +518,15 @@ function BrowserConsole() {
                     <ArrowUpRight size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#89918b]" />
                     <input id="start-url" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="example.com" autoComplete="url" className="h-12 w-full rounded-lg border border-[#d5d5cc] bg-[#fbfaf6] pl-10 pr-3 text-[13px] text-[#263746] placeholder:text-[#aaa99f] focus:border-[#d97b5c] focus:outline-none focus:ring-2 focus:ring-[#d97b5c]/15" data-testid="input-start-url" />
                   </div>
+                  <SyncTabsOption
+                    checked={syncTabs}
+                    onChange={changeSyncTabs}
+                    disabled={busy}
+                    testId="toggle-sync-tabs-start"
+                  />
                   <p className="text-[10px] leading-[1.65] text-[#858982]">You can enter a domain or a complete URL. Sites may block automated browsing.</p>
                   <button type="submit" disabled={busy || health.isError || health.isLoading} className="mt-2 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#d96f51] px-4 text-[12px] font-extrabold text-white shadow-[0_5px_12px_rgba(173,79,52,.16)] transition hover:bg-[#c95f43] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-start-session">
-                    {createSession.isPending ? <><LoaderCircle size={15} className="animate-spin" /> Opening browser…</> : <>Start browser session <ArrowRight size={15} /></>}
+                    {createSession.isPending ? <><LoaderCircle size={15} className="animate-spin" /> {syncTabs ? 'Opening 25 synced tabs…' : 'Opening browser…'}</> : <>Start browser session <ArrowRight size={15} /></>}
                   </button>
                 </form>
                 <div className="mt-6 border-t border-[#dddbd2] pt-4">
@@ -492,6 +576,12 @@ function BrowserConsole() {
                   <button type="submit" disabled={busy || !address.trim()} className="absolute right-1 top-1/2 h-7 -translate-y-1/2 rounded-md bg-[#dfe8e1] px-2.5 text-[10px] font-extrabold text-[#416a5d] hover:bg-[#d2e0d5] disabled:opacity-40" data-testid="button-navigate">Go</button>
                 </div>
               </form>
+              <SyncTabsOption
+                checked={syncTabs}
+                onChange={changeSyncTabs}
+                disabled={busy}
+                testId="toggle-sync-tabs"
+              />
               <button type="button" onClick={saveScreenshot} disabled={!state.screenshot} className="inline-flex h-8 items-center gap-2 rounded-lg border border-[#d2d4cc] bg-[#fbfaf6] px-3 text-[10px] font-bold text-[#586663] hover:bg-white disabled:cursor-not-allowed disabled:opacity-45" title="Save screenshot as PNG" data-testid="button-save-screenshot">
                 <Camera size={14} /> <span className="hidden sm:inline">Save capture</span>
               </button>

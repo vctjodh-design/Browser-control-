@@ -22,10 +22,13 @@ export const HealthCheckResponse = zod.object({
  */
 export const createBrowserSessionBodyUrlMax = 2048;
 
+export const createBrowserSessionBodyTabCountMax = 25;
+
 
 
 export const CreateBrowserSessionBody = zod.object({
-  "url": zod.string().min(1).max(createBrowserSessionBodyUrlMax).optional()
+  "url": zod.string().min(1).max(createBrowserSessionBodyUrlMax).optional(),
+  "tabCount": zod.number().int().min(1).max(createBrowserSessionBodyTabCountMax).optional().describe('Number of tabs to open with the starting URL')
 })
 
 export const createBrowserSessionResponsePageContentHeadingsItemLevelMax = 6;
@@ -122,10 +125,14 @@ export const NavigateBrowserParams = zod.object({
 
 export const navigateBrowserBodyUrlMax = 2048;
 
+export const navigateBrowserBodyTabCountMax = 25;
+
 
 
 export const NavigateBrowserBody = zod.object({
-  "url": zod.string().min(1).max(navigateBrowserBodyUrlMax)
+  "url": zod.string().min(1).max(navigateBrowserBodyUrlMax),
+  "syncTabs": zod.boolean().optional().describe('Navigate every open tab and open copies up to tabCount'),
+  "tabCount": zod.number().int().min(1).max(navigateBrowserBodyTabCountMax).optional().describe('Target number of tabs when syncTabs is enabled')
 })
 
 export const navigateBrowserResponsePageContentHeadingsItemLevelMax = 6;
@@ -188,7 +195,8 @@ export const PerformBrowserActionBody = zod.object({
   "y": zod.number().min(performBrowserActionBodyYMin).optional(),
   "text": zod.string().max(performBrowserActionBodyTextMax).optional(),
   "key": zod.string().max(performBrowserActionBodyKeyMax).optional(),
-  "deltaY": zod.number().min(performBrowserActionBodyDeltaYMin).max(performBrowserActionBodyDeltaYMax).optional()
+  "deltaY": zod.number().min(performBrowserActionBodyDeltaYMin).max(performBrowserActionBodyDeltaYMax).optional(),
+  "syncTabs": zod.boolean().optional().describe('Apply this browser action to every open tab')
 })
 
 export const performBrowserActionResponsePageContentHeadingsItemLevelMax = 6;
@@ -242,7 +250,8 @@ export const moveBrowserMouseBodyYMax = 899;
 
 export const MoveBrowserMouseBody = zod.object({
   "x": zod.number().min(moveBrowserMouseBodyXMin).max(moveBrowserMouseBodyXMax),
-  "y": zod.number().min(moveBrowserMouseBodyYMin).max(moveBrowserMouseBodyYMax)
+  "y": zod.number().min(moveBrowserMouseBodyYMin).max(moveBrowserMouseBodyYMax),
+  "syncTabs": zod.boolean().optional().describe('Move the pointer in every open tab')
 })
 
 export const MoveBrowserMouseResponse = zod.object({

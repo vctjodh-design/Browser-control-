@@ -22,4 +22,6 @@ export interface BrowserActionInput {
      * @maximum 5000
      */
   deltaY?: number;
+  /** Apply this browser action to every open tab */
+  syncTabs?: boolean;
 }

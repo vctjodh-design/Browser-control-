@@ -17,4 +17,6 @@ export interface MousePositionInput {
      * @maximum 899
      */
   y: number;
+  /** Move the pointer in every open tab */
+  syncTabs?: boolean;
 }

@@ -59,7 +59,10 @@ router.post("/browser/sessions", async (req, res): Promise<void> => {
   }
 
   try {
-    const state = await createBrowserSession(parsed.data.url);
+    const state = await createBrowserSession(
+      parsed.data.url,
+      parsed.data.tabCount,
+    );
     res.status(201).json(CreateBrowserSessionResponse.parse(state));
   } catch (error) {
     if (!(error instanceof BrowserOperationError) || error.statusCode >= 500) {
@@ -126,6 +129,8 @@ router.post(
       const state = await navigateBrowser(
         params.data.sessionId,
         body.data.url,
+        body.data.syncTabs,
+        body.data.tabCount,
       );
       res.json(NavigateBrowserResponse.parse(state));
     } catch (error) {
@@ -179,6 +184,7 @@ router.post(
         params.data.sessionId,
         body.data.x,
         body.data.y,
+        body.data.syncTabs,
       );
       res.json(MoveBrowserMouseResponse.parse(result));
     } catch (error) {

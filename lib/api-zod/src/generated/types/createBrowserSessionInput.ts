@@ -12,4 +12,10 @@ export interface CreateBrowserSessionInput {
      * @maxLength 2048
      */
   url?: string;
+  /**
+     * Number of tabs to open with the starting URL
+     * @minimum 1
+     * @maximum 25
+     */
+  tabCount?: number;
 }

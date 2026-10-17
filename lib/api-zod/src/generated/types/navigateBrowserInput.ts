@@ -12,4 +12,12 @@ export interface NavigateBrowserInput {
      * @maxLength 2048
      */
   url: string;
+  /** Navigate every open tab and open copies up to tabCount */
+  syncTabs?: boolean;
+  /**
+     * Target number of tabs when syncTabs is enabled
+     * @minimum 1
+     * @maximum 25
+     */
+  tabCount?: number;
 }

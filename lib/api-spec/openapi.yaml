@@ -384,6 +384,11 @@ components:
           type: string
           minLength: 1
           maxLength: 2048
+        tabCount:
+          type: integer
+          minimum: 1
+          maximum: 25
+          description: Number of tabs to open with the starting URL
     NavigateBrowserInput:
       type: object
       properties:
@@ -391,6 +396,14 @@ components:
           type: string
           minLength: 1
           maxLength: 2048
+        syncTabs:
+          type: boolean
+          description: Navigate every open tab and open copies up to tabCount
+        tabCount:
+          type: integer
+          minimum: 1
+          maximum: 25
+          description: Target number of tabs when syncTabs is enabled
       required: [url]
     CreateBrowserTabInput:
       type: object
@@ -421,6 +434,9 @@ components:
           type: number
           minimum: -5000
           maximum: 5000
+        syncTabs:
+          type: boolean
+          description: Apply this browser action to every open tab
       required: [action]
     MousePositionInput:
       type: object
@@ -433,6 +449,9 @@ components:
           type: number
           minimum: 0
           maximum: 899
+        syncTabs:
+          type: boolean
+          description: Move the pointer in every open tab
       required: [x, y]
     MouseMoveResponse:
       type: object

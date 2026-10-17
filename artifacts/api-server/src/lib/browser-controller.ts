@@ -8,7 +8,8 @@ import {
 } from "./secure-browser-proxy";
 
 const MAX_SESSIONS = 3;
-const MAX_TABS_PER_SESSION = 8;
+const MAX_TABS_PER_SESSION = 25;
+const PAGE_ACTION_CONCURRENCY = 5;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const VIEWPORT = { width: 1440, height: 900 };
 const MAX_PAGE_TEXT_LENGTH = 50_000;
@@ -24,14 +25,15 @@ export class BrowserOperationError extends Error {
   }
 }
 
-type BrowserAction =
+type BrowserAction = (
   | { action: "click"; x?: number; y?: number }
   | { action: "type"; text?: string }
   | { action: "key"; key?: string }
   | { action: "scroll"; x?: number; y?: number; deltaY?: number }
   | { action: "back" }
   | { action: "forward" }
-  | { action: "reload" };
+  | { action: "reload" }
+) & { syncTabs?: boolean };
 
 type BrowserSession = {
   id: string;
@@ -84,6 +86,10 @@ function registerPage(
   if (activate) session.activeTabId = tabId;
 
   page.on("popup", (popup) => {
+    if (session.tabs.size >= MAX_TABS_PER_SESSION) {
+      void popup.close().catch(() => undefined);
+      return;
+    }
     registerPage(session, popup);
   });
   page.on("close", () => {
@@ -117,6 +123,76 @@ function getActivePage(session: BrowserSession): Page {
     );
   }
   return page;
+}
+
+function validateTabCount(count: number): void {
+  if (
+    !Number.isInteger(count) ||
+    count < 1 ||
+    count > MAX_TABS_PER_SESSION
+  ) {
+    throw new BrowserOperationError(
+      `Choose between 1 and ${MAX_TABS_PER_SESSION} tabs.`,
+      400,
+    );
+  }
+}
+
+async function ensureTabCount(
+  session: BrowserSession,
+  targetCount: number,
+): Promise<Page[]> {
+  validateTabCount(targetCount);
+  for (const [id, page] of session.tabs) {
+    if (page.isClosed()) session.tabs.delete(id);
+  }
+
+  while (session.tabs.size < targetCount) {
+    let page: Page;
+    try {
+      page = await session.context.newPage();
+    } catch {
+      throw new BrowserOperationError(
+        "The browser could not open the requested number of tabs.",
+        503,
+      );
+    }
+    registerPage(session, page, false);
+  }
+
+  return Array.from(session.tabs.values()).filter((page) => !page.isClosed());
+}
+
+async function runAcrossPages(
+  pages: Page[],
+  description: string,
+  operation: (page: Page) => Promise<unknown>,
+): Promise<void> {
+  let completed = 0;
+  let failed = 0;
+  for (let index = 0; index < pages.length; index += PAGE_ACTION_CONCURRENCY) {
+    const batch = pages.slice(index, index + PAGE_ACTION_CONCURRENCY);
+    await Promise.all(
+      batch.map(async (page) => {
+        try {
+          if (page.isClosed()) {
+            throw new Error("The tab is closed.");
+          }
+          await operation(page);
+          completed += 1;
+        } catch {
+          failed += 1;
+        }
+      }),
+    );
+  }
+
+  if (failed > 0) {
+    throw new BrowserOperationError(
+      `${description} completed in ${completed} of ${pages.length} tabs. Check the tabs before retrying.`,
+      502,
+    );
+  }
 }
 
 function validateMousePosition(x: number, y: number): void {
@@ -281,7 +357,11 @@ export async function getBrowserState(sessionId: string) {
   };
 }
 
-export async function createBrowserSession(url?: string) {
+export async function createBrowserSession(
+  url?: string,
+  tabCount = 1,
+) {
+  validateTabCount(tabCount);
   if (sessions.size >= MAX_SESSIONS) {
     throw new BrowserOperationError(
       "All browser sessions are currently in use. Try again in a few minutes.",
@@ -311,7 +391,13 @@ export async function createBrowserSession(url?: string) {
   try {
     if (url) {
       const safeUrl = await validatePublicWebUrl(url);
-      await page.goto(safeUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      const pages = await ensureTabCount(session, tabCount);
+      await runAcrossPages(pages, "Opening the page", (targetPage) =>
+        targetPage.goto(safeUrl, {
+          waitUntil: "domcontentloaded",
+          timeout: 30_000,
+        }),
+      );
     }
     return await getBrowserState(sessionId);
   } catch (error) {
@@ -338,9 +424,13 @@ export async function createBrowserSession(url?: string) {
   }
 }
 
-export async function navigateBrowser(sessionId: string, url: string) {
+export async function navigateBrowser(
+  sessionId: string,
+  url: string,
+  syncTabs = false,
+  tabCount?: number,
+) {
   const session = getSession(sessionId);
-  const page = getActivePage(session);
   let safeUrl: string;
   try {
     safeUrl = await validatePublicWebUrl(url);
@@ -352,9 +442,18 @@ export async function navigateBrowser(sessionId: string, url: string) {
   }
 
   try {
-    await page.goto(safeUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    const pages = syncTabs
+      ? await ensureTabCount(
+          session,
+          tabCount ?? MAX_TABS_PER_SESSION,
+        )
+      : [getActivePage(session)];
+    await runAcrossPages(pages, "Navigation", (page) =>
+      page.goto(safeUrl, { waitUntil: "domcontentloaded", timeout: 30_000 }),
+    );
     return await getBrowserState(sessionId);
-  } catch {
+  } catch (error) {
+    if (error instanceof BrowserOperationError) throw error;
     throw new BrowserOperationError(
       "The page could not be loaded. It may have blocked the request or timed out.",
       502,
@@ -367,56 +466,71 @@ export async function performBrowserAction(
   action: BrowserAction,
 ) {
   const session = getSession(sessionId);
-  const page = getActivePage(session);
+  const pages = action.syncTabs
+    ? Array.from(session.tabs.values()).filter((page) => !page.isClosed())
+    : [getActivePage(session)];
 
   try {
-    switch (action.action) {
-      case "click":
+    if (action.action === "click") {
+      if (typeof action.x !== "number" || typeof action.y !== "number") {
+        throw new BrowserOperationError(
+          "A screen position is required to click.",
+          400,
+        );
+      }
+      validateMousePosition(action.x, action.y);
+    }
+    if (action.action === "type" && (!action.text || action.text.length === 0)) {
+      throw new BrowserOperationError("Enter text to type.", 400);
+    }
+    if (action.action === "key" && (!action.key || action.key.length === 0)) {
+      throw new BrowserOperationError("Choose a key to press.", 400);
+    }
+    if (action.action === "scroll") {
+      if (action.x !== undefined || action.y !== undefined) {
         if (typeof action.x !== "number" || typeof action.y !== "number") {
           throw new BrowserOperationError(
-            "A screen position is required to click.",
+            "A complete screen position is required to scroll there.",
             400,
           );
         }
         validateMousePosition(action.x, action.y);
-        await page.mouse.click(action.x, action.y);
-        await page.waitForTimeout(200);
-        break;
-      case "type":
-        if (typeof action.text !== "string" || action.text.length === 0) {
-          throw new BrowserOperationError("Enter text to type.", 400);
-        }
-        await page.keyboard.type(action.text);
-        break;
-      case "key":
-        if (typeof action.key !== "string" || action.key.length === 0) {
-          throw new BrowserOperationError("Choose a key to press.", 400);
-        }
-        await page.keyboard.press(action.key);
-        break;
-      case "scroll":
-        if (action.x !== undefined || action.y !== undefined) {
-          if (typeof action.x !== "number" || typeof action.y !== "number") {
-            throw new BrowserOperationError(
-              "A complete screen position is required to scroll there.",
-              400,
-            );
-          }
-          validateMousePosition(action.x, action.y);
-          await page.mouse.move(action.x, action.y);
-        }
-        await page.mouse.wheel(0, action.deltaY ?? 600);
-        break;
-      case "back":
-        await page.goBack({ waitUntil: "domcontentloaded", timeout: 10_000 }).catch(() => null);
-        break;
-      case "forward":
-        await page.goForward({ waitUntil: "domcontentloaded", timeout: 10_000 }).catch(() => null);
-        break;
-      case "reload":
-        await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
-        break;
+      }
     }
+
+    await runAcrossPages(pages, "The browser action", async (page) => {
+      switch (action.action) {
+        case "click":
+          await page.mouse.click(action.x!, action.y!);
+          await page.waitForTimeout(200);
+          break;
+        case "type":
+          await page.keyboard.type(action.text!);
+          break;
+        case "key":
+          await page.keyboard.press(action.key!);
+          break;
+        case "scroll":
+          if (action.x !== undefined && action.y !== undefined) {
+            await page.mouse.move(action.x, action.y);
+          }
+          await page.mouse.wheel(0, action.deltaY ?? 600);
+          break;
+        case "back":
+          await page
+            .goBack({ waitUntil: "domcontentloaded", timeout: 10_000 })
+            .catch(() => null);
+          break;
+        case "forward":
+          await page
+            .goForward({ waitUntil: "domcontentloaded", timeout: 10_000 })
+            .catch(() => null);
+          break;
+        case "reload":
+          await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
+          break;
+      }
+    });
 
     return await getBrowserState(sessionId);
   } catch (error) {
@@ -432,15 +546,21 @@ export async function moveBrowserMouse(
   sessionId: string,
   x: number,
   y: number,
+  syncTabs = false,
 ): Promise<{ moved: true }> {
   validateMousePosition(x, y);
   const session = getSession(sessionId);
-  const page = getActivePage(session);
+  const pages = syncTabs
+    ? Array.from(session.tabs.values()).filter((page) => !page.isClosed())
+    : [getActivePage(session)];
 
   try {
-    await page.mouse.move(x, y);
+    await runAcrossPages(pages, "Pointer movement", (page) =>
+      page.mouse.move(x, y),
+    );
     return { moved: true };
-  } catch {
+  } catch (error) {
+    if (error instanceof BrowserOperationError) throw error;
     throw new BrowserOperationError(
       "The pointer could not be moved on the browser page.",
       502,
