@@ -108,6 +108,7 @@ function TeamMark({ name, logo }: { name: string; logo: string | null }) {
 
 function FixtureRow({ fixture }: { fixture: Fixture }) {
   const matchId = fixture.matchUrl.split('/').pop() ?? fixture.matchUrl;
+  const fixtureId = Number(matchId.match(/\d+/)?.[0]);
   const hasScore = fixture.homeScore !== null && fixture.awayScore !== null;
   const status = fixture.status.trim() || 'Scheduled';
   const statusLower = status.toLowerCase();
@@ -115,7 +116,7 @@ function FixtureRow({ fixture }: { fixture: Fixture }) {
   const isComplete = statusLower.includes('full') || statusLower.includes('finished') || statusLower.includes('ft');
 
   return (
-    <article className="group grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-4 border-b border-[#e7e5dc] px-4 py-4 transition-colors last:border-b-0 hover:bg-[#fbfaf5] sm:grid-cols-[minmax(86px,.45fr)_minmax(250px,1.35fr)_minmax(130px,.7fr)_auto] sm:gap-5 sm:px-5" data-testid={`fixture-row-${matchId}`}>
+    <Link href={Number.isFinite(fixtureId) ? `/matches/${fixtureId}` : '/fixtures'} className="group grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-4 border-b border-[#e7e5dc] px-4 py-4 transition-colors last:border-b-0 hover:bg-[#fbfaf5] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d96f51] sm:grid-cols-[minmax(86px,.45fr)_minmax(250px,1.35fr)_minmax(130px,.7fr)_auto] sm:gap-5 sm:px-5" data-testid={`fixture-row-${matchId}`} aria-label={`View ${fixture.homeTeam} versus ${fixture.awayTeam} match details`}>
       <div className="min-w-0">
         <p className="mono text-[10px] text-[#8b928a]" data-testid={`text-kickoff-${matchId}`}>{fixture.kickoff}</p>
       </div>
@@ -143,10 +144,10 @@ function FixtureRow({ fixture }: { fixture: Fixture }) {
         </div>
       </div>
 
-      <a href={fixture.matchUrl} target="_blank" rel="noreferrer" className="col-start-2 row-start-1 inline-flex items-center justify-end gap-1.5 text-[10px] font-extrabold text-[#668074] transition hover:text-[#d06c4f] sm:col-start-auto sm:row-start-auto sm:justify-start" aria-label={`Open ${fixture.homeTeam} versus ${fixture.awayTeam} match details on KickoffScore`} data-testid={`link-match-${matchId}`}>
+      <span className="col-start-2 row-start-1 inline-flex items-center justify-end gap-1.5 text-[10px] font-extrabold text-[#668074] transition group-hover:text-[#d06c4f] sm:col-start-auto sm:row-start-auto sm:justify-start" data-testid={`link-match-${matchId}`}>
         Match details <ExternalLink size={12} />
-      </a>
-    </article>
+      </span>
+    </Link>
   );
 }
 

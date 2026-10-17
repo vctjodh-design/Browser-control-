@@ -42,6 +42,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import FixturesPage from '@/pages/fixtures';
+import MatchDetailsPage from '@/pages/match-details';
 
 const queryClient = new QueryClient();
 
@@ -816,6 +817,7 @@ function Router() {
       <Switch>
         <Route path="/" component={BrowserConsole} />
         <Route path="/fixtures" component={FixturesPage} />
+        <Route path="/matches/:fixtureId" component={MatchDetailsPage} />
         <Route component={NotFound} />
       </Switch>
     </RoutedErrorBoundary>

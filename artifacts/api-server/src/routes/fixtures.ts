@@ -1,8 +1,14 @@
 import { Router, type IRouter } from "express";
 import {
+  GetFootballMatchDetailsParams,
+  GetFootballMatchDetailsResponse,
   GetFootballFixturesQueryParams,
   GetFootballFixturesResponse,
 } from "@workspace/api-zod";
+import {
+  getKickoffScoreMatchDetails,
+  KickoffScoreMatchNotFoundError,
+} from "../lib/kickoffscore-match-details";
 import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
 
 const router: IRouter = Router();
@@ -45,5 +51,37 @@ router.get("/football/fixtures", async (req, res): Promise<void> => {
     });
   }
 });
+
+router.get(
+  "/football/matches/:fixtureId/details",
+  async (req, res): Promise<void> => {
+    const params = GetFootballMatchDetailsParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    try {
+      const details = await getKickoffScoreMatchDetails(
+        params.data.fixtureId,
+      );
+      res.json(GetFootballMatchDetailsResponse.parse(details));
+    } catch (error) {
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not load match details from KickoffScore",
+      );
+      res.status(502).json({
+        error:
+          "KickoffScore match details could not be loaded right now. Please try again.",
+      });
+    }
+  },
+);
 
 export default router;
