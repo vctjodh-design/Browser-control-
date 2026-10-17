@@ -5,6 +5,35 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export interface FootballFixture {
+  competition: string;
+  homeTeam: string;
+  awayTeam: string;
+  /** @nullable */
+  homeLogo: string | null;
+  /** @nullable */
+  awayLogo: string | null;
+  /** Kickoff time as shown by KickoffScore */
+  kickoff: string;
+  /** Match status as shown by KickoffScore */
+  status: string;
+  /** @nullable */
+  homeScore: number | null;
+  /** @nullable */
+  awayScore: number | null;
+  matchUrl: string;
+}
+
+export interface FootballFixtures {
+  date: string;
+  sourceUrl: string;
+  fixtures: FootballFixture[];
+}
+
+export interface FootballFixtureError {
+  error: string;
+}
+
 export interface HealthStatus {
   status: string;
 }
@@ -140,4 +169,11 @@ export interface MousePositionInput {
 export interface MouseMoveResponse {
   moved: boolean;
 }
+
+export type GetFootballFixturesParams = {
+/**
+ * Calendar date in YYYY-MM-DD format
+ */
+date: string;
+};
 

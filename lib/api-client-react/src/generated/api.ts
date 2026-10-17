@@ -25,6 +25,9 @@ import type {
   BrowserState,
   CreateBrowserSessionInput,
   CreateBrowserTabInput,
+  FootballFixtureError,
+  FootballFixtures,
+  GetFootballFixturesParams,
   HealthStatus,
   MouseMoveResponse,
   MousePositionInput,
@@ -124,6 +127,91 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getHealthCheckQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFootballFixturesUrl = (params: GetFootballFixturesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/football/fixtures?${stringifiedParams}` : `/api/football/fixtures`
+}
+
+/**
+ * Returns match details from KickoffScore for the selected calendar date
+ * @summary Get football fixtures for a date
+ */
+export const getFootballFixtures = async (params: GetFootballFixturesParams, options?: Parameters<typeof customFetch>[1]): Promise<FootballFixtures> => {
+
+  return customFetch<FootballFixtures>(getGetFootballFixturesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballFixturesQueryKey = (params?: GetFootballFixturesParams,) => {
+    return [
+    `/api/football/fixtures`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFootballFixturesQueryOptions = <TData = Awaited<ReturnType<typeof getFootballFixtures>>, TError = ErrorType<FootballFixtureError>>(params: GetFootballFixturesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballFixtures>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballFixturesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballFixtures>>> = ({ signal }) => getFootballFixtures(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballFixtures>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballFixturesQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballFixtures>>>
+export type GetFootballFixturesQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary Get football fixtures for a date
+ */
+
+export function useGetFootballFixtures<TData = Awaited<ReturnType<typeof getFootballFixtures>>, TError = ErrorType<FootballFixtureError>>(
+ params: GetFootballFixturesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballFixtures>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballFixturesQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

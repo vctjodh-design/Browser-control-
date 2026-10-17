@@ -18,6 +18,32 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * Returns match details from KickoffScore for the selected calendar date
+ * @summary Get football fixtures for a date
+ */
+export const GetFootballFixturesQueryParams = zod.object({
+  "date": zod.date().describe('Calendar date in YYYY-MM-DD format')
+})
+
+export const GetFootballFixturesResponse = zod.object({
+  "date": zod.coerce.date(),
+  "sourceUrl": zod.string().url(),
+  "fixtures": zod.array(zod.object({
+  "competition": zod.string(),
+  "homeTeam": zod.string(),
+  "awayTeam": zod.string(),
+  "homeLogo": zod.string().url().nullable(),
+  "awayLogo": zod.string().url().nullable(),
+  "kickoff": zod.string().describe('Kickoff time as shown by KickoffScore'),
+  "status": zod.string().describe('Match status as shown by KickoffScore'),
+  "homeScore": zod.number().int().nullable(),
+  "awayScore": zod.number().int().nullable(),
+  "matchUrl": zod.string().url()
+}))
+})
+
+
+/**
  * @summary Start a browser session
  */
 export const createBrowserSessionBodyUrlMax = 2048;

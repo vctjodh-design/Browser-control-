@@ -23,6 +23,7 @@ import {
   ArrowUpRight,
   Camera,
   Check,
+  CalendarDays,
   CircleAlert,
   Globe2,
   Keyboard,
@@ -39,7 +40,8 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
+import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
+import FixturesPage from '@/pages/fixtures';
 
 const queryClient = new QueryClient();
 
@@ -434,6 +436,14 @@ function BrowserConsole() {
             </div>
           </div>
           <div className="flex items-center gap-2.5" aria-live="polite">
+            <nav aria-label="Main navigation" className="mr-2 flex items-center gap-1 rounded-xl border border-[#deddd3] bg-[#efeee7] p-1">
+              <Link href="/" aria-current="page" className="inline-flex h-8 items-center gap-2 rounded-lg bg-[#253746] px-3 text-[10px] font-extrabold text-[#f8f2e7] shadow-sm" data-testid="link-browser-home">
+                <Globe2 size={13} /> <span>Browser</span>
+              </Link>
+              <Link href="/fixtures" className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6] hover:text-[#344550]" data-testid="link-fixtures">
+                <CalendarDays size={13} /> <span>Fixtures</span>
+              </Link>
+            </nav>
             <span className={`relative flex size-2.5 rounded-full ${health.isError ? 'bg-[#c76c5c]' : health.isLoading ? 'bg-[#d59a42]' : 'bg-[#4d997e]'}`}>
               {health.isLoading && <span className="absolute inset-0 animate-ping rounded-full bg-current opacity-30" />}
             </span>
@@ -805,6 +815,7 @@ function Router() {
     <RoutedErrorBoundary>
       <Switch>
         <Route path="/" component={BrowserConsole} />
+        <Route path="/fixtures" component={FixturesPage} />
         <Route component={NotFound} />
       </Switch>
     </RoutedErrorBoundary>

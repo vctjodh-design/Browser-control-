@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: fixtures
+    description: Football fixtures from KickoffScore
   - name: browser
     description: Remote Chromium browser sessions and controls
 paths:
@@ -26,6 +28,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /football/fixtures:
+    get:
+      operationId: getFootballFixtures
+      tags: [fixtures]
+      summary: Get football fixtures for a date
+      description: Returns match details from KickoffScore for the selected calendar date
+      parameters:
+        - name: date
+          in: query
+          required: true
+          description: Calendar date in YYYY-MM-DD format
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Fixtures for the selected date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtures"
+        "400":
+          description: Invalid date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "502":
+          description: KickoffScore could not be reached or its page could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
   /browser/sessions:
     post:
       operationId: createBrowserSession
@@ -282,6 +317,65 @@ components:
       schema:
         type: string
   schemas:
+    FootballFixture:
+      type: object
+      properties:
+        competition:
+          type: string
+        homeTeam:
+          type: string
+        awayTeam:
+          type: string
+        homeLogo:
+          type: ["string", "null"]
+          format: uri
+        awayLogo:
+          type: ["string", "null"]
+          format: uri
+        kickoff:
+          type: string
+          description: Kickoff time as shown by KickoffScore
+        status:
+          type: string
+          description: Match status as shown by KickoffScore
+        homeScore:
+          type: ["integer", "null"]
+        awayScore:
+          type: ["integer", "null"]
+        matchUrl:
+          type: string
+          format: uri
+      required:
+        - competition
+        - homeTeam
+        - awayTeam
+        - homeLogo
+        - awayLogo
+        - kickoff
+        - status
+        - homeScore
+        - awayScore
+        - matchUrl
+    FootballFixtures:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        sourceUrl:
+          type: string
+          format: uri
+        fixtures:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFixture"
+      required: [date, sourceUrl, fixtures]
+    FootballFixtureError:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
     HealthStatus:
       type: object
       properties:
