@@ -27,6 +27,7 @@ import type {
   CreateBrowserTabInput,
   FootballFixtureError,
   FootballFixtures,
+  FootballMatchDetails,
   GetFootballFixturesParams,
   HealthStatus,
   MouseMoveResponse,
@@ -212,6 +213,84 @@ export function useGetFootballFixtures<TData = Awaited<ReturnType<typeof getFoot
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetFootballFixturesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFootballMatchDetailsUrl = (fixtureId: number,) => {
+
+
+
+
+  return `/api/football/matches/${fixtureId}/details`
+}
+
+/**
+ * Returns match details and related public data from KickoffScore
+ * @summary Get match details, odds, standings, team form, and head-to-head
+ */
+export const getFootballMatchDetails = async (fixtureId: number, options?: Parameters<typeof customFetch>[1]): Promise<FootballMatchDetails> => {
+
+  return customFetch<FootballMatchDetails>(getGetFootballMatchDetailsUrl(fixtureId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballMatchDetailsQueryKey = (fixtureId: number,) => {
+    return [
+    `/api/football/matches/${fixtureId}/details`
+    ] as const;
+    }
+
+
+export const getGetFootballMatchDetailsQueryOptions = <TData = Awaited<ReturnType<typeof getFootballMatchDetails>>, TError = ErrorType<FootballFixtureError>>(fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchDetails>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballMatchDetailsQueryKey(fixtureId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballMatchDetails>>> = ({ signal }) => getFootballMatchDetails(fixtureId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: fixtureId !== null && fixtureId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchDetails>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballMatchDetailsQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballMatchDetails>>>
+export type GetFootballMatchDetailsQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary Get match details, odds, standings, team form, and head-to-head
+ */
+
+export function useGetFootballMatchDetails<TData = Awaited<ReturnType<typeof getFootballMatchDetails>>, TError = ErrorType<FootballFixtureError>>(
+ fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchDetails>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballMatchDetailsQueryOptions(fixtureId,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

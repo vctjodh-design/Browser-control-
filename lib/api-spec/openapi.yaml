@@ -61,6 +61,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballFixtureError"
+  /football/matches/{fixtureId}/details:
+    get:
+      operationId: getFootballMatchDetails
+      tags: [fixtures]
+      summary: Get match details, odds, standings, team form, and head-to-head
+      description: Returns match details and related public data from KickoffScore
+      parameters:
+        - name: fixtureId
+          in: path
+          required: true
+          description: KickoffScore fixture ID
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Match details and supporting data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballMatchDetails"
+        "400":
+          description: Invalid fixture ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "404":
+          description: Match was not found on KickoffScore
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "502":
+          description: KickoffScore could not be reached or its data could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
   /browser/sessions:
     post:
       operationId: createBrowserSession
@@ -370,6 +409,212 @@ components:
           items:
             $ref: "#/components/schemas/FootballFixture"
       required: [date, sourceUrl, fixtures]
+    FootballMatchParticipant:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        logo:
+          type: ["string", "null"]
+          format: uri
+      required: [id, name, logo]
+    FootballMatchTeam:
+      allOf:
+        - $ref: "#/components/schemas/FootballMatchParticipant"
+        - type: object
+          properties:
+            score:
+              type: ["integer", "null"]
+            halfTimeScore:
+              type: ["integer", "null"]
+          required: [score, halfTimeScore]
+    FootballMatchSummary:
+      type: object
+      properties:
+        fixtureId:
+          type: integer
+        date:
+          type: string
+          format: date-time
+        competition:
+          type: string
+        status:
+          type: string
+        venue:
+          type: ["string", "null"]
+        leagueId:
+          type: ["integer", "null"]
+        season:
+          type: ["integer", "null"]
+        home:
+          $ref: "#/components/schemas/FootballMatchTeam"
+        away:
+          $ref: "#/components/schemas/FootballMatchTeam"
+      required:
+        - fixtureId
+        - date
+        - competition
+        - status
+        - venue
+        - leagueId
+        - season
+        - home
+        - away
+    FootballRecentMatch:
+      type: object
+      properties:
+        fixtureId:
+          type: integer
+        date:
+          type: string
+          format: date-time
+        competition:
+          type: string
+        status:
+          type: string
+        homeTeam:
+          $ref: "#/components/schemas/FootballMatchParticipant"
+        awayTeam:
+          $ref: "#/components/schemas/FootballMatchParticipant"
+        homeScore:
+          type: ["integer", "null"]
+        awayScore:
+          type: ["integer", "null"]
+      required:
+        - fixtureId
+        - date
+        - competition
+        - status
+        - homeTeam
+        - awayTeam
+        - homeScore
+        - awayScore
+    FootballStandingsRow:
+      type: object
+      properties:
+        rank:
+          type: integer
+        teamId:
+          type: integer
+        teamName:
+          type: string
+        teamLogo:
+          type: ["string", "null"]
+          format: uri
+        played:
+          type: integer
+        goalDifference:
+          type: integer
+        points:
+          type: integer
+        form:
+          type: string
+        homePlayed:
+          type: integer
+        homePoints:
+          type: integer
+        homeGoalDifference:
+          type: integer
+        awayPlayed:
+          type: integer
+        awayPoints:
+          type: integer
+        awayGoalDifference:
+          type: integer
+      required:
+        - rank
+        - teamId
+        - teamName
+        - teamLogo
+        - played
+        - goalDifference
+        - points
+        - form
+        - homePlayed
+        - homePoints
+        - homeGoalDifference
+        - awayPlayed
+        - awayPoints
+        - awayGoalDifference
+    FootballOddsSelection:
+      type: object
+      properties:
+        selection:
+          type: string
+        odd:
+          type: number
+        bookmaker:
+          type: string
+        bookmakerCount:
+          type: integer
+      required: [selection, odd, bookmaker, bookmakerCount]
+    FootballOddsMarket:
+      type: object
+      properties:
+        marketId:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+          enum: [1x2, first-half, goals, handicap, other]
+        selections:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballOddsSelection"
+      required: [marketId, name, category, selections]
+    FootballMatchDetailsIssue:
+      type: object
+      properties:
+        section:
+          type: string
+          enum: [standings, odds, homeRecent, awayRecent, headToHead]
+        message:
+          type: string
+      required: [section, message]
+    FootballMatchDetails:
+      type: object
+      properties:
+        sourceUrl:
+          type: string
+          format: uri
+        match:
+          $ref: "#/components/schemas/FootballMatchSummary"
+        standings:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballStandingsRow"
+        oddsMarkets:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballOddsMarket"
+        homeRecent:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballRecentMatch"
+        awayRecent:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballRecentMatch"
+        headToHead:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballRecentMatch"
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballMatchDetailsIssue"
+      required:
+        - sourceUrl
+        - match
+        - standings
+        - oddsMarkets
+        - homeRecent
+        - awayRecent
+        - headToHead
+        - issues
     FootballFixtureError:
       type: object
       properties:

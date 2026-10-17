@@ -30,6 +30,118 @@ export interface FootballFixtures {
   fixtures: FootballFixture[];
 }
 
+export interface FootballMatchParticipant {
+  id: number;
+  name: string;
+  /** @nullable */
+  logo: string | null;
+}
+
+export type FootballMatchTeam = FootballMatchParticipant & ({
+  /** @nullable */
+  score: number | null;
+  /** @nullable */
+  halfTimeScore: number | null;
+});
+
+export interface FootballMatchSummary {
+  fixtureId: number;
+  date: string;
+  competition: string;
+  status: string;
+  /** @nullable */
+  venue: string | null;
+  /** @nullable */
+  leagueId: number | null;
+  /** @nullable */
+  season: number | null;
+  home: FootballMatchTeam;
+  away: FootballMatchTeam;
+}
+
+export interface FootballRecentMatch {
+  fixtureId: number;
+  date: string;
+  competition: string;
+  status: string;
+  homeTeam: FootballMatchParticipant;
+  awayTeam: FootballMatchParticipant;
+  /** @nullable */
+  homeScore: number | null;
+  /** @nullable */
+  awayScore: number | null;
+}
+
+export interface FootballStandingsRow {
+  rank: number;
+  teamId: number;
+  teamName: string;
+  /** @nullable */
+  teamLogo: string | null;
+  played: number;
+  goalDifference: number;
+  points: number;
+  form: string;
+  homePlayed: number;
+  homePoints: number;
+  homeGoalDifference: number;
+  awayPlayed: number;
+  awayPoints: number;
+  awayGoalDifference: number;
+}
+
+export interface FootballOddsSelection {
+  selection: string;
+  odd: number;
+  bookmaker: string;
+  bookmakerCount: number;
+}
+
+export type FootballOddsMarketCategory = typeof FootballOddsMarketCategory[keyof typeof FootballOddsMarketCategory];
+
+
+export const FootballOddsMarketCategory = {
+  '1x2': '1x2',
+  'first-half': 'first-half',
+  goals: 'goals',
+  handicap: 'handicap',
+  other: 'other',
+} as const;
+
+export interface FootballOddsMarket {
+  marketId: string;
+  name: string;
+  category: FootballOddsMarketCategory;
+  selections: FootballOddsSelection[];
+}
+
+export type FootballMatchDetailsIssueSection = typeof FootballMatchDetailsIssueSection[keyof typeof FootballMatchDetailsIssueSection];
+
+
+export const FootballMatchDetailsIssueSection = {
+  standings: 'standings',
+  odds: 'odds',
+  homeRecent: 'homeRecent',
+  awayRecent: 'awayRecent',
+  headToHead: 'headToHead',
+} as const;
+
+export interface FootballMatchDetailsIssue {
+  section: FootballMatchDetailsIssueSection;
+  message: string;
+}
+
+export interface FootballMatchDetails {
+  sourceUrl: string;
+  match: FootballMatchSummary;
+  standings: FootballStandingsRow[];
+  oddsMarkets: FootballOddsMarket[];
+  homeRecent: FootballRecentMatch[];
+  awayRecent: FootballRecentMatch[];
+  headToHead: FootballRecentMatch[];
+  issues: FootballMatchDetailsIssue[];
+}
+
 export interface FootballFixtureError {
   error: string;
 }
