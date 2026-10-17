@@ -16,8 +16,10 @@ import {
   type BrowserState,
 } from '@workspace/api-client-react';
 import {
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   ArrowUpRight,
   Camera,
   Check,
@@ -288,6 +290,17 @@ function BrowserConsole() {
     if (!typeText || busy) return;
     sendAction({ action: 'type', text: typeText });
     setTypeText('');
+  };
+
+  const scrollPage = (deltaY: number) => {
+    if (!state || busy) return;
+    const point = pointerPositionRef.current ?? {
+      x: Math.round(state.viewportWidth / 2),
+      y: Math.round(state.viewportHeight / 2),
+    };
+    pointerPositionRef.current = point;
+    setPointerPosition(point);
+    sendAction({ action: 'scroll', x: point.x, y: point.y, deltaY });
   };
 
   const submitKey = (event: FormEvent<HTMLFormElement>) => {
@@ -602,6 +615,34 @@ function BrowserConsole() {
                   <Keyboard size={17} className="mt-1 text-[#71817b]" />
                 </div>
                 <p className="mt-2 text-[10px] leading-[1.65] text-[#838982]">Move the pointer over the page preview, click to interact, and scroll at its current position.</p>
+
+                <div className="mt-4">
+                  <p className="mb-1.5 text-[10px] font-bold text-[#5d6965]">Page scroll</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => scrollPage(-650)}
+                      disabled={busy}
+                      className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[#d5d6ce] bg-[#fbfaf6] text-[10px] font-bold text-[#536763] transition hover:border-[#bfcfc4] hover:bg-white disabled:opacity-40"
+                      aria-label="Scroll page up"
+                      title="Scroll up about 650 pixels"
+                      data-testid="button-scroll-up"
+                    >
+                      <ArrowUp size={14} /> Scroll up
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => scrollPage(650)}
+                      disabled={busy}
+                      className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[#d5d6ce] bg-[#fbfaf6] text-[10px] font-bold text-[#536763] transition hover:border-[#bfcfc4] hover:bg-white disabled:opacity-40"
+                      aria-label="Scroll page down"
+                      title="Scroll down about 650 pixels"
+                      data-testid="button-scroll-down"
+                    >
+                      <ArrowDown size={14} /> Scroll down
+                    </button>
+                  </div>
+                </div>
 
                 <form onSubmit={submitType} className="mt-5">
                   <label htmlFor="type-text" className="mb-1.5 block text-[10px] font-bold text-[#5d6965]">Type text</label>
