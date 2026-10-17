@@ -1,4 +1,4 @@
-import { type FormEvent, type MouseEvent, type ReactNode, type WheelEvent, useEffect, useRef, useState } from 'react';
+import { type FormEvent, type MouseEvent, type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   useActivateBrowserTab,
@@ -9,6 +9,7 @@ import {
   getGetBrowserSessionQueryKey,
   useGetBrowserSession,
   useHealthCheck,
+  useMoveBrowserMouse,
   useNavigateBrowser,
   usePerformBrowserAction,
   type BrowserActionInput,
@@ -25,6 +26,7 @@ import {
   Keyboard,
   LoaderCircle,
   LockKeyhole,
+  MousePointer2,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -47,6 +49,7 @@ const OUTPUT_MODES: { id: OutputMode; label: string }[] = [
   { id: 'json', label: 'JSON' },
   { id: 'links', label: 'Links' },
 ];
+type BrowserPoint = { x: number; y: number };
 
 function normalizeUrl(value: string) {
   const trimmed = value.trim();
@@ -97,7 +100,13 @@ function BrowserConsole() {
   const [showKeyControls, setShowKeyControls] = useState(false);
   const [outputMode, setOutputMode] = useState<OutputMode>('screenshot');
   const [copyStatus, setCopyStatus] = useState('');
+  const [pointerPosition, setPointerPosition] = useState<BrowserPoint | null>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const outputPanelRef = useRef<HTMLDivElement>(null);
+  const pointerPositionRef = useRef<BrowserPoint | null>(null);
+  const pendingMousePositionRef = useRef<BrowserPoint | null>(null);
+  const mouseMoveWorkerRef = useRef<Promise<void> | null>(null);
+  const lastRemoteMousePositionRef = useRef<BrowserPoint | null>(null);
   const sessionQueryKey = getGetBrowserSessionQueryKey(sessionId);
   const sessionQuery = useGetBrowserSession(sessionId, {
     query: { enabled: Boolean(sessionId), queryKey: sessionQueryKey },
@@ -108,6 +117,7 @@ function BrowserConsole() {
   const closeSession = useCloseBrowserSession();
   const navigate = useNavigateBrowser();
   const performAction = usePerformBrowserAction();
+  const moveMouse = useMoveBrowserMouse();
   const createTab = useCreateBrowserTab();
   const activateTab = useActivateBrowserTab();
   const closeTab = useCloseBrowserTab();
@@ -128,6 +138,63 @@ function BrowserConsole() {
   const sendAction = (data: BrowserActionInput) => {
     if (!sessionId || busy) return;
     performAction.mutate({ sessionId, data }, { onSuccess: acceptState });
+  };
+
+  const pumpMouseMoves = (): Promise<void> => {
+    if (mouseMoveWorkerRef.current) return mouseMoveWorkerRef.current;
+    if (!sessionId || !pendingMousePositionRef.current) return Promise.resolve();
+
+    const moveSessionId = sessionId;
+    const worker = (async () => {
+      while (pendingMousePositionRef.current) {
+        const point = pendingMousePositionRef.current;
+        pendingMousePositionRef.current = null;
+        const last = lastRemoteMousePositionRef.current;
+        if (last?.x === point.x && last.y === point.y) continue;
+        try {
+          await moveMouse.mutateAsync({ sessionId: moveSessionId, data: point });
+          lastRemoteMousePositionRef.current = point;
+        } catch {
+          pendingMousePositionRef.current = null;
+          break;
+        }
+      }
+    })();
+
+    mouseMoveWorkerRef.current = worker;
+    void worker.finally(() => {
+      if (mouseMoveWorkerRef.current === worker) mouseMoveWorkerRef.current = null;
+      if (pendingMousePositionRef.current) void pumpMouseMoves();
+    });
+    return worker;
+  };
+
+  const queueMouseMove = (point: BrowserPoint): Promise<void> => {
+    pendingMousePositionRef.current = point;
+    return pumpMouseMoves();
+  };
+
+  const flushMouseMoves = async () => {
+    while (mouseMoveWorkerRef.current || pendingMousePositionRef.current) {
+      if (!mouseMoveWorkerRef.current) {
+        void pumpMouseMoves();
+      }
+      const worker = mouseMoveWorkerRef.current;
+      if (worker) await worker;
+      else break;
+    }
+  };
+
+  const getBrowserPoint = (clientX: number, clientY: number): BrowserPoint | null => {
+    if (!state) return null;
+    const rect = imageRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0 ||
+        clientX < rect.left || clientX > rect.right ||
+        clientY < rect.top || clientY > rect.bottom) return null;
+    return {
+      x: Math.max(0, Math.min(state.viewportWidth - 1, Math.round(((clientX - rect.left) / rect.width) * state.viewportWidth))),
+      y: Math.max(0, Math.min(state.viewportHeight - 1, Math.round(((clientY - rect.top) / rect.height) * state.viewportHeight))),
+    };
   };
 
   const onStart = (event: FormEvent<HTMLFormElement>) => {
@@ -167,20 +234,51 @@ function BrowserConsole() {
     });
   };
 
-  const clickPreview = (event: MouseEvent<HTMLImageElement>) => {
-    if (!state || busy) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-    const x = Math.max(0, Math.min(state.viewportWidth - 1, Math.round(((event.clientX - rect.left) / rect.width) * state.viewportWidth)));
-    const y = Math.max(0, Math.min(state.viewportHeight - 1, Math.round(((event.clientY - rect.top) / rect.height) * state.viewportHeight)));
-    sendAction({ action: 'click', x, y });
+  const updatePointerPosition = (point: BrowserPoint) => {
+    pointerPositionRef.current = point;
+    setPointerPosition(point);
+    void queueMouseMove(point);
   };
 
-  const scrollPreview = (event: WheelEvent<HTMLDivElement>) => {
+  const trackPreviewPointer = (event: PointerEvent<HTMLDivElement>) => {
     if (!state || busy) return;
-    event.preventDefault();
-    sendAction({ action: 'scroll', deltaY: Math.max(-5000, Math.min(5000, Math.round(event.deltaY))) });
+    const point = getBrowserPoint(event.clientX, event.clientY);
+    if (point) updatePointerPosition(point);
   };
+
+  const clickPreview = async (event: MouseEvent<HTMLImageElement>) => {
+    if (!state || busy) return;
+    const point = getBrowserPoint(event.clientX, event.clientY);
+    if (!point) return;
+    updatePointerPosition(point);
+    await flushMouseMoves();
+    sendAction({ action: 'click', x: point.x, y: point.y });
+  };
+
+  const scrollPreview = async (event: globalThis.WheelEvent) => {
+    event.preventDefault();
+    if (!state || busy) return;
+    const point = getBrowserPoint(event.clientX, event.clientY) ?? pointerPositionRef.current;
+    if (!point) return;
+    updatePointerPosition(point);
+    await flushMouseMoves();
+    sendAction({
+      action: 'scroll',
+      x: point.x,
+      y: point.y,
+      deltaY: Math.max(-5000, Math.min(5000, Math.round(event.deltaY))),
+    });
+  };
+
+  useEffect(() => {
+    const panel = outputPanelRef.current;
+    if (!panel || outputMode !== 'screenshot') return;
+    const handleWheel = (event: globalThis.WheelEvent) => {
+      void scrollPreview(event);
+    };
+    panel.addEventListener('wheel', handleWheel, { passive: false });
+    return () => panel.removeEventListener('wheel', handleWheel);
+  }, [outputMode, scrollPreview]);
 
   const submitType = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -221,7 +319,7 @@ function BrowserConsole() {
   };
 
   const primaryError = readableError(createSession.error) || readableError(closeSession.error) ||
-    readableError(navigate.error) || readableError(performAction.error) ||
+    readableError(navigate.error) || readableError(performAction.error) || readableError(moveMouse.error) ||
     readableError(createTab.error) || readableError(activateTab.error) || readableError(closeTab.error) ||
     readableError(sessionQuery.error);
 
@@ -424,15 +522,27 @@ function BrowserConsole() {
                   )}
                 </div>
                 <div
+                  ref={outputPanelRef}
                   id="browser-output-panel"
                   role="tabpanel"
                   aria-label={`${OUTPUT_MODES.find((mode) => mode.id === outputMode)?.label ?? 'Page'} output`}
                   className={`flex flex-1 overflow-auto p-3 sm:p-5 lg:p-7 ${outputMode === 'screenshot' ? 'items-center justify-center bg-[#dadbd5]' : 'items-start bg-[#eeede7]'}`}
-                  onWheel={outputMode === 'screenshot' ? scrollPreview : undefined}
                 >
                   {outputMode === 'screenshot' ? (
                     state.screenshot ? (
-                      <img ref={imageRef} src={state.screenshot} alt={`Remote browser showing ${state.currentUrl || 'the current page'}`} onClick={clickPreview} draggable={false} className="block h-auto max-h-[calc(100dvh-260px)] w-full cursor-crosshair object-contain shadow-[0_8px_24px_rgba(35,49,53,.17)]" data-testid="img-browser-screenshot" />
+                      <div className="relative inline-block w-full" onPointerMove={trackPreviewPointer} onPointerLeave={() => setPointerPosition(null)}>
+                        <img ref={imageRef} src={state.screenshot} alt={`Remote browser showing ${state.currentUrl || 'the current page'}`} onClick={clickPreview} draggable={false} className="block h-auto max-h-[calc(100dvh-260px)] w-full cursor-none object-contain shadow-[0_8px_24px_rgba(35,49,53,.17)]" data-testid="img-browser-screenshot" />
+                        {pointerPosition && (
+                          <MousePointer2
+                            aria-hidden="true"
+                            className="pointer-events-none absolute z-10 size-5 -translate-x-px -translate-y-px fill-white stroke-[#243443] drop-shadow-md"
+                            style={{
+                              left: `${(pointerPosition.x / state.viewportWidth) * 100}%`,
+                              top: `${(pointerPosition.y / state.viewportHeight) * 100}%`,
+                            }}
+                          />
+                        )}
+                      </div>
                     ) : (
                       <div className="flex min-h-[280px] w-full flex-col items-center justify-center rounded-xl border border-dashed border-[#c0c4bd] bg-[#e3e4de] px-6 text-center">
                         <div className="mb-4 grid size-11 place-items-center rounded-2xl bg-[#d8e4dc] text-[#487866]"><Globe2 size={21} /></div>
@@ -474,9 +584,9 @@ function BrowserConsole() {
                   )}
                 </div>
                 <div className="flex min-h-9 items-center justify-between border-t border-[#d2d2ca] bg-[#eeede7] px-3 text-[9px] text-[#848b83] sm:px-5">
-                  <span className="flex items-center gap-1.5"><span className={`size-1.5 rounded-full ${busy ? 'bg-[#d49b46]' : 'bg-[#4d997e]'}`} />{busy ? 'Applying browser action' : 'Click page to interact'}</span>
+                  <span className="flex items-center gap-1.5"><span className={`size-1.5 rounded-full ${busy ? 'bg-[#d49b46]' : 'bg-[#4d997e]'}`} />{busy ? 'Applying browser action' : 'Move pointer, click, or scroll over page'}</span>
                   <span className="mono hidden sm:block">{state.currentUrl || 'about:blank'}</span>
-                  <span className="hidden sm:block">Scroll over page to scroll browser</span>
+                  <span className="hidden sm:block">Scroll where the pointer rests</span>
                 </div>
               </div>
 
@@ -488,7 +598,7 @@ function BrowserConsole() {
                   </div>
                   <Keyboard size={17} className="mt-1 text-[#71817b]" />
                 </div>
-                <p className="mt-2 text-[10px] leading-[1.65] text-[#838982]">Click directly on the page preview, or send text and keys to the focused element.</p>
+                <p className="mt-2 text-[10px] leading-[1.65] text-[#838982]">Move the pointer over the page preview, click to interact, and scroll at its current position.</p>
 
                 <form onSubmit={submitType} className="mt-5">
                   <label htmlFor="type-text" className="mb-1.5 block text-[10px] font-bold text-[#5d6965]">Type text</label>

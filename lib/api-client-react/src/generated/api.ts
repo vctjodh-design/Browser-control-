@@ -26,6 +26,8 @@ import type {
   CreateBrowserSessionInput,
   CreateBrowserTabInput,
   HealthStatus,
+  MouseMoveResponse,
+  MousePositionInput,
   NavigateBrowserInput
 } from './api.schemas';
 
@@ -549,6 +551,95 @@ export const usePerformBrowserAction = <TError = ErrorType<BrowserError>,
         TContext
       > => {
       return useMutation(getPerformBrowserActionMutationOptions(options));
+    }
+
+export const getMoveBrowserMouseUrl = (sessionId: string,) => {
+
+
+
+
+  return `/api/browser/sessions/${sessionId}/mouse`
+}
+
+/**
+ * @summary Move the pointer within the active browser page
+ */
+export const moveBrowserMouse = async (sessionId: string,
+    mousePositionInput: MousePositionInput, options?: Parameters<typeof customFetch>[1]): Promise<MouseMoveResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<MouseMoveResponse>(getMoveBrowserMouseUrl(sessionId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(mousePositionInput)
+  }
+);}
+
+
+
+
+
+export const getMoveBrowserMouseMutationKey = () => ['moveBrowserMouse'] as const;
+
+export const getMoveBrowserMouseMutationOptions = <TError = ErrorType<BrowserError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof moveBrowserMouse>>, TError,MoveBrowserMouseMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof moveBrowserMouse>>, TError,MoveBrowserMouseMutationVariables, TContext> => {
+
+const mutationKey = getMoveBrowserMouseMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof moveBrowserMouse>>, MoveBrowserMouseMutationVariables> = (props) => {
+          const {sessionId,data} = props ?? {};
+
+          return  moveBrowserMouse(sessionId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MoveBrowserMouseMutationResult = NonNullable<Awaited<ReturnType<typeof moveBrowserMouse>>>
+    export type MoveBrowserMouseMutationBody = BodyType<MousePositionInput>
+    export type MoveBrowserMouseMutationError = ErrorType<BrowserError>
+    export type MoveBrowserMouseMutationVariables = {sessionId: string;data: BodyType<MousePositionInput>}
+
+    /**
+ * @summary Move the pointer within the active browser page
+ */
+export const useMoveBrowserMouse = <TError = ErrorType<BrowserError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof moveBrowserMouse>>, TError,MoveBrowserMouseMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof moveBrowserMouse>>,
+        TError,
+        MoveBrowserMouseMutationVariables,
+        TContext
+      > => {
+      return useMutation(getMoveBrowserMouseMutationOptions(options));
     }
 
 export const getCreateBrowserTabUrl = (sessionId: string,) => {

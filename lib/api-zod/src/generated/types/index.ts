@@ -17,4 +17,6 @@ export * from './browserTab';
 export * from './createBrowserSessionInput';
 export * from './createBrowserTabInput';
 export * from './healthStatus';
+export * from './mouseMoveResponse';
+export * from './mousePositionInput';
 export * from './navigateBrowserInput';

@@ -106,3 +106,20 @@ export interface BrowserActionInput {
   deltaY?: number;
 }
 
+export interface MousePositionInput {
+  /**
+     * @minimum 0
+     * @maximum 1439
+     */
+  x: number;
+  /**
+     * @minimum 0
+     * @maximum 899
+     */
+  y: number;
+}
+
+export interface MouseMoveResponse {
+  moved: boolean;
+}
+

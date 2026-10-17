@@ -155,6 +155,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BrowserError"
+  /browser/sessions/{sessionId}/mouse:
+    post:
+      operationId: moveBrowserMouse
+      tags: [browser]
+      summary: Move the pointer within the active browser page
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MousePositionInput"
+      responses:
+        "200":
+          description: Pointer moved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MouseMoveResponse"
+        "400":
+          description: Invalid pointer position
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrowserError"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrowserError"
   /browser/sessions/{sessionId}/tabs:
     post:
       operationId: createBrowserTab
@@ -390,4 +422,22 @@ components:
           minimum: -5000
           maximum: 5000
       required: [action]
+    MousePositionInput:
+      type: object
+      properties:
+        x:
+          type: number
+          minimum: 0
+          maximum: 1439
+        y:
+          type: number
+          minimum: 0
+          maximum: 899
+      required: [x, y]
+    MouseMoveResponse:
+      type: object
+      properties:
+        moved:
+          type: boolean
+      required: [moved]
 

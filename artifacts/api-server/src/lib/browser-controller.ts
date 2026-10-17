@@ -28,7 +28,7 @@ type BrowserAction =
   | { action: "click"; x?: number; y?: number }
   | { action: "type"; text?: string }
   | { action: "key"; key?: string }
-  | { action: "scroll"; deltaY?: number }
+  | { action: "scroll"; x?: number; y?: number; deltaY?: number }
   | { action: "back" }
   | { action: "forward" }
   | { action: "reload" };
@@ -117,6 +117,22 @@ function getActivePage(session: BrowserSession): Page {
     );
   }
   return page;
+}
+
+function validateMousePosition(x: number, y: number): void {
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    x < 0 ||
+    y < 0 ||
+    x >= VIEWPORT.width ||
+    y >= VIEWPORT.height
+  ) {
+    throw new BrowserOperationError(
+      "The pointer position is outside the browser viewport.",
+      400,
+    );
+  }
 }
 
 export async function getBrowserState(sessionId: string) {
@@ -363,17 +379,7 @@ export async function performBrowserAction(
             400,
           );
         }
-        if (
-          action.x < 0 ||
-          action.y < 0 ||
-          action.x >= VIEWPORT.width ||
-          action.y >= VIEWPORT.height
-        ) {
-          throw new BrowserOperationError(
-            "The click position is outside the browser viewport.",
-            400,
-          );
-        }
+        validateMousePosition(action.x, action.y);
         await page.mouse.click(action.x, action.y);
         await page.waitForTimeout(200);
         break;
@@ -390,6 +396,16 @@ export async function performBrowserAction(
         await page.keyboard.press(action.key);
         break;
       case "scroll":
+        if (action.x !== undefined || action.y !== undefined) {
+          if (typeof action.x !== "number" || typeof action.y !== "number") {
+            throw new BrowserOperationError(
+              "A complete screen position is required to scroll there.",
+              400,
+            );
+          }
+          validateMousePosition(action.x, action.y);
+          await page.mouse.move(action.x, action.y);
+        }
         await page.mouse.wheel(0, action.deltaY ?? 600);
         break;
       case "back":
@@ -408,6 +424,26 @@ export async function performBrowserAction(
     if (error instanceof BrowserOperationError) throw error;
     throw new BrowserOperationError(
       "That browser action could not be completed.",
+      502,
+    );
+  }
+}
+
+export async function moveBrowserMouse(
+  sessionId: string,
+  x: number,
+  y: number,
+): Promise<{ moved: true }> {
+  validateMousePosition(x, y);
+  const session = getSession(sessionId);
+  const page = getActivePage(session);
+
+  try {
+    await page.mouse.move(x, y);
+    return { moved: true };
+  } catch {
+    throw new BrowserOperationError(
+      "The pointer could not be moved on the browser page.",
       502,
     );
   }

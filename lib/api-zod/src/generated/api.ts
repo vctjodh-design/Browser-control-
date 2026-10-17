@@ -226,6 +226,31 @@ export const PerformBrowserActionResponse = zod.object({
 
 
 /**
+ * @summary Move the pointer within the active browser page
+ */
+export const MoveBrowserMouseParams = zod.object({
+  "sessionId": zod.coerce.string()
+})
+
+export const moveBrowserMouseBodyXMin = 0;
+export const moveBrowserMouseBodyXMax = 1439;
+
+export const moveBrowserMouseBodyYMin = 0;
+export const moveBrowserMouseBodyYMax = 899;
+
+
+
+export const MoveBrowserMouseBody = zod.object({
+  "x": zod.number().min(moveBrowserMouseBodyXMin).max(moveBrowserMouseBodyXMax),
+  "y": zod.number().min(moveBrowserMouseBodyYMin).max(moveBrowserMouseBodyYMax)
+})
+
+export const MoveBrowserMouseResponse = zod.object({
+  "moved": zod.boolean()
+})
+
+
+/**
  * @summary Open a new browser tab
  */
 export const CreateBrowserTabParams = zod.object({

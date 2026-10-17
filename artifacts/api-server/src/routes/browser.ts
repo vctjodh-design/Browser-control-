@@ -13,6 +13,9 @@ import {
   CreateBrowserTabResponse,
   GetBrowserSessionParams,
   GetBrowserSessionResponse,
+  MoveBrowserMouseBody,
+  MoveBrowserMouseParams,
+  MoveBrowserMouseResponse,
   NavigateBrowserBody,
   NavigateBrowserParams,
   NavigateBrowserResponse,
@@ -27,6 +30,7 @@ import {
   createBrowserSession,
   createBrowserTab,
   getBrowserState,
+  moveBrowserMouse,
   navigateBrowser,
   performBrowserAction,
   BrowserOperationError,
@@ -150,6 +154,33 @@ router.post(
         body.data,
       );
       res.json(PerformBrowserActionResponse.parse(state));
+    } catch (error) {
+      sendError(res, error);
+    }
+  },
+);
+
+router.post(
+  "/browser/sessions/:sessionId/mouse",
+  async (req, res): Promise<void> => {
+    const params = MoveBrowserMouseParams.safeParse(req.params);
+    const body = MoveBrowserMouseBody.safeParse(req.body);
+    if (!params.success) {
+      sendValidationError(res, params.error.message);
+      return;
+    }
+    if (!body.success) {
+      sendValidationError(res, body.error.message);
+      return;
+    }
+
+    try {
+      const result = await moveBrowserMouse(
+        params.data.sessionId,
+        body.data.x,
+        body.data.y,
+      );
+      res.json(MoveBrowserMouseResponse.parse(result));
     } catch (error) {
       sendError(res, error);
     }
