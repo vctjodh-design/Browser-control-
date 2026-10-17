@@ -98,70 +98,144 @@ function readStatusAndKickoff(prefix: string, matchHtml: string) {
   };
 }
 
+function inferFixtureStatus(startTime: string | null, hasScore: boolean): string {
+  const startTimestamp = startTime ? Date.parse(startTime) : Number.NaN;
+  const now = Date.now();
+
+  if (hasScore) {
+    const elapsed = now - startTimestamp;
+    return Number.isFinite(startTimestamp) && elapsed >= 0 && elapsed < 3 * 60 * 60 * 1000
+      ? "In Play"
+      : "Match Finished";
+  }
+
+  return Number.isFinite(startTimestamp) && startTimestamp > now
+    ? "Not Started"
+    : "Status unavailable";
+}
+
 function parseFixturePage(
   html: string,
   date: string,
   sourceUrl: string,
 ): FixturePage {
-  let competition = "Football";
-  const fixtures: FixturePage["fixtures"] = [];
-  const links =
-    /<a\b([^>]*\bhref=["'](\/(?:leagues|match)\/[^"']+)["'][^>]*)>([\s\S]*?)<\/a>/gi;
-
-  for (const link of html.matchAll(links)) {
-    const href = link[2];
-    const linkHtml = link[3] ?? "";
-    if (!href) continue;
-
-    if (href.startsWith("/leagues/")) {
-      const name = textFromHtml(linkHtml);
-      if (name) competition = name;
-      continue;
+  const cardDetails = new Map<
+    string,
+    {
+      homeLogo: string | null;
+      awayLogo: string | null;
+      kickoff: string;
+      status: string;
+      homeScore: number | null;
+      awayScore: number | null;
     }
+  >();
 
-    const matchId = href.match(/^\/match\/[^/]+\/(\d+)$/);
-    if (!matchId) continue;
+  // KickoffScore also renders logo cards for its featured matches. Keep their
+  // extra status and logo data, but use the competition rows below as the full
+  // fixture list.
+  const matchAnchors =
+    /<a\b([^>]*\bhref=["'](\/match\/[^"']+)["'][^>]*)>([\s\S]*?)<\/a>/gi;
+  for (const match of html.matchAll(matchAnchors)) {
+    const href = match[2];
+    const matchHtml = match[3] ?? "";
+    if (!href || !matchHtml.includes("<img")) continue;
 
-    const matchHtml = linkHtml;
     const images = [...matchHtml.matchAll(/<img\b([^>]*)>/gi)]
       .map((image) => {
-        const attributes = image[1] ?? "";
-        const alt = attribute(attributes, "alt");
+        const imageAttributes = image[1] ?? "";
+        const alt = attribute(imageAttributes, "alt");
         return {
           alt,
-          logo: safeLogoUrl(attribute(attributes, "src")),
+          logo: safeLogoUrl(attribute(imageAttributes, "src")),
         };
       })
       .filter((image) => image.alt && /\s+logo$/i.test(image.alt));
+    if (images.length < 2) continue;
 
-    const homeTeam = images[0]?.alt?.replace(/\s+logo$/i, "") ?? "";
-    const awayTeam = images[1]?.alt?.replace(/\s+logo$/i, "") ?? "";
-    if (!homeTeam || !awayTeam) continue;
-
+    const index = match.index ?? 0;
+    const { kickoff, status } = readStatusAndKickoff(
+      html.slice(Math.max(0, index - 2_500), index),
+      matchHtml,
+    );
     const scoreValues = [
       ...matchHtml.matchAll(/<span\b[^>]*>\s*(\d{1,3})\s*<\/span>/gi),
     ].map((score) => Number(score[1]));
-    const hasScore = scoreValues.length >= 2;
-    const { kickoff, status } = readStatusAndKickoff(
-      html.slice(Math.max(0, (link.index ?? 0) - 2_500), link.index ?? 0),
-      matchHtml,
-    );
 
-    fixtures.push({
-      competition,
-      homeTeam,
-      awayTeam,
+    cardDetails.set(new URL(href, KICKOFFSCORE_ORIGIN).toString(), {
       homeLogo: images[0]?.logo ?? null,
       awayLogo: images[1]?.logo ?? null,
       kickoff,
       status,
-      homeScore: hasScore ? scoreValues[0] ?? null : null,
-      awayScore: hasScore ? scoreValues[1] ?? null : null,
-      matchUrl: new URL(href, KICKOFFSCORE_ORIGIN).toString(),
+      homeScore: scoreValues.length >= 2 ? scoreValues[0] ?? null : null,
+      awayScore: scoreValues.length >= 2 ? scoreValues[1] ?? null : null,
     });
   }
 
-  return { date, sourceUrl, fixtures };
+  let competition = "Football";
+  const fixturesByUrl = new Map<
+    string,
+    FixturePage["fixtures"][number]
+  >();
+  const sections =
+    /<h3\b[^>]*>([\s\S]*?)<\/h3>|<li\b[^>]*>([\s\S]*?)<\/li>/gi;
+
+  for (const section of html.matchAll(sections)) {
+    const headingHtml = section[1];
+    if (headingHtml !== undefined) {
+      const leagueLink = headingHtml.match(
+        /<a\b([^>]*\bhref=["']\/leagues\/[^"']+["'][^>]*)>([\s\S]*?)<\/a>/i,
+      );
+      if (leagueLink?.[2]) competition = textFromHtml(leagueLink[2]);
+      continue;
+    }
+
+    const rowHtml = section[2] ?? "";
+    const matchLink = rowHtml.match(
+      /<a\b([^>]*\bhref=["'](\/match\/[^"']+)["'][^>]*)>([\s\S]*?)<\/a>/i,
+    );
+    const timeElement = rowHtml.match(
+      /<time\b([^>]*)>([\s\S]*?)<\/time>/i,
+    );
+    if (!matchLink?.[2] || !matchLink[3] || !timeElement) continue;
+
+    const href = matchLink[2];
+    if (!/^\/match\/[^/]+\/\d+$/.test(href)) continue;
+    const matchup = textFromHtml(matchLink[3]).match(
+      /^([\s\S]+?)\s+vs\.?\s+([\s\S]+)$/i,
+    );
+    if (!matchup) continue;
+
+    const kickoff = textFromHtml(timeElement[2] ?? "") || "—";
+    const startTime = attribute(timeElement[1] ?? "", "dateTime");
+    const rowScore = rowHtml.match(
+      /<span\b[^>]*>\s*(\d{1,3})\s*[-–]\s*(\d{1,3})\s*<\/span>/i,
+    );
+    const card = cardDetails.get(new URL(href, KICKOFFSCORE_ORIGIN).toString());
+    const homeScore = rowScore
+      ? Number(rowScore[1])
+      : card?.homeScore ?? null;
+    const awayScore = rowScore
+      ? Number(rowScore[2])
+      : card?.awayScore ?? null;
+    const hasScore = homeScore !== null && awayScore !== null;
+    const matchUrl = new URL(href, KICKOFFSCORE_ORIGIN).toString();
+
+    fixturesByUrl.set(matchUrl, {
+      competition,
+      homeTeam: matchup[1].trim(),
+      awayTeam: matchup[2].trim(),
+      homeLogo: card?.homeLogo ?? null,
+      awayLogo: card?.awayLogo ?? null,
+      kickoff: card?.kickoff && card.kickoff !== "—" ? card.kickoff : kickoff,
+      status: card?.status ?? inferFixtureStatus(startTime, hasScore),
+      homeScore,
+      awayScore,
+      matchUrl,
+    });
+  }
+
+  return { date, sourceUrl, fixtures: [...fixturesByUrl.values()] };
 }
 
 export async function getKickoffScoreFixtures(

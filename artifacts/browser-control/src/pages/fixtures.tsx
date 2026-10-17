@@ -10,7 +10,9 @@ import {
   ExternalLink,
   LoaderCircle,
   RefreshCw,
+  Search,
   Trophy,
+  X,
 } from 'lucide-react';
 
 function getLocalDateString(date = new Date()) {
@@ -46,6 +48,10 @@ function readableError(error: unknown) {
     return error.error;
   }
   return 'The fixture feed could not be reached. Please try again.';
+}
+
+function normalizeSearchTerm(value: string) {
+  return value.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
 function TeamMark({ name, logo }: { name: string; logo: string | null }) {
@@ -116,8 +122,18 @@ function FixtureRow({ fixture, index }: {
 
 export default function FixturesPage() {
   const [selectedDate, setSelectedDate] = useState(() => getLocalDateString());
+  const [searchTerm, setSearchTerm] = useState('');
   const fixturesQuery = useGetFootballFixtures({ date: selectedDate });
   const data = fixturesQuery.data;
+  const normalizedSearch = normalizeSearchTerm(searchTerm);
+  const allFixtures = data?.fixtures ?? [];
+  const filteredFixtures = normalizedSearch
+    ? allFixtures.filter((fixture) =>
+        normalizeSearchTerm(
+          `${fixture.homeTeam} vs ${fixture.awayTeam} ${fixture.competition}`,
+        ).includes(normalizedSearch),
+      )
+    : allFixtures;
 
   return (
     <main className="screen-noise min-h-[100dvh] bg-[#f2f0e8] text-[#243443]">
@@ -195,7 +211,13 @@ export default function FixturesPage() {
               <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#e6eee8] text-[#537867]"><Trophy size={16} /></span>
               <div className="min-w-0">
                 <h2 className="truncate text-[14px] font-extrabold tracking-[-.035em] text-[#344550]" data-testid="text-fixtures-heading">Fixtures · {formatSelectedDate(selectedDate)}</h2>
-                <p className="mt-0.5 text-[10px] text-[#858982]">{data ? `${data.fixtures.length} ${data.fixtures.length === 1 ? 'match' : 'matches'} listed` : 'Match schedule and results'}</p>
+                <p className="mt-0.5 text-[10px] text-[#858982]" aria-live="polite" data-testid="text-fixtures-count">
+                  {data
+                    ? normalizedSearch
+                      ? `${filteredFixtures.length} of ${data.fixtures.length} matches`
+                      : `${data.fixtures.length} ${data.fixtures.length === 1 ? 'match' : 'matches'} listed`
+                    : 'Match schedule and results'}
+                </p>
               </div>
             </div>
             {data?.sourceUrl && (
@@ -204,6 +226,42 @@ export default function FixturesPage() {
               </a>
             )}
           </div>
+
+          {data?.fixtures.length ? (
+            <div className="flex flex-col gap-2.5 border-b border-[#e7e5dc] px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+              <label className="relative block w-full sm:max-w-[440px]">
+                <span className="sr-only">Search matches by team or competition</span>
+                <Search size={15} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8b928a]" />
+                <input
+                  type="text"
+                  inputMode="search"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder="Search teams or competitions"
+                  autoComplete="off"
+                  aria-label="Search matches by team or competition"
+                  className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] pl-9 pr-10 text-[12px] font-medium text-[#354750] placeholder:text-[#9a9b93] focus:border-[#d96f51] focus:outline-none focus:ring-2 focus:ring-[#d96f51]/15"
+                  data-testid="input-fixture-search"
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm('')}
+                    aria-label="Clear match search"
+                    className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-[#78817b] transition hover:bg-[#efeee8] hover:text-[#354750]"
+                    data-testid="button-clear-fixture-search"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </label>
+              <p className="text-[10px] text-[#858982]" aria-live="polite">
+                {normalizedSearch
+                  ? `${filteredFixtures.length} ${filteredFixtures.length === 1 ? 'match' : 'matches'} found`
+                  : 'Search by team or competition'}
+              </p>
+            </div>
+          ) : null}
 
           {fixturesQuery.isLoading ? (
             <div className="p-4 sm:p-5" role="status" aria-label="Loading fixtures" data-testid="status-fixtures-loading">
@@ -228,11 +286,22 @@ export default function FixturesPage() {
               </button>
             </div>
           ) : data?.fixtures.length ? (
-            <div data-testid="list-fixtures">
-              {data.fixtures.map((fixture, index) => (
-                <FixtureRow key={`${fixture.matchUrl}-${index}`} fixture={fixture} index={index} />
-              ))}
-            </div>
+            filteredFixtures.length ? (
+              <div data-testid="list-fixtures">
+                {filteredFixtures.map((fixture, index) => (
+                  <FixtureRow key={`${fixture.matchUrl}-${index}`} fixture={fixture} index={index} />
+                ))}
+              </div>
+            ) : (
+              <div className="flex min-h-[255px] flex-col items-center justify-center px-6 py-12 text-center" data-testid="status-fixtures-no-search-results">
+                <span className="grid size-12 place-items-center rounded-2xl border border-[#dfe4dc] bg-[#edf2ec] text-[#718879]"><Search size={20} /></span>
+                <h3 className="mt-4 text-[16px] font-extrabold tracking-[-.04em] text-[#354750]">No matching fixtures</h3>
+                <p className="mt-2 max-w-[320px] text-[11px] leading-5 text-[#858982]">No teams or competitions match “{searchTerm}”. Try a different search.</p>
+                <button type="button" onClick={() => setSearchTerm('')} className="mt-4 inline-flex h-9 items-center gap-2 rounded-lg bg-[#253746] px-3.5 text-[10px] font-extrabold text-[#f8f2e7] transition hover:bg-[#344c5d]" data-testid="button-reset-fixture-search">
+                  <X size={13} /> Clear search
+                </button>
+              </div>
+            )
           ) : (
             <div className="flex min-h-[255px] flex-col items-center justify-center px-6 py-12 text-center" data-testid="status-fixtures-empty">
               <span className="grid size-12 place-items-center rounded-2xl border border-[#dfe4dc] bg-[#edf2ec] text-[#718879]"><CalendarDays size={20} /></span>
