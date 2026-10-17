@@ -108,11 +108,6 @@ function BrowserConsole() {
   const mouseMoveWorkerRef = useRef<Promise<void> | null>(null);
   const lastRemoteMousePositionRef = useRef<BrowserPoint | null>(null);
   const sessionQueryKey = getGetBrowserSessionQueryKey(sessionId);
-  const sessionQuery = useGetBrowserSession(sessionId, {
-    query: { enabled: Boolean(sessionId), queryKey: sessionQueryKey },
-  });
-  const state = sessionQuery.data as BrowserState | undefined;
-
   const createSession = useCreateBrowserSession();
   const closeSession = useCloseBrowserSession();
   const navigate = useNavigateBrowser();
@@ -124,6 +119,14 @@ function BrowserConsole() {
 
   const busy = createSession.isPending || closeSession.isPending || navigate.isPending ||
     performAction.isPending || createTab.isPending || activateTab.isPending || closeTab.isPending;
+  const sessionQuery = useGetBrowserSession(sessionId, {
+    query: {
+      enabled: Boolean(sessionId),
+      queryKey: sessionQueryKey,
+      refetchInterval: outputMode === 'screenshot' && !busy ? 500 : false,
+    },
+  });
+  const state = sessionQuery.data as BrowserState | undefined;
   const activeTab = state?.tabs.find((tab) => tab.id === state.activeTabId) ?? state?.tabs.find((tab) => tab.active);
   const outputText = state ? getOutputText(state, outputMode) : '';
 
@@ -586,7 +589,7 @@ function BrowserConsole() {
                 <div className="flex min-h-9 items-center justify-between border-t border-[#d2d2ca] bg-[#eeede7] px-3 text-[9px] text-[#848b83] sm:px-5">
                   <span className="flex items-center gap-1.5"><span className={`size-1.5 rounded-full ${busy ? 'bg-[#d49b46]' : 'bg-[#4d997e]'}`} />{busy ? 'Applying browser action' : 'Move pointer, click, or scroll over page'}</span>
                   <span className="mono hidden sm:block">{state.currentUrl || 'about:blank'}</span>
-                  <span className="hidden sm:block">Scroll where the pointer rests</span>
+                  <span className="hidden sm:block">Live screenshot · refreshes twice a second</span>
                 </div>
               </div>
 

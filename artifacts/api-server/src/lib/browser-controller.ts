@@ -149,7 +149,6 @@ export async function getBrowserState(sessionId: string) {
   const [screenshot, pageContent, title] = await Promise.all([
     activePage.screenshot({
       type: "png",
-      animations: "disabled",
       timeout: 15_000,
     }),
     activePage.evaluate(() => {
