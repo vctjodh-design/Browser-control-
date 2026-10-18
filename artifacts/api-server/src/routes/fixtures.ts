@@ -2,6 +2,8 @@ import { Router, type IRouter } from "express";
 import {
   GetFootballMatchDetailsParams,
   GetFootballMatchDetailsResponse,
+  GetFootballMatchTmpParams,
+  GetFootballMatchTmpResponse,
   GetFootballFixturesQueryParams,
   GetFootballFixturesResponse,
 } from "@workspace/api-zod";
@@ -9,6 +11,7 @@ import {
   getKickoffScoreMatchDetails,
   KickoffScoreMatchNotFoundError,
 } from "../lib/kickoffscore-match-details";
+import { getKickoffScoreMatchTmp } from "../lib/kickoffscore-match-tmp";
 import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
 
 const router: IRouter = Router();
@@ -79,6 +82,36 @@ router.get(
       res.status(502).json({
         error:
           "KickoffScore match details could not be loaded right now. Please try again.",
+      });
+    }
+  },
+);
+
+router.get(
+  "/football/matches/:fixtureId/tmp",
+  async (req, res): Promise<void> => {
+    const params = GetFootballMatchTmpParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    try {
+      const context = await getKickoffScoreMatchTmp(params.data.fixtureId);
+      res.json(GetFootballMatchTmpResponse.parse(context));
+    } catch (error) {
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not load historical TMP context from KickoffScore",
+      );
+      res.status(502).json({
+        error:
+          "Historical match expectations could not be loaded right now. Please try again.",
       });
     }
   },

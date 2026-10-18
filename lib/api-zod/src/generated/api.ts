@@ -113,6 +113,8 @@ export const GetFootballMatchDetailsResponse = zod.object({
   "date": zod.coerce.date(),
   "competition": zod.string(),
   "status": zod.string(),
+  "leagueId": zod.number().int().nullable(),
+  "season": zod.number().int().nullable(),
   "homeTeam": zod.object({
   "id": zod.number().int(),
   "name": zod.string(),
@@ -131,6 +133,8 @@ export const GetFootballMatchDetailsResponse = zod.object({
   "date": zod.coerce.date(),
   "competition": zod.string(),
   "status": zod.string(),
+  "leagueId": zod.number().int().nullable(),
+  "season": zod.number().int().nullable(),
   "homeTeam": zod.object({
   "id": zod.number().int(),
   "name": zod.string(),
@@ -149,6 +153,8 @@ export const GetFootballMatchDetailsResponse = zod.object({
   "date": zod.coerce.date(),
   "competition": zod.string(),
   "status": zod.string(),
+  "leagueId": zod.number().int().nullable(),
+  "season": zod.number().int().nullable(),
   "homeTeam": zod.object({
   "id": zod.number().int(),
   "name": zod.string(),
@@ -164,6 +170,72 @@ export const GetFootballMatchDetailsResponse = zod.object({
 })),
   "issues": zod.array(zod.object({
   "section": zod.enum(['standings', 'odds', 'homeRecent', 'awayRecent', 'headToHead']),
+  "message": zod.string()
+}))
+})
+
+
+/**
+ * Returns historical market expectations and latest available season tables for recent matches
+ * @summary Get historical odds and standings context for match TMP
+ */
+
+
+
+export const GetFootballMatchTmpParams = zod.object({
+  "fixtureId": zod.coerce.number().int().min(1).describe('KickoffScore fixture ID')
+})
+
+export const getFootballMatchTmpResponseOddsHistoryItemHomeProbabilityMin = 0;
+export const getFootballMatchTmpResponseOddsHistoryItemHomeProbabilityMax = 1;
+
+export const getFootballMatchTmpResponseOddsHistoryItemDrawProbabilityMin = 0;
+export const getFootballMatchTmpResponseOddsHistoryItemDrawProbabilityMax = 1;
+
+export const getFootballMatchTmpResponseOddsHistoryItemAwayProbabilityMin = 0;
+export const getFootballMatchTmpResponseOddsHistoryItemAwayProbabilityMax = 1;
+
+export const getFootballMatchTmpResponseOddsHistoryItemMarketsItemSelectionsItemProbabilityMin = 0;
+export const getFootballMatchTmpResponseOddsHistoryItemMarketsItemSelectionsItemProbabilityMax = 1;
+
+
+
+export const GetFootballMatchTmpResponse = zod.object({
+  "fixtureId": zod.number().int(),
+  "oddsHistory": zod.array(zod.object({
+  "fixtureId": zod.number().int(),
+  "homeProbability": zod.number().min(getFootballMatchTmpResponseOddsHistoryItemHomeProbabilityMin).max(getFootballMatchTmpResponseOddsHistoryItemHomeProbabilityMax).nullable(),
+  "drawProbability": zod.number().min(getFootballMatchTmpResponseOddsHistoryItemDrawProbabilityMin).max(getFootballMatchTmpResponseOddsHistoryItemDrawProbabilityMax).nullable(),
+  "awayProbability": zod.number().min(getFootballMatchTmpResponseOddsHistoryItemAwayProbabilityMin).max(getFootballMatchTmpResponseOddsHistoryItemAwayProbabilityMax).nullable(),
+  "bookmakerCount": zod.number().int(),
+  "verifiedBookmakerCount": zod.number().int(),
+  "unverifiedBookmakerCount": zod.number().int(),
+  "marketCount": zod.number().int(),
+  "marketCategories": zod.array(zod.enum(['1x2', 'first-half', 'goals', 'handicap', 'other'])),
+  "markets": zod.array(zod.object({
+  "marketId": zod.string(),
+  "name": zod.string(),
+  "category": zod.enum(['1x2', 'first-half', 'goals', 'handicap', 'other']),
+  "selections": zod.array(zod.object({
+  "selection": zod.string(),
+  "probability": zod.number().min(getFootballMatchTmpResponseOddsHistoryItemMarketsItemSelectionsItemProbabilityMin).max(getFootballMatchTmpResponseOddsHistoryItemMarketsItemSelectionsItemProbabilityMax),
+  "bookmakerCount": zod.number().int()
+}))
+})),
+  "quoteSource": zod.enum(['verified', 'mixed', 'unverified', 'unavailable'])
+})),
+  "seasonStandings": zod.array(zod.object({
+  "leagueId": zod.number().int(),
+  "season": zod.number().int(),
+  "teamId": zod.number().int(),
+  "teamName": zod.string(),
+  "rank": zod.number().int(),
+  "played": zod.number().int(),
+  "points": zod.number().int(),
+  "goalDifference": zod.number().int()
+})),
+  "issues": zod.array(zod.object({
+  "section": zod.enum(['oddsHistory', 'standingsHistory']),
   "message": zod.string()
 }))
 })

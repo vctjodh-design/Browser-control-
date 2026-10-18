@@ -12,6 +12,10 @@ export interface FootballRecentMatch {
   date: Date;
   competition: string;
   status: string;
+  /** @nullable */
+  leagueId: number | null;
+  /** @nullable */
+  season: number | null;
   homeTeam: FootballMatchParticipant;
   awayTeam: FootballMatchParticipant;
   /** @nullable */

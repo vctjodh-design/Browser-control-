@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link, useParams } from 'wouter';
-import { useGetFootballMatchDetails } from '@workspace/api-client-react';
+import { useGetFootballMatchDetails, useGetFootballMatchTmp } from '@workspace/api-client-react';
 import type { FootballMatchDetails, FootballRecentMatch } from '@workspace/api-client-react';
+import { MatchTmpPanel } from '@/components/match-tmp-panel';
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -15,12 +16,13 @@ import {
   Trophy,
 } from 'lucide-react';
 
-type MatchTab = 'table' | 'odds' | 'form' | 'h2h';
+type MatchTab = 'table' | 'odds' | 'form' | 'h2h' | 'tmp';
 const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'table', label: 'Table', short: '01' },
   { id: 'odds', label: 'Odds', short: '02' },
   { id: 'form', label: 'Team form', short: '03' },
   { id: 'h2h', label: 'Head to head', short: '04' },
+  { id: 'tmp', label: 'TMP', short: '05' },
 ];
 
 function readableError(error: unknown) {
@@ -215,6 +217,9 @@ export default function MatchDetailsPage() {
     query: { enabled: validId, queryKey: ['/api/football/matches', fixtureId, 'details'] },
   });
   const [activeTab, setActiveTab] = useState<MatchTab>('table');
+  const tmpQuery = useGetFootballMatchTmp(validId ? fixtureId : 0, {
+    query: { enabled: validId && activeTab === 'tmp', queryKey: ['/api/football/matches', fixtureId, 'tmp'] },
+  });
   const details = detailsQuery.data as FootballMatchDetails | undefined;
   const match = details?.match;
   const isLive = match?.status.toLowerCase().includes('live') || match?.status.toLowerCase().includes('in play');
@@ -277,6 +282,7 @@ export default function MatchDetailsPage() {
                 {activeTab === 'odds' && <OddsPanel details={details} />}
                 {activeTab === 'form' && <FormPanel details={details} />}
                 {activeTab === 'h2h' && <HeadToHeadPanel details={details} />}
+                {activeTab === 'tmp' && <MatchTmpPanel details={details} context={tmpQuery.data} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />}
               </div>
             </section>
             <footer className="mt-4 flex flex-col justify-between gap-2 px-1 text-[9px] leading-5 text-[#8b8d84] sm:flex-row sm:items-center">

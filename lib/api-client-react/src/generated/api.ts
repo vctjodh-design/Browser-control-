@@ -28,6 +28,7 @@ import type {
   FootballFixtureError,
   FootballFixtures,
   FootballMatchDetails,
+  FootballMatchTmpContext,
   GetFootballFixturesParams,
   HealthStatus,
   MouseMoveResponse,
@@ -291,6 +292,84 @@ export function useGetFootballMatchDetails<TData = Awaited<ReturnType<typeof get
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetFootballMatchDetailsQueryOptions(fixtureId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFootballMatchTmpUrl = (fixtureId: number,) => {
+
+
+
+
+  return `/api/football/matches/${fixtureId}/tmp`
+}
+
+/**
+ * Returns historical market expectations and latest available season tables for recent matches
+ * @summary Get historical odds and standings context for match TMP
+ */
+export const getFootballMatchTmp = async (fixtureId: number, options?: Parameters<typeof customFetch>[1]): Promise<FootballMatchTmpContext> => {
+
+  return customFetch<FootballMatchTmpContext>(getGetFootballMatchTmpUrl(fixtureId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballMatchTmpQueryKey = (fixtureId: number,) => {
+    return [
+    `/api/football/matches/${fixtureId}/tmp`
+    ] as const;
+    }
+
+
+export const getGetFootballMatchTmpQueryOptions = <TData = Awaited<ReturnType<typeof getFootballMatchTmp>>, TError = ErrorType<FootballFixtureError>>(fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchTmp>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballMatchTmpQueryKey(fixtureId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballMatchTmp>>> = ({ signal }) => getFootballMatchTmp(fixtureId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: fixtureId !== null && fixtureId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchTmp>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballMatchTmpQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballMatchTmp>>>
+export type GetFootballMatchTmpQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary Get historical odds and standings context for match TMP
+ */
+
+export function useGetFootballMatchTmp<TData = Awaited<ReturnType<typeof getFootballMatchTmp>>, TError = ErrorType<FootballFixtureError>>(
+ fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchTmp>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballMatchTmpQueryOptions(fixtureId,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

@@ -88,7 +88,7 @@ function safeImageUrl(value: unknown): string | null {
   }
 }
 
-async function fetchKickoffScoreJson(
+export async function fetchKickoffScoreJson(
   path: string,
   query: Record<string, string>,
 ): Promise<unknown> {
@@ -259,6 +259,8 @@ function parseRecentMatch(value: unknown): FootballRecentMatch | null {
       asString(league?.country) ??
       "Football",
     status: asString(status?.long) ?? asString(status?.short) ?? "Unknown",
+    leagueId: asInteger(league?.id),
+    season: asInteger(league?.season),
     homeTeam: {
       id: homeId,
       name: homeName,
@@ -274,7 +276,7 @@ function parseRecentMatch(value: unknown): FootballRecentMatch | null {
   };
 }
 
-function parseStandings(payload: unknown): FootballStandingsRow[] {
+export function parseStandings(payload: unknown): FootballStandingsRow[] {
   const data = asObject(payload);
   const rows = Array.isArray(payload)
     ? payload.flatMap((group) => asArray(group))
@@ -327,7 +329,7 @@ function parseStandings(payload: unknown): FootballStandingsRow[] {
   });
 }
 
-function oddsCategory(name: string): FootballOddsMarketCategory {
+export function oddsCategory(name: string): FootballOddsMarketCategory {
   const normalized = name.toLowerCase();
   if (/\b(first|1st|second|2nd)\s*half\b|half[- ]time/.test(normalized)) {
     return "first-half";
