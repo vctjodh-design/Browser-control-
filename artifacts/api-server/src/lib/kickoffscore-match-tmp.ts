@@ -13,6 +13,7 @@ import {
   oddsCategory,
   parseStandings,
 } from "./kickoffscore-match-details";
+import { UpstreamRateLimitError } from "./upstream-rate-limit";
 
 const ODDS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const STANDINGS_CACHE_TTL_MS = 60 * 60 * 1000;
@@ -559,7 +560,8 @@ async function loadTmpContext(
   const oddsHistory = await withConcurrency(matches, 6, async (match) => {
     try {
       return await getOddsForMatch(match);
-    } catch {
+    } catch (error) {
+      if (error instanceof UpstreamRateLimitError) throw error;
       return unavailableOdds(match.fixtureId);
     }
   });
@@ -583,7 +585,8 @@ async function loadTmpContext(
           rows: await getSeasonStandings(leagueSeason),
           failed: false,
         };
-      } catch {
+      } catch (error) {
+        if (error instanceof UpstreamRateLimitError) throw error;
         return { rows: [] as FootballSeasonStanding[], failed: true };
       }
     },

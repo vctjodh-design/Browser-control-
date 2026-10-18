@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Response } from "express";
 import {
   GetFootballMatchDetailsParams,
   GetFootballMatchDetailsResponse,
@@ -13,8 +13,20 @@ import {
 } from "../lib/kickoffscore-match-details";
 import { getKickoffScoreMatchTmp } from "../lib/kickoffscore-match-tmp";
 import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
+import { UpstreamRateLimitError } from "../lib/upstream-rate-limit";
 
 const router: IRouter = Router();
+
+function sendUpstreamRateLimit(
+  res: Response,
+  error: unknown,
+): boolean {
+  if (!(error instanceof UpstreamRateLimitError)) return false;
+  res.set("Retry-After", String(error.retryAfterSeconds)).status(429).json({
+    error: `The data source is rate limiting requests. Please wait ${error.retryAfterSeconds} seconds before trying again.`,
+  });
+  return true;
+}
 
 function parseDateQuery(value: unknown): string | null {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -45,6 +57,7 @@ router.get("/football/fixtures", async (req, res): Promise<void> => {
     const validated = GetFootballFixturesResponse.parse(page);
     res.json({ ...validated, date });
   } catch (error) {
+    if (sendUpstreamRateLimit(res, error)) return;
     req.log.error(
       { errorName: error instanceof Error ? error.name : "UnknownError" },
       "Could not load fixtures from KickoffScore",
@@ -70,6 +83,7 @@ router.get(
       );
       res.json(GetFootballMatchDetailsResponse.parse(details));
     } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
       if (error instanceof KickoffScoreMatchNotFoundError) {
         res.status(404).json({ error: error.message });
         return;
@@ -100,6 +114,7 @@ router.get(
       const context = await getKickoffScoreMatchTmp(params.data.fixtureId);
       res.json(GetFootballMatchTmpResponse.parse(context));
     } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
       if (error instanceof KickoffScoreMatchNotFoundError) {
         res.status(404).json({ error: error.message });
         return;

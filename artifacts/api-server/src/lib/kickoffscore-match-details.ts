@@ -9,6 +9,10 @@ import type {
   FootballRecentMatch,
   FootballStandingsRow,
 } from "@workspace/api-zod";
+import {
+  fetchRespectingRateLimits,
+  UpstreamRateLimitError,
+} from "./upstream-rate-limit";
 
 const KICKOFFSCORE_API_ORIGIN = "https://api.kickoffscore.com";
 const KICKOFFSCORE_SITE_ORIGIN = "https://kickoffscore.com";
@@ -99,15 +103,16 @@ export async function fetchKickoffScoreJson(
 
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await fetchRespectingRateLimits(url, {
       headers: {
         accept: "application/json",
-        "user-agent": "Mozilla/5.0 (compatible; BrowserControl/1.0)",
+        "user-agent": "BrowserControl/1.0",
       },
       redirect: "error",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof UpstreamRateLimitError) throw error;
     throw new KickoffScoreApiError("KickoffScore could not be reached.");
   }
 
@@ -464,7 +469,8 @@ async function loadSection<T>(
 ): Promise<T[]> {
   try {
     return await loader();
-  } catch {
+  } catch (error) {
+    if (error instanceof UpstreamRateLimitError) throw error;
     issues.push({
       section,
       message: `KickoffScore could not load ${sectionLabel(section)} right now.`,

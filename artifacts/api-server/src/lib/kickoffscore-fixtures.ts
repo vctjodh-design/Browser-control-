@@ -1,3 +1,5 @@
+import { fetchRespectingRateLimits } from "./upstream-rate-limit";
+
 const KICKOFFSCORE_ORIGIN = "https://kickoffscore.com";
 const CACHE_TTL_MS = 60_000;
 const MAX_CACHED_DATES = 16;
@@ -367,10 +369,10 @@ export async function getKickoffScoreFixtures(
   // The host is fixed and the date is validated before this function is called.
   // No user-supplied URL is ever fetched here.
   const sourceUrl = `${KICKOFFSCORE_ORIGIN}/matches/${date}`;
-  const response = await fetch(sourceUrl, {
+  const response = await fetchRespectingRateLimits(sourceUrl, {
     headers: {
       accept: "text/html",
-      "user-agent": "Mozilla/5.0 (compatible; FixturesCalendar/1.0)",
+      "user-agent": "FixturesCalendar/1.0",
     },
     redirect: "error",
     signal: AbortSignal.timeout(15_000),

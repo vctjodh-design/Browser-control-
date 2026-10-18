@@ -55,6 +55,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballFixtureError"
+        "429":
+          description: KickoffScore is temporarily rate limiting requests
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait before trying again
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
         "502":
           description: KickoffScore could not be reached or its page could not be read
           content:
@@ -94,6 +105,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballFixtureError"
+        "429":
+          description: KickoffScore is temporarily rate limiting requests
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait before trying again
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
         "502":
           description: KickoffScore could not be reached or its data could not be read
           content:
@@ -129,6 +151,17 @@ paths:
                 $ref: "#/components/schemas/FootballFixtureError"
         "404":
           description: Match was not found on KickoffScore
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "429":
+          description: KickoffScore is temporarily rate limiting requests
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait before trying again
           content:
             application/json:
               schema:
