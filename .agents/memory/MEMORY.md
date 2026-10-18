@@ -1,3 +1,3 @@
 - [Browser egress safety](browser-egress-safety.md) — keep Chromium traffic behind the validating, DNS-pinning proxy; don't bypass private-network checks.
 - [Synced browser tabs](synced-browser-tabs.md) — keep mirrored browsing capped at the user's chosen 25-tab limit.
-- [TMP scoring rules](tmp-scoring-rules.md) — separate scoring/conceding TMP by average goals; keep the odds roll and historical source confidence distinct.
+- [TMP scoring rules](tmp-scoring-rules.md) — show overall results TMP alongside separate scoring/conceding averages; keep odds TMP distinct.
