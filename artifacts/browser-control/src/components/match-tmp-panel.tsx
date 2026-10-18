@@ -11,21 +11,21 @@ function resultFor(game: FootballRecentMatch, teamId: number) {
   return { scored, conceded, outcome: scored > conceded ? 'W' : scored < conceded ? 'L' : 'D', points: scored > conceded ? 3 : scored < conceded ? 0 : 1, goalDifference: scored - conceded };
 }
 
-function proxyScore(games: FootballRecentMatch[], teamId: number) {
+function goalTmp(games: FootballRecentMatch[], teamId: number) {
   const rows = games.map((game) => resultFor(game, teamId)).filter((row): row is NonNullable<typeof row> => row !== null);
   if (!rows.length) return null;
-  const wins = rows.filter((row) => row.outcome === 'W').length;
-  const draws = rows.filter((row) => row.outcome === 'D').length;
-  const losses = rows.filter((row) => row.outcome === 'L').length;
   const goalsFor = rows.reduce((sum, row) => sum + row.scored, 0);
   const goalsAgainst = rows.reduce((sum, row) => sum + row.conceded, 0);
-  const average = goalsFor / rows.length;
+  const goalsScoredAverage = goalsFor / rows.length;
+  const goalsConcededAverage = goalsAgainst / rows.length;
   const over = rows.filter((row) => row.scored + row.conceded > 2.5).length;
   const cleanSheets = rows.filter((row) => row.conceded === 0).length;
   return {
-    score: 100 + 18 * wins + 8 * draws - 6 * losses + 4 * (goalsFor - goalsAgainst),
-    count: rows.length, wins, draws, losses, goalsFor, goalsAgainst, average,
-    goalsScoredAverage: average, goalsConcededAverage: goalsAgainst / rows.length,
+    count: rows.length,
+    goalsScoredAverage,
+    goalsConcededAverage,
+    scoringTmp: 100 + 4 * goalsScoredAverage,
+    concedingTmp: 100 - 4 * goalsConcededAverage,
     cleanSheets, over, under: rows.length - over,
   };
 }
@@ -35,49 +35,27 @@ function NumberCell({ label, value }: { label: string; value: string | number })
 }
 
 function SampleCard({ title, games, teamId }: { title: string; games: FootballRecentMatch[]; teamId: number }) {
-  const sample = proxyScore(games, teamId);
-  const performanceGroups = sample ? [
-    {
-      label: 'Overperform · above average',
-      matches: games.filter((game) => {
-        const row = resultFor(game, teamId);
-        return row !== null && row.scored > sample.goalsScoredAverage;
-      }),
-    },
-    {
-      label: 'Aligned · at average',
-      matches: games.filter((game) => {
-        const row = resultFor(game, teamId);
-        return row !== null && row.scored === sample.goalsScoredAverage;
-      }),
-    },
-    {
-      label: 'Underperform · below average',
-      matches: games.filter((game) => {
-        const row = resultFor(game, teamId);
-        return row !== null && row.scored < sample.goalsScoredAverage;
-      }),
-    },
-  ] : [];
+  const sample = goalTmp(games, teamId);
+  const sampleId = title.toLowerCase().replaceAll(' ', '-');
   return (
-    <article className="overflow-hidden rounded-xl border border-[#deddd4] bg-[#fbfaf6]" data-testid={`tmp-sample-${title.toLowerCase().replaceAll(' ', '-')}`}>
+    <article className="overflow-hidden rounded-xl border border-[#deddd4] bg-[#fbfaf6]" data-testid={`tmp-sample-${sampleId}`}>
       <div className="flex items-center justify-between border-b border-[#e8e6de] bg-[#f3f2eb] px-4 py-3">
         <h4 className="text-[10px] font-extrabold text-[#43575a]">{title}</h4>
         <span className="mono text-[8px] text-[#898d84]">{sample ? `${sample.count} matches` : 'No sample'}</span>
       </div>
       {sample ? <>
-        <div className="flex items-end justify-between gap-3 px-4 py-4">
-          <div><p className="mono text-[8px] uppercase tracking-[.13em] text-[#92958c]">Proxy TMP</p><p className="mono mt-1 text-[30px] leading-none font-medium tracking-[-.08em] text-[#2f4a42]">{sample.score}</p></div>
-          <span className="rounded-md bg-[#e9eee8] px-2 py-1.5 text-[8px] font-bold text-[#64806d]">W {sample.wins} · D {sample.draws} · L {sample.losses}</span>
-        </div>
         <div className="grid grid-cols-2 gap-2 px-4 pb-3">
-          <div className="rounded-lg border border-[#e4e5da] bg-[#f3f5ee] px-3 py-2.5">
-            <p className="text-[8px] font-bold uppercase tracking-[.1em] text-[#858982]">Avg goals scored</p>
-            <p className="mono mt-1 text-[19px] font-semibold leading-none text-[#435f50]">{sample.goalsScoredAverage.toFixed(2)} <span className="text-[8px] font-normal text-[#858982]">per match</span></p>
+          <div className="rounded-lg border border-[#e4e5da] bg-[#f3f5ee] px-3 py-3" data-testid={`tmp-scoring-${sampleId}`}>
+            <p className="text-[8px] font-bold uppercase tracking-[.1em] text-[#858982]">Scoring TMP</p>
+            <p className="mono mt-1 text-[25px] font-semibold leading-none tracking-[-.05em] text-[#435f50]">{sample.scoringTmp.toFixed(1)}</p>
+            <p className="mt-2 border-t border-[#e1e5dc] pt-2 text-[8px] text-[#858982]">Avg goals scored</p>
+            <p className="mono mt-0.5 text-[12px] font-semibold text-[#52615e]">{sample.goalsScoredAverage.toFixed(2)} <span className="text-[8px] font-normal text-[#858982]">per match</span></p>
           </div>
-          <div className="rounded-lg border border-[#e4e5da] bg-[#f3f5ee] px-3 py-2.5">
-            <p className="text-[8px] font-bold uppercase tracking-[.1em] text-[#858982]">Avg goals conceded</p>
-            <p className="mono mt-1 text-[19px] font-semibold leading-none text-[#435f50]">{sample.goalsConcededAverage.toFixed(2)} <span className="text-[8px] font-normal text-[#858982]">per match</span></p>
+          <div className="rounded-lg border border-[#e8e1d9] bg-[#f7f2ec] px-3 py-3" data-testid={`tmp-conceding-${sampleId}`}>
+            <p className="text-[8px] font-bold uppercase tracking-[.1em] text-[#858982]">Conceding TMP</p>
+            <p className="mono mt-1 text-[25px] font-semibold leading-none tracking-[-.05em] text-[#765b4c]">{sample.concedingTmp.toFixed(1)}</p>
+            <p className="mt-2 border-t border-[#ebe2d9] pt-2 text-[8px] text-[#858982]">Avg goals conceded</p>
+            <p className="mono mt-0.5 text-[12px] font-semibold text-[#52615e]">{sample.goalsConcededAverage.toFixed(2)} <span className="text-[8px] font-normal text-[#858982]">per match</span></p>
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2 px-4 pb-3">
@@ -85,25 +63,6 @@ function SampleCard({ title, games, teamId }: { title: string; games: FootballRe
           <NumberCell label="Over 2.5" value={`${sample.over}/${sample.count}`} />
           <NumberCell label="Under 2.5" value={`${sample.under}/${sample.count}`} />
         </div>
-        <div className="mx-4 mb-3 rounded-lg border border-[#e8e6de] bg-[#f7f6f0] px-3 py-2.5">
-          <p className="mb-1 flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-[.1em] text-[#858982]"><Sigma size={11} /> TMP by goals-scored performance</p>
-          <p className="mb-1.5 text-[8px] text-[#92958c]">Scoring average baseline: <span className="mono font-semibold text-[#66766a]">{sample.goalsScoredAverage.toFixed(2)} goals / match</span></p>
-          {performanceGroups.map(({ label, matches }) => {
-            const group = proxyScore(matches, teamId);
-            return (
-              <div key={label} className="border-t border-[#e9e7df] py-2 first:border-0">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[8px] font-semibold text-[#68766d]">{label}</span>
-                  <span className="mono shrink-0 text-[8px] text-[#81877f]">{matches.length} matches · TMP <span className="font-semibold text-[#52615e]">{group?.score ?? '—'}</span></span>
-                </div>
-                <p className="mono mt-1 text-[8px] text-[#858982]">
-                  Avg scored {group ? group.goalsScoredAverage.toFixed(2) : '—'} · Avg conceded {group ? group.goalsConcededAverage.toFixed(2) : '—'}
-                </p>
-              </div>
-            );
-          })}
-        </div>
-        <p className="px-4 pb-3 text-[8px] leading-4 text-[#96978f]">Each split shows its own TMP and goals scored/conceded averages; the split is based on goals scored versus the full sample average.</p>
       </> : <p className="px-4 py-8 text-center text-[9px] text-[#858982]">Completed scores are not available for this sample.</p>}
     </article>
   );
@@ -233,19 +192,19 @@ export function MatchTmpPanel({ details, context, isLoading, isError, error, onR
       </div>
       <div className="grid gap-3 rounded-xl border border-[#deddd4] bg-[#f3f2eb] p-4 sm:grid-cols-[auto_1fr] sm:items-center">
         <span className="grid size-9 place-items-center rounded-lg bg-[#e6eee8] text-[#537867]"><Sigma size={17} /></span>
-        <div><p className="text-[9px] font-extrabold text-[#43575a]">Proxy TMP = 100 + 18W + 8D − 6L + 4(GF − GA)</p><p className="mt-1 text-[8px] leading-4 text-[#858982]">Computed independently from each side’s perspective. Samples include completed results with scores; recent form is capped at 15 and H2H at the latest 8.</p></div>
+        <div><p className="text-[9px] font-extrabold text-[#43575a]">Scoring TMP = 100 + 4 × avg goals scored · Conceding TMP = 100 − 4 × avg goals conceded</p><p className="mt-1 text-[8px] leading-4 text-[#858982]">These are separate team scores, calculated from each sample’s per-match averages. Recent form uses up to 15 results; head-to-head uses the latest 8 meetings.</p></div>
       </div>
-      {isError && !context && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#e3c3b6] bg-[#fff6f0] px-4 py-3 text-[9px] text-[#8c6b5e]" role="alert" data-testid="status-tmp-error"><span>{error && typeof error === 'object' && 'message' in error ? String(error.message) : 'Historical odds and standings context could not be loaded.'} Proxy TMP calculations remain available from match results.</span><button type="button" onClick={onRetry} className="inline-flex h-8 items-center gap-2 rounded-lg border border-[#e5c5b8] bg-[#fffaf6] px-3 text-[8px] font-extrabold text-[#855542] hover:bg-white" data-testid="button-retry-tmp"><RefreshCw size={11} /> Retry context</button></div>}
+      {isError && !context && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#e3c3b6] bg-[#fff6f0] px-4 py-3 text-[9px] text-[#8c6b5e]" role="alert" data-testid="status-tmp-error"><span>{error && typeof error === 'object' && 'message' in error ? String(error.message) : 'Historical odds and standings context could not be loaded.'} Goal TMP calculations remain available from match results.</span><button type="button" onClick={onRetry} className="inline-flex h-8 items-center gap-2 rounded-lg border border-[#e5c5b8] bg-[#fffaf6] px-3 text-[8px] font-extrabold text-[#855542] hover:bg-white" data-testid="button-retry-tmp"><RefreshCw size={11} /> Retry context</button></div>}
       {issues.map((issue, index) => <div key={`${issue.section}-${index}`} className="flex items-start gap-2 rounded-lg border border-[#ead9c4] bg-[#fbf3e9] px-3.5 py-3 text-[9px] leading-5 text-[#84684f]" role="status" data-testid={`tmp-issue-${issue.section}`}><AlertCircle size={13} className="mt-0.5 shrink-0 text-[#bb8755]" />{issue.message}</div>)}
-      {context && !hasAnyData && <div className="rounded-lg border border-dashed border-[#d9d9cf] bg-[#f7f6f0] px-4 py-3 text-[9px] text-[#858982]" data-testid="status-tmp-partial">The context request returned no odds or season standings. Proxy TMP remains available from match results; historical context is currently empty.</div>}
+      {context && !hasAnyData && <div className="rounded-lg border border-dashed border-[#d9d9cf] bg-[#f7f6f0] px-4 py-3 text-[9px] text-[#858982]" data-testid="status-tmp-partial">The context request returned no odds or season standings. Goal TMP remains available from match results; historical context is currently empty.</div>}
       {context && hasAnyData && (!context.oddsHistory.length || !context.seasonStandings.length) && <div className="rounded-lg border border-[#ead9c4] bg-[#fbf3e9] px-4 py-3 text-[9px] leading-5 text-[#84684f]" role="status" data-testid="status-tmp-partial">{context.oddsHistory.length ? 'Historical odds are available; latest-season standings were not returned.' : 'Latest-season standings are available; historical odds were not returned.'} Available TMP evidence is shown below.</div>}
       <div className="space-y-3">
-        <div className="flex items-center gap-2"><BarChart3 size={14} className="text-[#9b7160]" /><h3 className="text-[12px] font-extrabold text-[#43575a]">Proxy TMP · recent form</h3></div>
+        <div className="flex items-center gap-2"><BarChart3 size={14} className="text-[#9b7160]" /><h3 className="text-[12px] font-extrabold text-[#43575a]">Goal TMP · recent form</h3></div>
         <div className="grid gap-4 lg:grid-cols-2"><SampleCard title={`${details.match.home.name} · last 15`} games={details.homeRecent.slice(0, 15)} teamId={details.match.home.id} /><SampleCard title={`${details.match.away.name} · last 15`} games={details.awayRecent.slice(0, 15)} teamId={details.match.away.id} /></div>
       </div>
       <div className="space-y-3">
-        <div className="flex items-center gap-2"><BarChart3 size={14} className="text-[#9b7160]" /><h3 className="text-[12px] font-extrabold text-[#43575a]">Proxy TMP · latest eight meetings</h3></div>
-        <p className="text-[8px] leading-4 text-[#858982]">Each side is calculated from its own perspective: average goals scored and conceded, plus TMP for matches above, at, or below that side’s average goals scored.</p>
+        <div className="flex items-center gap-2"><BarChart3 size={14} className="text-[#9b7160]" /><h3 className="text-[12px] font-extrabold text-[#43575a]">Goal TMP · latest eight head-to-head meetings</h3></div>
+        <p className="text-[8px] leading-4 text-[#858982]">Each team’s scoring and conceding TMP is calculated from its own perspective across these meetings.</p>
         <div className="grid gap-4 lg:grid-cols-2"><SampleCard title={`${details.match.home.name} perspective`} games={homeH2h} teamId={details.match.home.id} /><SampleCard title={`${details.match.away.name} perspective`} games={awayH2h} teamId={details.match.away.id} /></div>
       </div>
       <div className="space-y-3">
