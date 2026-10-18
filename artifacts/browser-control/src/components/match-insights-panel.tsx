@@ -338,7 +338,7 @@ export function MatchInsightsPanel({ details, context, isLoading, isError, error
             </div>
           </article>)}
         </div>
-        <p className="rounded-lg border border-[#e6e4dc] bg-[#f7f6f0] px-3.5 py-2.5 text-[8px] leading-4 text-[#858982]" data-testid="insight-odds-tmp-method">Historical odds TMP: normalize historical 1X2 probabilities; expected points = 3 × win probability + draw probability. Game TMP = 50 + 10 × (actual points − expected points) + 8 × goal difference; roll starts at 50 and updates 60% prior / 40% game score in date order.</p>
+        <p className="rounded-lg border border-[#e6e4dc] bg-[#f7f6f0] px-3.5 py-2.5 text-[8px] leading-4 text-[#858982]" data-testid="insight-odds-tmp-method">Historical odds TMP: normalize historical 1X2 probabilities; expected points = 3 × win probability + draw probability. Game TMP = 50 + 10 × (actual points − expected points) + 8 × goal difference; the first game sets the roll, then it updates 60% prior / 40% game score in date order.</p>
         <div className="grid gap-3 lg:grid-cols-2">
           <article className="rounded-xl border border-[#deddd4] bg-[#fbfaf6] p-4" data-testid="insight-h2h-context">
             <div className="flex items-center justify-between gap-2"><h4 className="text-[10px] font-extrabold text-[#43575a]">H2H · home team perspective</h4><CoverageBadge testId="insight-h2h-coverage">{h2h.rows.length} / 8 completed</CoverageBadge></div>

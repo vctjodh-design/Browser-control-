@@ -37,6 +37,52 @@ function calculateTeamTmp(games: FootballRecentMatch[], teamId: number) {
   };
 }
 
+type TeamTmpSample = NonNullable<ReturnType<typeof calculateTeamTmp>>;
+
+function ComparisonEdge({
+  testId,
+  homeName,
+  awayName,
+  homeSample,
+  awaySample,
+}: {
+  testId: string;
+  homeName: string;
+  awayName: string;
+  homeSample: TeamTmpSample | null;
+  awaySample: TeamTmpSample | null;
+}) {
+  const edge =
+    homeSample && awaySample
+      ? homeSample.overallTmp - awaySample.overallTmp
+      : null;
+  const leader =
+    edge === null
+      ? 'Unavailable'
+      : edge === 0
+        ? 'Even · 0'
+        : `${edge > 0 ? homeName : awayName} +${Math.abs(edge)}`;
+
+  return (
+    <div
+      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#deddd4] bg-[#f7f6f0] px-4 py-3"
+      data-testid={testId}
+    >
+      <div>
+        <p className="mono text-[8px] uppercase tracking-[.12em] text-[#92958c]">
+          {homeSample && awaySample
+            ? `${homeName} ${homeSample.overallTmp} · ${awayName} ${awaySample.overallTmp}`
+            : 'Both team scores are needed'}
+        </p>
+        <p className="mt-1 text-[9px] font-bold text-[#52615e]">
+          Comparison edge
+        </p>
+      </div>
+      <span className="mono text-[16px] font-bold text-[#456b58]">{leader}</span>
+    </div>
+  );
+}
+
 function NumberCell({ label, value }: { label: string; value: string | number }) {
   return <div className="min-w-0"><p className="text-[8px] font-bold uppercase tracking-[.12em] text-[#92958c]">{label}</p><p className="mono mt-1 text-[12px] font-semibold text-[#47595b]">{value}</p></div>;
 }
@@ -87,9 +133,9 @@ function OddsScore({ details, context, side }: { details: FootballMatchDetails; 
       !!item.odds && item.odds.homeProbability !== null && item.odds.drawProbability !== null && item.odds.awayProbability !== null &&
       item.game.homeScore !== null && item.game.awayScore !== null)
     .sort((a, b) => new Date(a.game.date).getTime() - new Date(b.game.date).getTime());
-  let rolling = 50;
+  let rolling = 0;
   let expectationGap = 0;
-  const steps = usable.map(({ game, odds }) => {
+  const steps = usable.map(({ game, odds }, index) => {
     const isHome = game.homeTeam.id === team.id;
     const pHome = odds.homeProbability!;
     const pDraw = odds.drawProbability!;
@@ -97,7 +143,7 @@ function OddsScore({ details, context, side }: { details: FootballMatchDetails; 
     const expected = isHome ? 3 * pHome + pDraw : 3 * pAway + pDraw;
     const actual = resultFor(game, team.id)!;
     const gameScore = 50 + 10 * (actual.points - expected) + 8 * actual.goalDifference;
-    rolling = 0.6 * rolling + 0.4 * gameScore;
+    rolling = index === 0 ? gameScore : 0.6 * rolling + 0.4 * gameScore;
     expectationGap += actual.points - expected;
     const teamProbability = isHome ? pHome : pAway;
     const opponentProbability = isHome ? pAway : pHome;
@@ -190,8 +236,14 @@ export function MatchTmpPanel({ details, context, isLoading, isError, error, onR
   error: unknown;
   onRetry: () => void;
 }) {
+  const homeName = details.match.home.name;
+  const awayName = details.match.away.name;
+  const homeRecentSample = calculateTeamTmp(details.homeRecent.slice(0, 15), details.match.home.id);
+  const awayRecentSample = calculateTeamTmp(details.awayRecent.slice(0, 15), details.match.away.id);
   const homeH2h = details.headToHead.slice(0, 8);
   const awayH2h = details.headToHead.slice(0, 8);
+  const homeH2hSample = calculateTeamTmp(homeH2h, details.match.home.id);
+  const awayH2hSample = calculateTeamTmp(awayH2h, details.match.away.id);
   if (isLoading) return <section className="space-y-4" aria-label="Loading TMP context" data-testid="status-tmp-loading"><div className="h-5 w-48 animate-pulse rounded bg-[#e6e4dc]" /><div className="grid gap-4 lg:grid-cols-2"><div className="h-52 animate-pulse rounded-xl bg-[#eeede6]" /><div className="h-52 animate-pulse rounded-xl bg-[#eeede6]" /></div><div className="h-40 animate-pulse rounded-xl bg-[#eeede6]" /></section>;
   const issues = context?.issues ?? [];
   const hasAnyData = !!context && (context.oddsHistory.length > 0 || context.seasonStandings.length > 0);
@@ -206,7 +258,7 @@ export function MatchTmpPanel({ details, context, isLoading, isError, error, onR
         <div className="space-y-0.5">
           <p className="text-[9px] font-extrabold text-[#43575a]">Overall TMP = 100 + 18W + 8D − 6L + 4(GF − GA)</p>
           <p className="text-[8px] font-semibold text-[#53685b]">Scoring TMP = 100 + 4 × average goals scored · Conceding TMP = 100 − 4 × average goals conceded</p>
-          <p className="text-[8px] leading-4 text-[#858982]">The overall score and the two goal averages are separate values. Recent form uses up to 15 results; head-to-head uses the latest 8 meetings.</p>
+          <p className="text-[8px] leading-4 text-[#858982]">Recent form uses up to 15 completed results; H2H uses the latest 8 completed meetings. Each comparison edge is the difference between the two teams’ results TMP scores.</p>
         </div>
       </div>
       {isError && !context && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#e3c3b6] bg-[#fff6f0] px-4 py-3 text-[9px] text-[#8c6b5e]" role="alert" data-testid="status-tmp-error"><span>{error && typeof error === 'object' && 'message' in error ? String(error.message) : 'Historical odds and standings context could not be loaded.'} Overall, scoring, and conceding TMP values remain available from match results.</span><button type="button" onClick={onRetry} className="inline-flex h-8 items-center gap-2 rounded-lg border border-[#e5c5b8] bg-[#fffaf6] px-3 text-[8px] font-extrabold text-[#855542] hover:bg-white" data-testid="button-retry-tmp"><RefreshCw size={11} /> Retry context</button></div>}
@@ -215,16 +267,18 @@ export function MatchTmpPanel({ details, context, isLoading, isError, error, onR
       {context && hasAnyData && (!context.oddsHistory.length || !context.seasonStandings.length) && <div className="rounded-lg border border-[#ead9c4] bg-[#fbf3e9] px-4 py-3 text-[9px] leading-5 text-[#84684f]" role="status" data-testid="status-tmp-partial">{context.oddsHistory.length ? 'Historical odds are available; latest-season standings were not returned.' : 'Latest-season standings are available; historical odds were not returned.'} Available TMP evidence is shown below.</div>}
       <div className="space-y-3">
         <div className="flex items-center gap-2"><BarChart3 size={14} className="text-[#9b7160]" /><h3 className="text-[12px] font-extrabold text-[#43575a]">Team TMP · recent form</h3></div>
+        <ComparisonEdge testId="tmp-edge-last-15" homeName={homeName} awayName={awayName} homeSample={homeRecentSample} awaySample={awayRecentSample} />
         <div className="grid gap-4 lg:grid-cols-2"><SampleCard title={`${details.match.home.name} · last 15`} games={details.homeRecent.slice(0, 15)} teamId={details.match.home.id} /><SampleCard title={`${details.match.away.name} · last 15`} games={details.awayRecent.slice(0, 15)} teamId={details.match.away.id} /></div>
       </div>
       <div className="space-y-3">
         <div className="flex items-center gap-2"><BarChart3 size={14} className="text-[#9b7160]" /><h3 className="text-[12px] font-extrabold text-[#43575a]">Team TMP · latest eight head-to-head meetings</h3></div>
-        <p className="text-[8px] leading-4 text-[#858982]">Each team’s overall, scoring, and conceding TMP is calculated from its own perspective across these meetings.</p>
+        <p className="text-[8px] leading-4 text-[#858982]">Each team’s TMP uses its own perspective across the same latest eight completed meetings.</p>
+        <ComparisonEdge testId="tmp-edge-h2h" homeName={homeName} awayName={awayName} homeSample={homeH2hSample} awaySample={awayH2hSample} />
         <div className="grid gap-4 lg:grid-cols-2"><SampleCard title={`${details.match.home.name} perspective`} games={homeH2h} teamId={details.match.home.id} /><SampleCard title={`${details.match.away.name} perspective`} games={awayH2h} teamId={details.match.away.id} /></div>
       </div>
       <div className="space-y-3">
         <div className="flex items-center gap-2"><ArrowUpRight size={14} className="text-[#9b7160]" /><h3 className="text-[12px] font-extrabold text-[#43575a]">Odds TMP · market expectation</h3></div>
-        <p className="text-[8px] leading-4 text-[#858982]">Expected points: home 3pH + pD, away 3pA + pD. Per match: 50 + 10(actual − expected) + 8 goal difference; neutral roll starts at 50 and updates 60% previous / 40% game score in date order.</p>
+        <p className="text-[8px] leading-4 text-[#858982]">Expected points: home 3pH + pD, away 3pA + pD. Per match: 50 + 10(actual − expected) + 8 goal difference; the first game sets the roll, then each new game blends 60% previous / 40% game score in date order.</p>
         <div className="grid gap-4 lg:grid-cols-2"><OddsScore details={details} context={context ?? { fixtureId: details.match.fixtureId, oddsHistory: [], seasonStandings: [], issues: [] }} side="home" /><OddsScore details={details} context={context ?? { fixtureId: details.match.fixtureId, oddsHistory: [], seasonStandings: [], issues: [] }} side="away" /></div>
       </div>
       {context ? <MarketContext details={details} context={context} /> : <div className="flex items-center gap-2 rounded-lg border border-[#e5e3da] bg-[#f7f6f0] px-4 py-3 text-[8px] text-[#858982]" data-testid="status-tmp-partial"><ArrowDownRight size={12} /> Historical market and latest-season opponent context are not available yet.</div>}
