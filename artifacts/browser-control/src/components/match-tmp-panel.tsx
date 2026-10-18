@@ -27,10 +27,6 @@ function proxyScore(games: FootballRecentMatch[], teamId: number) {
     count: rows.length, wins, draws, losses, goalsFor, goalsAgainst, average,
     goalsScoredAverage: average, goalsConcededAverage: goalsAgainst / rows.length,
     cleanSheets, over, under: rows.length - over,
-    above: rows.filter((row) => row.scored > average),
-    below: rows.filter((row) => row.scored < average),
-    level: rows.filter((row) => row.scored === average),
-    rows,
   };
 }
 
@@ -38,12 +34,31 @@ function NumberCell({ label, value }: { label: string; value: string | number })
   return <div className="min-w-0"><p className="text-[8px] font-bold uppercase tracking-[.12em] text-[#92958c]">{label}</p><p className="mono mt-1 text-[12px] font-semibold text-[#47595b]">{value}</p></div>;
 }
 
-function MetricLine({ label, value }: { label: string; value: string | number }) {
-  return <div className="flex items-center justify-between gap-3 border-t border-[#e9e7df] py-2 first:border-0"><span className="text-[9px] text-[#81877f]">{label}</span><span className="mono text-[10px] font-medium text-[#52615e]">{value}</span></div>;
-}
-
 function SampleCard({ title, games, teamId }: { title: string; games: FootballRecentMatch[]; teamId: number }) {
   const sample = proxyScore(games, teamId);
+  const performanceGroups = sample ? [
+    {
+      label: 'Overperform · above average',
+      matches: games.filter((game) => {
+        const row = resultFor(game, teamId);
+        return row !== null && row.scored > sample.goalsScoredAverage;
+      }),
+    },
+    {
+      label: 'Aligned · at average',
+      matches: games.filter((game) => {
+        const row = resultFor(game, teamId);
+        return row !== null && row.scored === sample.goalsScoredAverage;
+      }),
+    },
+    {
+      label: 'Underperform · below average',
+      matches: games.filter((game) => {
+        const row = resultFor(game, teamId);
+        return row !== null && row.scored < sample.goalsScoredAverage;
+      }),
+    },
+  ] : [];
   return (
     <article className="overflow-hidden rounded-xl border border-[#deddd4] bg-[#fbfaf6]" data-testid={`tmp-sample-${title.toLowerCase().replaceAll(' ', '-')}`}>
       <div className="flex items-center justify-between border-b border-[#e8e6de] bg-[#f3f2eb] px-4 py-3">
@@ -55,20 +70,40 @@ function SampleCard({ title, games, teamId }: { title: string; games: FootballRe
           <div><p className="mono text-[8px] uppercase tracking-[.13em] text-[#92958c]">Proxy TMP</p><p className="mono mt-1 text-[30px] leading-none font-medium tracking-[-.08em] text-[#2f4a42]">{sample.score}</p></div>
           <span className="rounded-md bg-[#e9eee8] px-2 py-1.5 text-[8px] font-bold text-[#64806d]">W {sample.wins} · D {sample.draws} · L {sample.losses}</span>
         </div>
-        <div className="grid grid-cols-2 gap-x-5 px-4 pb-3 sm:grid-cols-3">
-          <NumberCell label="GF / match" value={sample.goalsScoredAverage.toFixed(2)} />
-          <NumberCell label="GA / match" value={sample.goalsConcededAverage.toFixed(2)} />
+        <div className="grid grid-cols-2 gap-2 px-4 pb-3">
+          <div className="rounded-lg border border-[#e4e5da] bg-[#f3f5ee] px-3 py-2.5">
+            <p className="text-[8px] font-bold uppercase tracking-[.1em] text-[#858982]">Avg goals scored</p>
+            <p className="mono mt-1 text-[19px] font-semibold leading-none text-[#435f50]">{sample.goalsScoredAverage.toFixed(2)} <span className="text-[8px] font-normal text-[#858982]">per match</span></p>
+          </div>
+          <div className="rounded-lg border border-[#e4e5da] bg-[#f3f5ee] px-3 py-2.5">
+            <p className="text-[8px] font-bold uppercase tracking-[.1em] text-[#858982]">Avg goals conceded</p>
+            <p className="mono mt-1 text-[19px] font-semibold leading-none text-[#435f50]">{sample.goalsConcededAverage.toFixed(2)} <span className="text-[8px] font-normal text-[#858982]">per match</span></p>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2 px-4 pb-3">
           <NumberCell label="Clean sheets" value={`${sample.cleanSheets}/${sample.count}`} />
           <NumberCell label="Over 2.5" value={`${sample.over}/${sample.count}`} />
           <NumberCell label="Under 2.5" value={`${sample.under}/${sample.count}`} />
         </div>
         <div className="mx-4 mb-3 rounded-lg border border-[#e8e6de] bg-[#f7f6f0] px-3 py-2.5">
-          <p className="mb-1.5 flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-[.1em] text-[#858982]"><Sigma size={11} /> Split by own goals average <span className="mono ml-auto normal-case tracking-normal">{sample.average.toFixed(2)} GF</span></p>
-          <MetricLine label={`Above average · ${sample.above.length} matches`} value={proxyScore(games.filter((game) => { const row = resultFor(game, teamId); return row && row.scored > sample.average; }), teamId)?.score ?? '—'} />
-          <MetricLine label={`Below average · ${sample.below.length} matches`} value={proxyScore(games.filter((game) => { const row = resultFor(game, teamId); return row && row.scored < sample.average; }), teamId)?.score ?? '—'} />
-          <MetricLine label={`Exactly average · ${sample.level.length} matches`} value={proxyScore(games.filter((game) => { const row = resultFor(game, teamId); return row && row.scored === sample.average; }), teamId)?.score ?? '—'} />
+          <p className="mb-1 flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-[.1em] text-[#858982]"><Sigma size={11} /> TMP by goals-scored performance</p>
+          <p className="mb-1.5 text-[8px] text-[#92958c]">Scoring average baseline: <span className="mono font-semibold text-[#66766a]">{sample.goalsScoredAverage.toFixed(2)} goals / match</span></p>
+          {performanceGroups.map(({ label, matches }) => {
+            const group = proxyScore(matches, teamId);
+            return (
+              <div key={label} className="border-t border-[#e9e7df] py-2 first:border-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[8px] font-semibold text-[#68766d]">{label}</span>
+                  <span className="mono shrink-0 text-[8px] text-[#81877f]">{matches.length} matches · TMP <span className="font-semibold text-[#52615e]">{group?.score ?? '—'}</span></span>
+                </div>
+                <p className="mono mt-1 text-[8px] text-[#858982]">
+                  Avg scored {group ? group.goalsScoredAverage.toFixed(2) : '—'} · Avg conceded {group ? group.goalsConcededAverage.toFixed(2) : '—'}
+                </p>
+              </div>
+            );
+          })}
         </div>
-        <p className="px-4 pb-3 text-[8px] leading-4 text-[#96978f]">Subsets show the same formula on that subset only; an exact-average split is kept separate.</p>
+        <p className="px-4 pb-3 text-[8px] leading-4 text-[#96978f]">Each split shows its own TMP and goals scored/conceded averages; the split is based on goals scored versus the full sample average.</p>
       </> : <p className="px-4 py-8 text-center text-[9px] text-[#858982]">Completed scores are not available for this sample.</p>}
     </article>
   );
@@ -210,7 +245,7 @@ export function MatchTmpPanel({ details, context, isLoading, isError, error, onR
       </div>
       <div className="space-y-3">
         <div className="flex items-center gap-2"><BarChart3 size={14} className="text-[#9b7160]" /><h3 className="text-[12px] font-extrabold text-[#43575a]">Proxy TMP · latest eight meetings</h3></div>
-        <p className="text-[8px] leading-4 text-[#858982]">Each team's metrics and split use its own goals scored, from that team's perspective.</p>
+        <p className="text-[8px] leading-4 text-[#858982]">Each side is calculated from its own perspective: average goals scored and conceded, plus TMP for matches above, at, or below that side’s average goals scored.</p>
         <div className="grid gap-4 lg:grid-cols-2"><SampleCard title={`${details.match.home.name} perspective`} games={homeH2h} teamId={details.match.home.id} /><SampleCard title={`${details.match.away.name} perspective`} games={awayH2h} teamId={details.match.away.id} /></div>
       </div>
       <div className="space-y-3">
