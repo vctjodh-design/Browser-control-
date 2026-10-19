@@ -251,7 +251,7 @@ export function MatchTmpPanel({ details, context, isLoading, isError, error, onR
     <section className="space-y-6" data-testid="panel-tmp">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div><p className="mono text-[9px] uppercase tracking-[.17em] text-[#9b7160]">Transparent match pressure</p><h2 className="mt-1 text-[20px] font-extrabold tracking-[-.05em] text-[#2b3e49]">TMP, with the arithmetic exposed</h2></div>
-        <p className="max-w-[410px] text-[9px] leading-5 text-[#858982]">Each team shows an overall results TMP plus separate scoring and conceding TMPs. Odds-based TMP remains a separate measure.</p>
+        <p className="max-w-[410px] text-[9px] leading-5 text-[#858982]">Results TMP uses only W/D/L and goals for/against. Odds TMP is a separate proxy; standings are context only.</p>
       </div>
       <div className="grid gap-3 rounded-xl border border-[#deddd4] bg-[#f3f2eb] p-4 sm:grid-cols-[auto_1fr] sm:items-center">
         <span className="grid size-9 place-items-center rounded-lg bg-[#e6eee8] text-[#537867]"><Sigma size={17} /></span>

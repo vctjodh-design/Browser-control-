@@ -141,8 +141,10 @@ function historicalOddsTmp(
       unverifiedBookmakers: quote.unverifiedBookmakerCount,
     }];
   }).sort((a, b) => a.date - b.date);
-  let rolling = 50;
-  steps.forEach((step) => { rolling = 0.6 * rolling + 0.4 * step.score; });
+  let rolling = 0;
+  steps.forEach((step, index) => {
+    rolling = index === 0 ? step.score : 0.6 * rolling + 0.4 * step.score;
+  });
   return {
     score: steps.length ? rolling : null,
     count: steps.length,
