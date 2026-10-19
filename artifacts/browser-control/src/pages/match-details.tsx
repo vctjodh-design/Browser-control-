@@ -9,6 +9,7 @@ import {
 import type { FootballMatchDetails, FootballMatchTmpContext, FootballRecentMatch } from '@workspace/api-client-react';
 import { MatchTmpPanel } from '@/components/match-tmp-panel';
 import { MatchInsightsPanel } from '@/components/match-insights-panel';
+import { MatchupAnalysisPanel } from '@/components/matchup-analysis-panel';
 import { PerformanceGraphsPanel } from '@/components/performance-graphs-panel';
 import { LastFivePanel } from '@/components/last-five-panel';
 import {
@@ -32,7 +33,7 @@ const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'lastfive', label: 'Last five', short: '04' },
   { id: 'h2h', label: 'Head to head', short: '05' },
   { id: 'tmp', label: 'TMP', short: '06' },
-  { id: 'insights', label: 'Insights', short: '07' },
+  { id: 'insights', label: 'Matchup analysis', short: '07' },
   { id: 'graphs', label: 'Graph Representations', short: '08' },
 ];
 
@@ -232,7 +233,7 @@ export default function MatchDetailsPage() {
     query: { enabled: validId && (activeTab === 'tmp' || activeTab === 'insights' || activeTab === 'graphs'), queryKey: ['/api/football/matches', fixtureId, 'tmp'] },
   });
   const lastFiveQuery = useGetFootballMatchLastFive(validId ? fixtureId : 0, {
-    query: { enabled: validId && activeTab === 'lastfive', queryKey: getGetFootballMatchLastFiveQueryKey(fixtureId) },
+    query: { enabled: validId && (activeTab === 'lastfive' || activeTab === 'insights'), queryKey: getGetFootballMatchLastFiveQueryKey(fixtureId) },
   });
   const details = detailsQuery.data as FootballMatchDetails | undefined;
   const match = details?.match;
@@ -297,7 +298,10 @@ export default function MatchDetailsPage() {
                 {activeTab === 'form' && <FormPanel details={details} />}
                 {activeTab === 'h2h' && <HeadToHeadPanel details={details} />}
                 {activeTab === 'tmp' && <MatchTmpPanel details={details} context={tmpQuery.data} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />}
-                {activeTab === 'insights' && <MatchInsightsPanel details={details} context={tmpQuery.data} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />}
+                {activeTab === 'insights' && <div className="space-y-7">
+                  <MatchupAnalysisPanel data={lastFiveQuery.data} isLoading={lastFiveQuery.isLoading} isError={lastFiveQuery.isError} error={lastFiveQuery.error} onRetry={() => { void lastFiveQuery.refetch(); }} />
+                  <MatchInsightsPanel details={details} lastFive={lastFiveQuery.data} context={tmpQuery.data} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />
+                </div>}
                 {activeTab === 'graphs' && <PerformanceGraphsPanel details={details} context={tmpQuery.data as FootballMatchTmpContext | undefined} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />}
                 {activeTab === 'lastfive' && <LastFivePanel data={lastFiveQuery.data} isLoading={lastFiveQuery.isLoading} isError={lastFiveQuery.isError} error={lastFiveQuery.error} onRetry={() => { void lastFiveQuery.refetch(); }} />}
               </div>
