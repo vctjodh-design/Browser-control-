@@ -127,6 +127,8 @@ export interface FootballHistoricalMarketSelection {
      */
   probability: number;
   bookmakerCount: number;
+  verifiedBookmakerCount: number;
+  unverifiedBookmakerCount: number;
 }
 
 export type FootballHistoricalMarketCategory = typeof FootballHistoricalMarketCategory[keyof typeof FootballHistoricalMarketCategory];

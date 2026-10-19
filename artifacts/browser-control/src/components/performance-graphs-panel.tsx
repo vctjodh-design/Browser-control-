@@ -1,4 +1,6 @@
 import type {
+  FootballHistoricalMarket,
+  FootballHistoricalMarketSelection,
   FootballMatchDetails,
   FootballMatchTmpContext,
 } from '@workspace/api-client-react';
@@ -15,6 +17,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { useState } from 'react';
 
 type Side = 'home' | 'away';
 
@@ -34,6 +37,26 @@ type MatchPoint = {
   gameTmp: number | null;
   oddsTmp: number | null;
   normalizedProbabilities: [number, number, number] | null;
+};
+
+type MarketKey = '1x2' | 'btts' | 'over25' | 'over35' | 'correctScore';
+type MarketDatum = {
+  fixtureId: number;
+  sequence: number;
+  dateLabel: string;
+  opponent: string;
+  scoreLabel: string;
+  outcome: 'W' | 'D' | 'L';
+  expected: number | null;
+  actual: number | null;
+  actualLabel: string;
+  forecastDetail: string;
+  pick?: string;
+  pickProbability?: number;
+  bookmakerCount: number;
+  verifiedBookmakerCount: number;
+  unverifiedBookmakerCount: number;
+  available: boolean;
 };
 
 type TeamSample = {
@@ -79,13 +102,182 @@ function normalizeProbabilities(
   return [home / sum, draw / sum, away / sum];
 }
 
+function cleanName(value: string) {
+  return value.toLowerCase().replace(/,/g, '.').replace(/[^a-z0-9.]+/g, ' ').trim();
+}
+
+function isFullTimeMarket(market: FootballHistoricalMarket) {
+  return !/first\s*half|second\s*half|1st\s*half|2nd\s*half/i.test(market.name);
+}
+
+function marketMatches(market: FootballHistoricalMarket, key: MarketKey) {
+  if (!isFullTimeMarket(market)) return false;
+  const name = cleanName(market.name);
+  if (key === '1x2') {
+    return market.category === '1x2' && /^(match winner|match result|full time result|1x2)\b/.test(name);
+  }
+  if (market.category !== 'goals') return false;
+  if (key === 'btts') return /^(both teams to score|both teams score|btts)$/.test(name);
+  if (key === 'correctScore') return /^(exact score|correct score)$/.test(name);
+  if (key === 'over25' || key === 'over35') {
+    const threshold = key === 'over25' ? /2[.,]5/ : /3[.,]5/;
+    return /^(goals over under|total goals)$/.test(name)
+      && (threshold.test(name) || market.selections.some((selection) => threshold.test(selection.selection)));
+  }
+  return false;
+}
+
+function findMarket(
+  history: FootballMatchTmpContext['oddsHistory'][number] | undefined,
+  key: MarketKey,
+) {
+  return history?.markets.find((market) => marketMatches(market, key));
+}
+
+function selectionByName(selections: FootballHistoricalMarketSelection[], pattern: RegExp) {
+  return selections.find((item) => pattern.test(cleanName(item.selection)));
+}
+
+function quality(selections: FootballHistoricalMarketSelection[]) {
+  const minimum = (getValue: (item: FootballHistoricalMarketSelection) => number) =>
+    selections.length ? Math.min(...selections.map(getValue)) : 0;
+  return {
+    bookmakerCount: minimum((item) => item.bookmakerCount),
+    verifiedBookmakerCount: minimum((item) => item.verifiedBookmakerCount),
+    unverifiedBookmakerCount: minimum((item) => item.unverifiedBookmakerCount),
+  };
+}
+
+function normalizedPair(
+  first: FootballHistoricalMarketSelection | undefined,
+  second: FootballHistoricalMarketSelection | undefined,
+) {
+  if (!first || !second || !Number.isFinite(first.probability) || !Number.isFinite(second.probability)) return null;
+  const sum = first.probability + second.probability;
+  return sum > 0 ? [first.probability / sum, second.probability / sum] as const : null;
+}
+
+function buildMarketDatum(
+  match: MatchPoint,
+  history: FootballMatchTmpContext['oddsHistory'][number] | undefined,
+  key: MarketKey,
+  isHomeSide: boolean,
+) : MarketDatum {
+  const base = {
+    fixtureId: match.fixtureId,
+    sequence: 0,
+    dateLabel: match.dateLabel,
+    opponent: match.opponent,
+    scoreLabel: isHomeSide
+      ? match.scoreLabel
+      : match.scoreLabel.split('–').reverse().join('–'),
+    outcome: match.outcome,
+    expected: null as number | null,
+    actual: null as number | null,
+    actualLabel: '',
+    forecastDetail: '',
+    bookmakerCount: 0,
+    verifiedBookmakerCount: 0,
+    unverifiedBookmakerCount: 0,
+    available: false,
+  };
+  const market = findMarket(history, key);
+  if (!market) return base;
+  const selections = market.selections;
+  let used: FootballHistoricalMarketSelection[] = [];
+  let expected: number | null = null;
+  let actual: number | null = null;
+  let actualLabel = '';
+  let forecastDetail = '';
+  let pick: string | undefined;
+  let pickProbability: number | undefined;
+
+  if (key === '1x2') {
+    const home = selectionByName(selections, /^(home|1|team 1|home win)$/);
+    const draw = selectionByName(selections, /^(draw|x)$/);
+    const away = selectionByName(selections, /^(away|2|team 2|away win)$/);
+    if (home && draw && away) {
+      const sum = home.probability + draw.probability + away.probability;
+      if (sum > 0) {
+        const probabilities = isHomeSide
+          ? [home.probability / sum, draw.probability / sum, away.probability / sum]
+          : [away.probability / sum, draw.probability / sum, home.probability / sum];
+        const resultIndex = match.outcome === 'W' ? 0 : match.outcome === 'D' ? 1 : 2;
+        expected = probabilities[resultIndex];
+        actual = 1;
+        actualLabel = `${match.outcome} occurred`;
+        forecastDetail = `Team win ${(probabilities[0] * 100).toFixed(1)}% · Draw ${(probabilities[1] * 100).toFixed(1)}% · Team loss ${(probabilities[2] * 100).toFixed(1)}%`;
+        used = [home, draw, away];
+      }
+    }
+  } else if (key === 'btts') {
+    const yes = selectionByName(selections, /^(yes|both teams to score yes)$/);
+    const no = selectionByName(selections, /^(no|both teams to score no)$/);
+    const pair = normalizedPair(yes, no);
+    if (pair) {
+      const bothScored = match.goalsFor > 0 && match.goalsAgainst > 0;
+      expected = bothScored ? pair[0] : pair[1];
+      actual = 1;
+      actualLabel = bothScored ? 'Yes occurred' : 'No occurred';
+      forecastDetail = `Yes ${(pair[0] * 100).toFixed(1)}% · No ${(pair[1] * 100).toFixed(1)}%`;
+      used = [yes!, no!];
+    }
+  } else if (key === 'over25' || key === 'over35') {
+    const threshold = key === 'over25' ? 2.5 : 3.5;
+    const thresholdPattern = key === 'over25' ? /2[.,]5/ : /3[.,]5/;
+    const hasThresholdInMarket = thresholdPattern.test(market.name);
+    const thresholdText = key === 'over25' ? '2[.,]5' : '3[.,]5';
+    const specificOver = selectionByName(selections, new RegExp(`^over.*${thresholdText}`));
+    const specificUnder = selectionByName(selections, new RegExp(`^under.*${thresholdText}`));
+    const over = specificOver ?? (hasThresholdInMarket ? selectionByName(selections, /^over(?:\s+|$)/) : undefined);
+    const under = specificUnder ?? (hasThresholdInMarket ? selectionByName(selections, /^under(?:\s+|$)/) : undefined);
+    const pair = normalizedPair(over, under);
+    if (pair) {
+      const total = Number(match.scoreLabel.split('–')[0]) + Number(match.scoreLabel.split('–')[1]);
+      const observedOver = total > threshold;
+      expected = observedOver ? pair[0] : pair[1];
+      actual = 1;
+      actualLabel = observedOver ? `Over ${threshold} occurred` : `Under ${threshold} occurred`;
+      forecastDetail = `Over ${(pair[0] * 100).toFixed(1)}% · Under ${(pair[1] * 100).toFixed(1)}%`;
+      used = [over!, under!];
+    }
+  } else {
+    const choices = selections.filter((selection) => /^\d+\s*[-:]\s*\d+$/.test(selection.selection.trim()));
+    if (choices.length) {
+      const top = choices.reduce((best, item) => item.probability > best.probability ? item : best);
+      const [teamGoals, opponentGoals] = match.scoreLabel.split('–').map(Number);
+      const actualScore = (isHomeSide ? `${teamGoals}-${opponentGoals}` : `${opponentGoals}-${teamGoals}`).replace(/\s/g, '');
+      const pickedScore = top.selection.replace(/:/g, '-').replace(/\s/g, '');
+      pick = top.selection;
+      pickProbability = top.probability;
+      expected = top.probability;
+      actual = pickedScore === actualScore ? 1 : 0;
+      actualLabel = actual ? 'Correct pick' : 'Incorrect pick';
+      forecastDetail = `${top.selection} was the most probable listed score`;
+      used = [top];
+    }
+  }
+  const q = quality(used);
+  return {
+    ...base,
+    expected,
+    actual,
+    actualLabel,
+    forecastDetail,
+    pick,
+    pickProbability,
+    ...q,
+    available: expected !== null && actual !== null,
+  };
+}
+
 function buildTeamSample(
   details: FootballMatchDetails,
   context: FootballMatchTmpContext | undefined,
   side: Side,
 ): TeamSample {
   const team = details.match[side];
-  const sourceGames = (side === 'home' ? details.homeRecent : details.awayRecent).slice(0, 15);
+  const sourceGames = side === 'home' ? details.homeRecent : details.awayRecent;
   const historyByFixture = new Map((context?.oddsHistory ?? []).map((record) => [record.fixtureId, record]));
 
   const chronological = [...sourceGames]
@@ -93,7 +285,8 @@ function buildTeamSample(
     .sort((a, b) => {
       const delta = new Date(a.date).getTime() - new Date(b.date).getTime();
       return Number.isNaN(delta) || delta === 0 ? 0 : delta;
-    });
+    })
+    .slice(-15);
 
   let rollingOddsTmp: number | null = null;
   const matches: MatchPoint[] = chronological.map((game) => {
@@ -161,7 +354,7 @@ function buildTeamSample(
       ? oddsMatches.reduce((sum, match) => sum + match.actualPoints - match.expectedPoints!, 0)
       : null,
     oddsCovered: oddsMatches.length,
-    total: sourceGames.length,
+    total: matches.length,
   };
 }
 
@@ -220,7 +413,167 @@ function OddsTooltip({ active, payload }: { active?: boolean; payload?: Array<{ 
   );
 }
 
-function TeamPerformanceCard({ sample }: { sample: TeamSample }) {
+const MARKET_OPTIONS: Array<{ key: MarketKey; label: string; short: string }> = [
+  { key: '1x2', label: '1X2 · Match result', short: '1X2' },
+  { key: 'btts', label: 'Both teams to score', short: 'BTTS' },
+  { key: 'over25', label: 'Goals · Over/Under 2.5', short: '2.5 goals' },
+  { key: 'over35', label: 'Goals · Over/Under 3.5', short: '3.5 goals' },
+  { key: 'correctScore', label: 'Correct score', short: 'Correct score' },
+];
+
+function MarketTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload?: MarketDatum }>;
+}) {
+  const point = payload?.[0]?.payload;
+  if (!active || !point) return null;
+  return (
+    <div className="max-w-[260px] rounded-lg border border-[#d9d8ce] bg-[#fffdf8] px-3 py-2.5 shadow-[0_8px_24px_rgba(48,58,55,.13)]">
+      <p className="text-[9px] font-extrabold text-[#43575a]">{point.dateLabel} · {point.opponent}</p>
+      <p className="mono mt-1 text-[9px] text-[#63766a]">Final score {point.scoreLabel} · actual {point.outcome}</p>
+      {point.available ? (
+        <>
+          {point.pick ? <p className="mono mt-2 text-[9px] text-[#64766b]">Market pick {point.pick} · {((point.pickProbability ?? 0) * 100).toFixed(1)}%</p> : (
+            <p className="mono mt-2 text-[9px] text-[#64766b]">Probability of observed outcome · {(point.expected! * 100).toFixed(1)}%</p>
+          )}
+          {!point.pick && <p className="mono mt-1 text-[8px] text-[#7d837b]">{point.forecastDetail}</p>}
+          <p className="mt-1 text-[9px] font-bold text-[#426a56]">{point.actualLabel}</p>
+          <p className="mt-1 text-[8px] leading-4 text-[#858982]">
+            {point.verifiedBookmakerCount} verified · {point.unverifiedBookmakerCount} unverified of {point.bookmakerCount} bookmakers. Quotes are not labelled confirmed pre-match.
+          </p>
+        </>
+      ) : <p className="mt-2 text-[9px] text-[#96978f]">Unavailable · no usable full-time market selection for this fixture.</p>}
+    </div>
+  );
+}
+
+function MarketComparison({ sample, context }: { sample: TeamSample; context?: FootballMatchTmpContext }) {
+  const [marketKey, setMarketKey] = useState<MarketKey>('1x2');
+  const selectedMarket = MARKET_OPTIONS.find((item) => item.key === marketKey)!;
+  const historyByFixture = new Map((context?.oddsHistory ?? []).map((record) => [record.fixtureId, record]));
+  const rows = sample.matches.map((match, index) => ({
+    ...buildMarketDatum(match, historyByFixture.get(match.fixtureId), marketKey, sample.side === 'home'),
+    sequence: index + 1,
+  }));
+  const covered = rows.filter((row) => row.available).length;
+  const expectedRows = rows.map((row) => ({
+    ...row,
+    expectedPercent: row.expected === null ? null : row.expected * 100,
+    actualPercent: row.actual === null ? null : row.actual * 100,
+  }));
+
+  return (
+    <section aria-labelledby={`market-comparison-title-${sample.side}`} className="border-t border-[#e8e6de] px-4 py-4 sm:px-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="mono text-[8px] uppercase tracking-[.13em] text-[#9b7160]">Expected against observed</p>
+          <h4 id={`market-comparison-title-${sample.side}`} className="mt-1 text-[11px] font-extrabold text-[#42575a]">Full-time market comparison</h4>
+        </div>
+        <label className="flex items-center gap-2 text-[8px] font-bold text-[#737d76]">
+          <span>Market</span>
+          <select
+            value={marketKey}
+            onChange={(event) => setMarketKey(event.target.value as MarketKey)}
+            className="min-h-8 max-w-[210px] rounded-md border border-[#dcdcd2] bg-[#fffdf8] px-2 text-[9px] font-bold text-[#43575a] outline-none focus-visible:ring-2 focus-visible:ring-[#9b7160]"
+            aria-label={`${sample.name} market comparison`}
+            data-testid={`performance-market-selector-${sample.side}`}
+          >
+            {MARKET_OPTIONS.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
+          </select>
+        </label>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-3 text-[8px] text-[#858982]" aria-label="Chart legend">
+          <span className="inline-flex items-center gap-1.5"><i className="h-[2px] w-4 bg-[#567d69]" /> Probability</span>
+          <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-full border border-[#bd795f] bg-[#fff8f2]" /> Actual result</span>
+        </div>
+        <span className="mono rounded-full border border-[#deddd3] bg-[#f7f6f0] px-2.5 py-1 text-[8px] text-[#707b73]" data-testid={`performance-market-coverage-${sample.side}`}>
+          {covered} / {sample.matches.length} covered
+        </span>
+      </div>
+      {covered ? (
+        <>
+          <div className="mt-2 h-[190px] rounded-lg border border-[#e6e5dc] bg-[#f8f8f2] px-1 py-2" data-testid={`performance-market-chart-${sample.side}-${marketKey}`}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={expectedRows} margin={{ top: 10, right: 12, bottom: 0, left: -12 }}>
+                <CartesianGrid stroke="#e8e8df" strokeDasharray="3 5" vertical={false} />
+                <XAxis dataKey="sequence" tickLine={false} axisLine={false} tick={{ fill: '#999b91', fontSize: 8 }} tickFormatter={(value) => `M${value}`} minTickGap={18} />
+                <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickFormatter={(value) => `${value}%`} tickLine={false} axisLine={false} tick={{ fill: '#999b91', fontSize: 8 }} width={38} />
+                <Tooltip content={<MarketTooltip />} cursor={{ stroke: '#b6bdb2', strokeDasharray: '3 3' }} />
+                <Line
+                  type="linear"
+                  dataKey="expectedPercent"
+                  name="Probability"
+                  stroke="#567d69"
+                  strokeWidth={2.2}
+                  connectNulls={false}
+                  dot={{ r: 2.5, fill: '#567d69', stroke: '#fbfaf6', strokeWidth: 1.5 }}
+                  activeDot={{ r: 4, fill: '#567d69', stroke: '#fbfaf6', strokeWidth: 2 }}
+                  isAnimationActive={false}
+                />
+                <Line
+                  type="linear"
+                  dataKey="actualPercent"
+                  name="Actual result"
+                  stroke="transparent"
+                  connectNulls={false}
+                  dot={(props) => {
+                    const row = props.payload as MarketDatum;
+                    if (!row.available || row.actual === null) return <g key={row.fixtureId} />;
+                    return <circle key={row.fixtureId} cx={props.cx} cy={props.cy} r={3.5} fill="#fff8f2" stroke="#bd795f" strokeWidth={2} />;
+                  }}
+                  activeDot={{ r: 5, fill: '#fff8f2', stroke: '#bd795f', strokeWidth: 2 }}
+                  isAnimationActive={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <p className="mt-2 text-[8px] leading-4 text-[#898d84]">
+            {marketKey === 'correctScore'
+              ? 'Line shows the highest-probability exact-score pick; the actual marker denotes whether that pick matched the final home:away score.'
+              : marketKey === '1x2'
+                ? 'Line shows the probability assigned to this team’s observed W/D/L outcome; the marker denotes the realized outcome.'
+                : `Line shows normalized probability for the observed ${selectedMarket.short} side; the marker denotes the realized outcome.`}
+            {' '}Missing quotes remain gaps. {covered} of {rows.length} fixtures have usable full-time selections.
+          </p>
+          <div className="mt-3 overflow-x-auto rounded-lg border border-[#e8e6de]">
+            <table className="w-full min-w-[540px] text-left text-[8px]" data-testid={`performance-market-table-${sample.side}-${marketKey}`}>
+              <thead className="bg-[#f7f6f0] text-[8px] font-bold uppercase tracking-[.08em] text-[#8c9086]">
+                <tr><th className="px-3 py-2">Match</th><th className="px-3 py-2">Probability</th><th className="px-3 py-2">Actual</th><th className="px-3 py-2">Coverage quality</th></tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.fixtureId} className="border-t border-[#ebe9e1]" data-testid={`performance-market-row-${sample.side}-${marketKey}-${row.fixtureId}`}>
+                    <td className="px-3 py-2 text-[#52615e]">{row.dateLabel} · {row.opponent} · {row.scoreLabel}</td>
+                    <td className="px-3 py-2 text-[#66716d]">
+                      {row.available ? (
+                        <>
+                          <span className="mono">{row.pick ? `${row.pick} · ${((row.pickProbability ?? 0) * 100).toFixed(1)}%` : `Observed outcome · ${(row.expected! * 100).toFixed(1)}%`}</span>
+                          {!row.pick && <span className="mt-0.5 block text-[7px] text-[#858982]">{row.forecastDetail}</span>}
+                        </>
+                      ) : 'Unavailable'}
+                    </td>
+                    <td className="px-3 py-2 font-bold text-[#66716d]">{row.available ? row.actualLabel : 'Unavailable'}</td>
+                    <td className="mono px-3 py-2 text-[#858982]">{row.available ? `${row.verifiedBookmakerCount} verified · ${row.unverifiedBookmakerCount} unverified / ${row.bookmakerCount}` : 'No quote'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <div className="mt-3 grid min-h-[190px] place-items-center rounded-lg border border-dashed border-[#d9d9cf] bg-[#f7f6f0] px-5 text-center" data-testid={`performance-market-empty-${sample.side}-${marketKey}`}>
+          <div><p className="text-[10px] font-bold text-[#65756d]">No {selectedMarket.short} coverage</p><p className="mt-1 max-w-xs text-[8px] leading-4 text-[#92948b]">This market is unavailable for the selected fixtures. No probabilities have been inferred.</p></div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TeamPerformanceCard({ sample, context }: { sample: TeamSample; context?: FootballMatchTmpContext }) {
   const chartRows = sample.matches.map((match, index) => ({ ...match, sequence: index + 1 }));
   const latestOddsMatch = [...sample.matches].reverse().find((match) => match.oddsTmp !== null);
   const oddsGaps = sample.total - sample.oddsCovered;
@@ -251,6 +604,51 @@ function TeamPerformanceCard({ sample }: { sample: TeamSample }) {
             <SummaryMetric label="Results TMP" value={sample.resultsTmp?.toFixed(0) ?? '—'} note="Results-only index" testId={`performance-results-tmp-${sample.side}`} />
             <SummaryMetric label="Expectation gap" value={sample.expectationGap === null ? '—' : `${sample.expectationGap > 0 ? '+' : ''}${sample.expectationGap.toFixed(2)}`} note="Actual − expected pts" testId={`performance-expectation-gap-${sample.side}`} />
           </div>
+
+          <section className="border-b border-[#e8e6de] px-4 py-4 sm:px-5" aria-labelledby={`results-chart-title-${sample.side}`}>
+            <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <p className="mono text-[8px] uppercase tracking-[.13em] text-[#9b7160]">Results only · no market input</p>
+                <h4 id={`results-chart-title-${sample.side}`} className="mt-1 text-[11px] font-extrabold text-[#42575a]">Match-to-match W / D / L</h4>
+              </div>
+              <span className="mono text-[8px] text-[#92948b]">Oldest → latest</span>
+            </div>
+            <div className="h-[126px] rounded-lg border border-[#e6e5dc] bg-[#f8f8f2] px-1 py-2" data-testid={`performance-wdl-chart-${sample.side}`}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                  data={chartRows.map((row) => ({ ...row, resultValue: row.outcome === 'W' ? 2 : row.outcome === 'D' ? 1 : 0 }))}
+                  margin={{ top: 8, right: 12, bottom: 0, left: -18 }}
+                >
+                  <CartesianGrid stroke="#e8e8df" strokeDasharray="3 5" vertical={false} />
+                  <XAxis dataKey="sequence" tickLine={false} axisLine={false} tick={{ fill: '#999b91', fontSize: 8 }} tickFormatter={(value) => `M${value}`} minTickGap={18} />
+                  <YAxis domain={[0, 2]} ticks={[0, 1, 2]} tickFormatter={(value) => value === 2 ? 'W' : value === 1 ? 'D' : 'L'} tickLine={false} axisLine={false} tick={{ fill: '#999b91', fontSize: 8 }} width={28} />
+                  <ReferenceLine y={1} stroke="#d7d6cc" strokeDasharray="3 4" />
+                  <Tooltip
+                    labelFormatter={(value) => `Match ${value}`}
+                    formatter={(_value, _name, item) => {
+                      const match = item.payload as MatchPoint;
+                      return [`${match.outcome} · ${match.scoreLabel}`, `${match.dateLabel} · ${match.opponent}`];
+                    }}
+                  />
+                  <Line
+                    type="stepAfter"
+                    dataKey="resultValue"
+                    name="Actual result"
+                    stroke="#a6a397"
+                    strokeWidth={1.5}
+                    dot={(props) => {
+                      const match = props.payload as MatchPoint;
+                      const color = match.outcome === 'W' ? '#557d66' : match.outcome === 'L' ? '#c77a5e' : '#aaa58f';
+                      return <circle key={match.fixtureId} cx={props.cx} cy={props.cy} r={4} fill={color} stroke="#fbfaf6" strokeWidth={1.5} />;
+                    }}
+                    activeDot={{ r: 5, stroke: '#fbfaf6', strokeWidth: 2 }}
+                    isAnimationActive={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="mt-2 text-[8px] leading-4 text-[#898d84]">Each point is one completed score from this team’s home/away perspective. W, D and L are actual outcomes, not probabilities.</p>
+          </section>
 
           <div className="grid gap-5 p-4 sm:p-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(250px,.8fr)]">
             <section aria-labelledby={`odds-trend-${sample.side}`}>
@@ -338,6 +736,8 @@ function TeamPerformanceCard({ sample }: { sample: TeamSample }) {
               <p className="mt-2 text-[8px] leading-4 text-[#898d84]">Chronological scores, independent of odds. Results TMP: 100 + 18W + 8D − 6L + 4(GF − GA).</p>
             </section>
           </div>
+
+          <MarketComparison sample={sample} context={context} />
 
           <details className="border-t border-[#e8e6de]">
             <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 text-[9px] font-bold text-[#64766b] outline-none transition hover:bg-[#f7f6f0] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#9b7160] sm:px-5" data-testid={`performance-match-detail-toggle-${sample.side}`}>
@@ -447,8 +847,8 @@ export function PerformanceGraphsPanel({
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <TeamPerformanceCard sample={home} />
-        <TeamPerformanceCard sample={away} />
+        <TeamPerformanceCard sample={home} context={context} />
+        <TeamPerformanceCard sample={away} context={context} />
       </div>
       <p className="px-1 text-[8px] leading-4 text-[#92948b]" data-testid="performance-source-note">
         Source coverage: up to 15 most recent score-complete fixtures per team. Outcomes are recalculated from each team’s own perspective; the result strip marks clean sheets with a dot.

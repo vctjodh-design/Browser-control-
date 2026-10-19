@@ -14,4 +14,6 @@ export interface FootballHistoricalMarketSelection {
      */
   probability: number;
   bookmakerCount: number;
+  verifiedBookmakerCount: number;
+  unverifiedBookmakerCount: number;
 }

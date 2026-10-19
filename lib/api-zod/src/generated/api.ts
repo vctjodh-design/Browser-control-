@@ -219,7 +219,9 @@ export const GetFootballMatchTmpResponse = zod.object({
   "selections": zod.array(zod.object({
   "selection": zod.string(),
   "probability": zod.number().min(getFootballMatchTmpResponseOddsHistoryItemMarketsItemSelectionsItemProbabilityMin).max(getFootballMatchTmpResponseOddsHistoryItemMarketsItemSelectionsItemProbabilityMax),
-  "bookmakerCount": zod.number().int()
+  "bookmakerCount": zod.number().int(),
+  "verifiedBookmakerCount": zod.number().int(),
+  "unverifiedBookmakerCount": zod.number().int()
 }))
 })),
   "quoteSource": zod.enum(['verified', 'mixed', 'unverified', 'unavailable'])

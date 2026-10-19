@@ -654,7 +654,16 @@ components:
           maximum: 1
         bookmakerCount:
           type: integer
-      required: [selection, probability, bookmakerCount]
+        verifiedBookmakerCount:
+          type: integer
+        unverifiedBookmakerCount:
+          type: integer
+      required:
+        - selection
+        - probability
+        - bookmakerCount
+        - verifiedBookmakerCount
+        - unverifiedBookmakerCount
     FootballHistoricalMarket:
       type: object
       properties:

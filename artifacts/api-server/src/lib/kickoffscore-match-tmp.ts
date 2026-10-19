@@ -32,6 +32,8 @@ interface Quote {
 interface SelectionAccumulator {
   probabilityTotal: number;
   bookmakerCount: number;
+  verifiedBookmakerCount: number;
+  unverifiedBookmakerCount: number;
 }
 
 interface MarketAccumulator {
@@ -218,6 +220,7 @@ function addMarketProbabilities(
   name: string,
   category: MarketCategory,
   probabilities: Map<string, number>,
+  verified: boolean,
 ): void {
   const key = `${marketId}:${name}`;
   const market = markets.get(key) ?? {
@@ -232,9 +235,13 @@ function addMarketProbabilities(
     const accumulator = market.selections.get(selection) ?? {
       probabilityTotal: 0,
       bookmakerCount: 0,
+      verifiedBookmakerCount: 0,
+      unverifiedBookmakerCount: 0,
     };
     accumulator.probabilityTotal += probability;
     accumulator.bookmakerCount += 1;
+    if (verified) accumulator.verifiedBookmakerCount += 1;
+    else accumulator.unverifiedBookmakerCount += 1;
     market.selections.set(selection, accumulator);
   }
 }
@@ -250,6 +257,10 @@ function mapHistoricalMarket(
       selection,
       probability: Number(probability.toFixed(6)),
       bookmakerCount: market.selections.get(selection)?.bookmakerCount ?? 0,
+      verifiedBookmakerCount:
+        market.selections.get(selection)?.verifiedBookmakerCount ?? 0,
+      unverifiedBookmakerCount:
+        market.selections.get(selection)?.unverifiedBookmakerCount ?? 0,
     }))
     .sort((left, right) => right.probability - left.probability);
   if (!selections.length) return null;
@@ -316,6 +327,7 @@ function parseHistoricalOdds(
           name,
           category,
           probabilities.probabilities,
+          probabilities.verified,
         );
       }
 
