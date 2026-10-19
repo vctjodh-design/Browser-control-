@@ -28,6 +28,7 @@ import type {
   FootballFixtureError,
   FootballFixtures,
   FootballMatchDetails,
+  FootballMatchLastFive,
   FootballMatchTmpContext,
   GetFootballFixturesParams,
   HealthStatus,
@@ -370,6 +371,84 @@ export function useGetFootballMatchTmp<TData = Awaited<ReturnType<typeof getFoot
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetFootballMatchTmpQueryOptions(fixtureId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFootballMatchLastFiveUrl = (fixtureId: number,) => {
+
+
+
+
+  return `/api/football/matches/${fixtureId}/last-five`
+}
+
+/**
+ * Returns match events, lineups, player statistics, match statistics, prematch context, and all supplied odds markets for each recent result
+ * @summary Get detailed data for each team's last five matches
+ */
+export const getFootballMatchLastFive = async (fixtureId: number, options?: Parameters<typeof customFetch>[1]): Promise<FootballMatchLastFive> => {
+
+  return customFetch<FootballMatchLastFive>(getGetFootballMatchLastFiveUrl(fixtureId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballMatchLastFiveQueryKey = (fixtureId: number,) => {
+    return [
+    `/api/football/matches/${fixtureId}/last-five`
+    ] as const;
+    }
+
+
+export const getGetFootballMatchLastFiveQueryOptions = <TData = Awaited<ReturnType<typeof getFootballMatchLastFive>>, TError = ErrorType<FootballFixtureError>>(fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchLastFive>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballMatchLastFiveQueryKey(fixtureId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballMatchLastFive>>> = ({ signal }) => getFootballMatchLastFive(fixtureId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: fixtureId !== null && fixtureId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchLastFive>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballMatchLastFiveQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballMatchLastFive>>>
+export type GetFootballMatchLastFiveQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary Get detailed data for each team's last five matches
+ */
+
+export function useGetFootballMatchLastFive<TData = Awaited<ReturnType<typeof getFootballMatchLastFive>>, TError = ErrorType<FootballFixtureError>>(
+ fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchLastFive>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballMatchLastFiveQueryOptions(fixtureId,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

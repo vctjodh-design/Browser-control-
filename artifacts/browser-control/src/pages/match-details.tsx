@@ -1,10 +1,16 @@
 import { useState } from 'react';
 import { Link, useParams } from 'wouter';
-import { useGetFootballMatchDetails, useGetFootballMatchTmp } from '@workspace/api-client-react';
+import {
+  getGetFootballMatchLastFiveQueryKey,
+  useGetFootballMatchDetails,
+  useGetFootballMatchLastFive,
+  useGetFootballMatchTmp,
+} from '@workspace/api-client-react';
 import type { FootballMatchDetails, FootballMatchTmpContext, FootballRecentMatch } from '@workspace/api-client-react';
 import { MatchTmpPanel } from '@/components/match-tmp-panel';
 import { MatchInsightsPanel } from '@/components/match-insights-panel';
 import { PerformanceGraphsPanel } from '@/components/performance-graphs-panel';
+import { LastFivePanel } from '@/components/last-five-panel';
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -18,15 +24,16 @@ import {
   Trophy,
 } from 'lucide-react';
 
-type MatchTab = 'table' | 'odds' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs';
+type MatchTab = 'table' | 'odds' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'lastfive';
 const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'table', label: 'Table', short: '01' },
   { id: 'odds', label: 'Odds', short: '02' },
   { id: 'form', label: 'Team form', short: '03' },
-  { id: 'h2h', label: 'Head to head', short: '04' },
-  { id: 'tmp', label: 'TMP', short: '05' },
-  { id: 'insights', label: 'Insights', short: '06' },
-  { id: 'graphs', label: 'Graph Representations', short: '07' },
+  { id: 'lastfive', label: 'Last five', short: '04' },
+  { id: 'h2h', label: 'Head to head', short: '05' },
+  { id: 'tmp', label: 'TMP', short: '06' },
+  { id: 'insights', label: 'Insights', short: '07' },
+  { id: 'graphs', label: 'Graph Representations', short: '08' },
 ];
 
 function readableError(error: unknown) {
@@ -224,6 +231,9 @@ export default function MatchDetailsPage() {
   const tmpQuery = useGetFootballMatchTmp(validId ? fixtureId : 0, {
     query: { enabled: validId && (activeTab === 'tmp' || activeTab === 'insights' || activeTab === 'graphs'), queryKey: ['/api/football/matches', fixtureId, 'tmp'] },
   });
+  const lastFiveQuery = useGetFootballMatchLastFive(validId ? fixtureId : 0, {
+    query: { enabled: validId && activeTab === 'lastfive', queryKey: getGetFootballMatchLastFiveQueryKey(fixtureId) },
+  });
   const details = detailsQuery.data as FootballMatchDetails | undefined;
   const match = details?.match;
   const isLive = match?.status.toLowerCase().includes('live') || match?.status.toLowerCase().includes('in play');
@@ -289,6 +299,7 @@ export default function MatchDetailsPage() {
                 {activeTab === 'tmp' && <MatchTmpPanel details={details} context={tmpQuery.data} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />}
                 {activeTab === 'insights' && <MatchInsightsPanel details={details} context={tmpQuery.data} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />}
                 {activeTab === 'graphs' && <PerformanceGraphsPanel details={details} context={tmpQuery.data as FootballMatchTmpContext | undefined} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />}
+                {activeTab === 'lastfive' && <LastFivePanel data={lastFiveQuery.data} isLoading={lastFiveQuery.isLoading} isError={lastFiveQuery.isError} error={lastFiveQuery.error} onRetry={() => { void lastFiveQuery.refetch(); }} />}
               </div>
             </section>
             <footer className="mt-4 flex flex-col justify-between gap-2 px-1 text-[9px] leading-5 text-[#8b8d84] sm:flex-row sm:items-center">

@@ -257,6 +257,136 @@ export interface FootballMatchDetails {
   issues: FootballMatchDetailsIssue[];
 }
 
+export interface FootballLastFiveStat {
+  label: string;
+  value: string | number | null;
+}
+
+export interface FootballLastFiveTeamStatistics {
+  /** @nullable */
+  teamId: number | null;
+  teamName: string;
+  statistics: FootballLastFiveStat[];
+}
+
+export interface FootballLastFiveEvent {
+  /** @nullable */
+  minute: number | null;
+  /** @nullable */
+  extraMinute: number | null;
+  /** @nullable */
+  teamId: number | null;
+  /** @nullable */
+  teamName: string | null;
+  /** @nullable */
+  player: string | null;
+  /** @nullable */
+  assist: string | null;
+  type: string;
+  /** @nullable */
+  detail: string | null;
+  /** @nullable */
+  comments: string | null;
+}
+
+export interface FootballLastFiveLineupPlayer {
+  /** @nullable */
+  id: number | null;
+  name: string;
+  /** @nullable */
+  number: number | null;
+  /** @nullable */
+  position: string | null;
+  /** @nullable */
+  grid: string | null;
+}
+
+export interface FootballLastFiveLineup {
+  /** @nullable */
+  teamId: number | null;
+  teamName: string;
+  /** @nullable */
+  formation: string | null;
+  /** @nullable */
+  coach: string | null;
+  starters: FootballLastFiveLineupPlayer[];
+  substitutes: FootballLastFiveLineupPlayer[];
+}
+
+export interface FootballLastFivePlayer {
+  /** @nullable */
+  id: number | null;
+  name: string;
+  /** @nullable */
+  photo: string | null;
+  /** @nullable */
+  number: number | null;
+  /** @nullable */
+  position: string | null;
+  /** @nullable */
+  rating: string | null;
+  statistics: FootballLastFiveStat[];
+}
+
+export interface FootballLastFivePlayerGroup {
+  /** @nullable */
+  teamId: number | null;
+  teamName: string;
+  players: FootballLastFivePlayer[];
+}
+
+export interface FootballLastFiveMarketSelection {
+  selection: string;
+  odd: number;
+}
+
+export interface FootballLastFiveMarketBookmaker {
+  name: string;
+  selections: FootballLastFiveMarketSelection[];
+}
+
+export type FootballLastFiveOddsMarketCategory = typeof FootballLastFiveOddsMarketCategory[keyof typeof FootballLastFiveOddsMarketCategory];
+
+
+export const FootballLastFiveOddsMarketCategory = {
+  '1x2': '1x2',
+  'first-half': 'first-half',
+  goals: 'goals',
+  handicap: 'handicap',
+  other: 'other',
+} as const;
+
+export interface FootballLastFiveOddsMarket {
+  marketId: string;
+  name: string;
+  category: FootballLastFiveOddsMarketCategory;
+  bookmakers: FootballLastFiveMarketBookmaker[];
+}
+
+export interface FootballLastFiveMatch {
+  match: FootballRecentMatch;
+  sourceUrl: string;
+  statistics: FootballLastFiveTeamStatistics[];
+  events: FootballLastFiveEvent[];
+  lineups: FootballLastFiveLineup[];
+  players: FootballLastFivePlayerGroup[];
+  oddsMarkets: FootballLastFiveOddsMarket[];
+  prematchStats: FootballLastFiveStat[];
+  issues: string[];
+}
+
+export interface FootballLastFiveTeam {
+  team: FootballMatchParticipant;
+  matches: FootballLastFiveMatch[];
+}
+
+export interface FootballMatchLastFive {
+  fixtureId: number;
+  home: FootballLastFiveTeam;
+  away: FootballLastFiveTeam;
+  issues: string[];
+}
+
 export interface FootballFixtureError {
   error: string;
 }

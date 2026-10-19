@@ -2,6 +2,8 @@ import { Router, type IRouter, type Response } from "express";
 import {
   GetFootballMatchDetailsParams,
   GetFootballMatchDetailsResponse,
+  GetFootballMatchLastFiveParams,
+  GetFootballMatchLastFiveResponse,
   GetFootballMatchTmpParams,
   GetFootballMatchTmpResponse,
   GetFootballFixturesQueryParams,
@@ -12,6 +14,7 @@ import {
   KickoffScoreMatchNotFoundError,
 } from "../lib/kickoffscore-match-details";
 import { getKickoffScoreMatchTmp } from "../lib/kickoffscore-match-tmp";
+import { getKickoffScoreMatchLastFive } from "../lib/kickoffscore-last-five";
 import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
 import { UpstreamRateLimitError } from "../lib/upstream-rate-limit";
 
@@ -96,6 +99,39 @@ router.get(
       res.status(502).json({
         error:
           "KickoffScore match details could not be loaded right now. Please try again.",
+      });
+    }
+  },
+);
+
+router.get(
+  "/football/matches/:fixtureId/last-five",
+  async (req, res): Promise<void> => {
+    const params = GetFootballMatchLastFiveParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    try {
+      const lastFive = await getKickoffScoreMatchLastFive(
+        params.data.fixtureId,
+      );
+      res.json(GetFootballMatchLastFiveResponse.parse(lastFive));
+    } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not load last-five match data from KickoffScore",
+      );
+      res.status(502).json({
+        error:
+          "Last-five match data could not be loaded right now. Please try again.",
       });
     }
   },
