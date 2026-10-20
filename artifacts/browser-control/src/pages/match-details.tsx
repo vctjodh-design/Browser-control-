@@ -299,8 +299,8 @@ export default function MatchDetailsPage() {
                 {activeTab === 'h2h' && <HeadToHeadPanel details={details} />}
                 {activeTab === 'tmp' && <MatchTmpPanel details={details} context={tmpQuery.data} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />}
                 {activeTab === 'insights' && <div className="space-y-7">
-                  <MatchupAnalysisPanel data={lastFiveQuery.data} isLoading={lastFiveQuery.isLoading} isError={lastFiveQuery.isError} error={lastFiveQuery.error} onRetry={() => { void lastFiveQuery.refetch(); }} />
-                  <MatchInsightsPanel details={details} lastFive={lastFiveQuery.data} context={tmpQuery.data} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />
+                  <MatchInsightsPanel details={details} lastFive={lastFiveQuery.data} lastFiveLoading={lastFiveQuery.isLoading} lastFiveError={lastFiveQuery.isError} context={tmpQuery.data} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />
+                  <MatchupAnalysisPanel data={lastFiveQuery.data} matchDate={match.date} isLoading={lastFiveQuery.isLoading} isError={lastFiveQuery.isError} error={lastFiveQuery.error} onRetry={() => { void lastFiveQuery.refetch(); }} />
                 </div>}
                 {activeTab === 'graphs' && <PerformanceGraphsPanel details={details} context={tmpQuery.data as FootballMatchTmpContext | undefined} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />}
                 {activeTab === 'lastfive' && <LastFivePanel data={lastFiveQuery.data} isLoading={lastFiveQuery.isLoading} isError={lastFiveQuery.isError} error={lastFiveQuery.error} onRetry={() => { void lastFiveQuery.refetch(); }} />}

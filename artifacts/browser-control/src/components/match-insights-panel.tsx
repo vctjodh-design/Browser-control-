@@ -1,10 +1,14 @@
 import type { ReactNode } from 'react';
 import type {
   FootballMatchDetails,
+  FootballMatchLastFive,
   FootballMatchTmpContext,
   FootballRecentMatch,
 } from '@workspace/api-client-react';
 import { AlertCircle, ArrowDownRight, BarChart3, RefreshCw, Sigma } from 'lucide-react';
+import { BookmakerComparisonPanel } from '@/components/bookmaker-comparison-panel';
+import { buildMatchupAnalysis } from '@/lib/matchup-analysis';
+import type { OddsModelInput } from '@/lib/odds-edge-analysis';
 
 type OutcomeRates = { wins: number; draws: number; losses: number; count: number };
 type TeamFormStats = OutcomeRates & {
@@ -176,8 +180,11 @@ function IssueNotice({ message, testId }: { message: string; testId: string }) {
   </div>;
 }
 
-export function MatchInsightsPanel({ details, context, isLoading, isError, error, onRetry }: {
+export function MatchInsightsPanel({ details, lastFive, lastFiveLoading, lastFiveError, context, isLoading, isError, error, onRetry }: {
   details: FootballMatchDetails;
+  lastFive?: FootballMatchLastFive;
+  lastFiveLoading: boolean;
+  lastFiveError: boolean;
   context?: FootballMatchTmpContext;
   isLoading: boolean;
   isError: boolean;
@@ -190,6 +197,7 @@ export function MatchInsightsPanel({ details, context, isLoading, isError, error
   const h2h = h2hStats(details.headToHead, match.home.id, match.away.id);
   const home = formStats(homeGames, match.home.id);
   const away = formStats(awayGames, match.away.id);
+  const lastFiveAnalysis = lastFive ? buildMatchupAnalysis(lastFive) : null;
   const currentHomeStanding = details.standings.find((row) => row.teamId === match.home.id);
   const currentAwayStanding = details.standings.find((row) => row.teamId === match.away.id);
   const contextHomeStanding = context?.seasonStandings.find((row) => row.teamId === match.home.id &&
@@ -199,6 +207,17 @@ export function MatchInsightsPanel({ details, context, isLoading, isError, error
   const missing: string[] = [];
   if (homeGames.length < 15) missing.push(`${match.home.name} recent form ${homeGames.length}/15 completed`);
   if (awayGames.length < 15) missing.push(`${match.away.name} recent form ${awayGames.length}/15 completed`);
+  if (!lastFiveAnalysis) missing.push(lastFiveLoading
+    ? 'Last-five xG context is loading'
+    : lastFiveError
+      ? 'Last-five xG context failed to load'
+      : 'Last-five xG context unavailable');
+  else if (lastFiveAnalysis.home.sample < 3 || lastFiveAnalysis.away.sample < 3) {
+    missing.push('Last-five samples under 3 matches; 15-result rates are used as fallback');
+  }
+  else if (lastFiveAnalysis.home.expectedGoalsCoverage < 3 || lastFiveAnalysis.away.expectedGoalsCoverage < 3) {
+    missing.push('Five-match xG coverage is below 3 observations for one or both teams');
+  }
   if (h2h.rows.length < 3) missing.push(`H2H blend unavailable (${h2h.rows.length}/3 minimum; ${h2h.rows.length}/8 used)`);
   if (!details.oddsMarkets.length) missing.push('Current fixture odds not supplied');
   if (!currentHomeStanding || !currentAwayStanding) missing.push('Current competition standings incomplete');
@@ -209,8 +228,14 @@ export function MatchInsightsPanel({ details, context, isLoading, isError, error
   }
 
   const hasCoreData = !!home && !!away;
-  const formHomeLambda = home && away ? (home.goalsForAverage + away.goalsAgainstAverage) / 2 : 0;
-  const formAwayLambda = home && away ? (away.goalsForAverage + home.goalsAgainstAverage) / 2 : 0;
+  const homeFiveUsable = !!lastFiveAnalysis && lastFiveAnalysis.home.sample >= 3;
+  const awayFiveUsable = !!lastFiveAnalysis && lastFiveAnalysis.away.sample >= 3;
+  const homeAttackRate = homeFiveUsable ? lastFiveAnalysis.home.forecastAttackRate ?? home?.goalsForAverage ?? 0 : home?.goalsForAverage ?? 0;
+  const awayDefenseRate = awayFiveUsable ? lastFiveAnalysis.away.forecastDefenseRate ?? away?.goalsAgainstAverage ?? 0 : away?.goalsAgainstAverage ?? 0;
+  const awayAttackRate = awayFiveUsable ? lastFiveAnalysis.away.forecastAttackRate ?? away?.goalsForAverage ?? 0 : away?.goalsForAverage ?? 0;
+  const homeDefenseRate = homeFiveUsable ? lastFiveAnalysis.home.forecastDefenseRate ?? home?.goalsAgainstAverage ?? 0 : home?.goalsAgainstAverage ?? 0;
+  const formHomeLambda = home && away ? (homeAttackRate + awayDefenseRate) / 2 : 0;
+  const formAwayLambda = home && away ? (awayAttackRate + homeDefenseRate) / 2 : 0;
   const blended = h2h.rows.length >= 3;
   const homeLambda = blended ? formHomeLambda * 0.8 + (h2h.homeGoals ?? 0) * 0.2 : formHomeLambda;
   const awayLambda = blended ? formAwayLambda * 0.8 + (h2h.awayGoals ?? 0) * 0.2 : formAwayLambda;
@@ -230,35 +255,42 @@ export function MatchInsightsPanel({ details, context, isLoading, isError, error
     .sort((a, b) => b.probability - a.probability).slice(0, 3);
   const homeOddsTmp = historicalOddsTmp(details.homeRecent, match.home.id, context);
   const awayOddsTmp = historicalOddsTmp(details.awayRecent, match.away.id, context);
-
-  const picks = hasCoreData && resultSignal ? [
-    { label: `${match.home.name} win`, probability: resultSignal[0], group: '1X2', index: 0 },
-    { label: 'Draw', probability: resultSignal[1], group: '1X2', index: 1 },
-    { label: `${match.away.name} win`, probability: resultSignal[2], group: '1X2', index: 2 },
-    { label: 'BTTS · Yes', probability: poisson.btts[0], group: 'BTTS', index: 0 },
-    { label: 'BTTS · No', probability: poisson.btts[1], group: 'BTTS', index: 1 },
-    { label: 'Over 2.5 goals', probability: poisson.total25[0], group: 'Total 2.5', index: 0 },
-    { label: 'Under 2.5 goals', probability: poisson.total25[1], group: 'Total 2.5', index: 1 },
-    { label: 'Over 3.5 goals', probability: poisson.total35[0], group: 'Total 3.5', index: 0 },
-    { label: 'Under 3.5 goals', probability: poisson.total35[1], group: 'Total 3.5', index: 1 },
-  ].sort((a, b) => b.probability - a.probability) : [];
-  const bestPick = picks[0];
-  const homeTmp = home ? historicalOddsTmp(details.homeRecent, match.home.id, context) : null;
+  const evidenceSufficient = !!home && !!away &&
+    home.count >= 8 && away.count >= 8 &&
+    !!lastFiveAnalysis &&
+    lastFiveAnalysis.home.sample >= 4 && lastFiveAnalysis.away.sample >= 4 &&
+    lastFiveAnalysis.home.expectedGoalsCoverage >= 3 &&
+    lastFiveAnalysis.away.expectedGoalsCoverage >= 3;
+  const evidenceReason = !home || !away || home.count < 8 || away.count < 8
+    ? 'At least 8 completed recent results per team are required for an edge screen.'
+    : !lastFiveAnalysis
+      ? lastFiveLoading
+        ? 'Waiting for the last-five xG sample.'
+        : 'Last-five xG data is unavailable; no edge will be flagged.'
+      : lastFiveAnalysis.home.sample < 4 || lastFiveAnalysis.away.sample < 4
+        ? 'At least 4 completed last-five matches per team are required for an edge screen.'
+        : 'At least 3 xG observations per team are required for an edge screen.';
+  const oddsModel: OddsModelInput = {
+    result: hasCoreData ? resultSignal : null,
+    btts: hasCoreData ? poisson.btts : null,
+    scoreMatrix: hasCoreData ? matrix : [],
+    evidenceSufficient,
+  };
 
   return <section className="space-y-5" data-testid="panel-insights">
     <header className="flex flex-wrap items-end justify-between gap-3">
       <div><p className="mono text-[9px] uppercase tracking-[.17em] text-[#9b7160]">Evidence-led forecast</p>
-        <h2 className="mt-1 text-[20px] font-extrabold tracking-[-.05em] text-[#2b3e49]">Match insights</h2>
+        <h2 className="mt-1 text-[20px] font-extrabold tracking-[-.05em] text-[#2b3e49]">Price and probability analysis</h2>
         <p className="mt-1 text-[9px] text-[#858982]">{match.home.name} at home · {match.away.name} away</p></div>
-      <CoverageBadge testId="insight-sample-coverage">{homeGames.length}/15 home · {awayGames.length}/15 away · {h2h.rows.length}/8 H2H</CoverageBadge>
+      <CoverageBadge testId="insight-sample-coverage">{homeGames.length}/15 · {awayGames.length}/15 · {h2h.rows.length}/8 H2H · {lastFiveAnalysis ? `${lastFiveAnalysis.home.expectedGoalsCoverage}/${lastFiveAnalysis.away.expectedGoalsCoverage} xG` : 'xG pending'}</CoverageBadge>
     </header>
 
     <div className="grid gap-3 rounded-xl border border-[#d8ded5] bg-[#edf2ec] p-4 sm:grid-cols-[auto_1fr] sm:items-center">
       <span className="grid size-9 place-items-center rounded-lg bg-[#dce8dd] text-[#537867]"><Sigma size={17} /></span>
       <div><p className="text-[9px] font-extrabold text-[#43575a]">Model method · transparent weights</p>
         <p className="mt-1 text-[8px] leading-4 text-[#63766b]" data-testid="insight-model-method">
-          Completed scores only; up to 15 recent results per team and 8 H2H. Expected goals average each team’s scored rate with its opponent’s conceded rate. With ≥3 H2H, goals blend 80% form / 20% H2H. Independent Poisson score matrix includes a 10+ tail.
-          1X2 = 70% Poisson + 20% recent W/D/L + 10% H2H W/D/L; recent rates average the home team’s W/D/L with the away team’s L/D/W. H2H rates use the upcoming home team’s perspective. Without ≥3 H2H, available weights are renormalized. No additional TMP/goal-rate weighting.
+          The goal-rate forecast uses the last-five sample when a team has at least three completed records: where at least three xG observations are available, attack and defensive rates blend 70% xG with 30% actual goals; otherwise they use goals only. Smaller samples fall back to up to 15 recent scores. Each team’s attack rate is averaged with its opponent’s conceded/xG-against rate. With ≥3 H2H, the resulting rates blend 80% recent form / 20% H2H. The independent Poisson score matrix includes a 10+ tail.
+          1X2 = 70% Poisson + 20% recent W/D/L from up to 15 results + 10% H2H W/D/L; without qualifying H2H, available weights are renormalized. Bookmaker prices are a separate benchmark and do not feed into the model.
         </p>
       </div>
     </div>
@@ -269,6 +301,13 @@ export function MatchInsightsPanel({ details, context, isLoading, isError, error
     {missing.length > 0 && <div className="flex flex-wrap gap-2" data-testid="insight-input-gaps">
       {missing.map((item) => <CoverageBadge key={item} testId={`insight-gap-${item.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>{item}</CoverageBadge>)}
     </div>}
+    <BookmakerComparisonPanel
+      markets={details.oddsMarkets}
+      homeName={match.home.name}
+      awayName={match.away.name}
+      model={oddsModel}
+      evidenceReason={evidenceReason}
+    />
     {isLoading && <div className="space-y-3" role="status" aria-label="Loading additional forecast context" data-testid="insight-context-loading">
       <div className="h-16 animate-pulse rounded-xl bg-[#eeede6]" /><div className="grid gap-3 sm:grid-cols-2"><div className="h-28 animate-pulse rounded-xl bg-[#eeede6]" /><div className="h-28 animate-pulse rounded-xl bg-[#eeede6]" /></div>
     </div>}
@@ -302,25 +341,14 @@ export function MatchInsightsPanel({ details, context, isLoading, isError, error
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-[1.05fr_.95fr]">
-        <article className="overflow-hidden rounded-xl border border-[#deddd4] bg-[#fbfaf6]" data-testid="insight-correct-scores">
-          <div className="flex items-center justify-between border-b border-[#e8e6de] bg-[#f3f2eb] px-4 py-3"><h3 className="text-[10px] font-extrabold text-[#43575a]">Likely exact scores</h3><span className="mono text-[8px] text-[#898d84]">Top 3 estimates</span></div>
-          {topScores.map((score, index) => <div key={`${score.homeGoals}-${score.awayGoals}`} className="grid grid-cols-[30px_1fr_auto] items-center gap-3 border-b border-[#e9e7df] px-4 py-3 last:border-0" data-testid={`insight-correct-score-${index + 1}`}>
-            <span className="mono text-[8px] text-[#9b7160]">0{index + 1}</span><span className="mono text-[14px] font-medium text-[#43575a]">{score.homeGoals} – {score.awayGoals}</span><span className="mono text-[11px] text-[#537867]">{pct(score.probability)}</span>
-          </div>)}
-        </article>
-        <article className="relative overflow-hidden rounded-xl border border-[#29434b] bg-[#293f49] p-4 text-[#f5f1e8]" data-testid="insight-best-pick">
-          <div className="absolute right-0 top-0 h-full w-1/3 bg-[linear-gradient(135deg,transparent,rgba(117,151,127,.16))]" aria-hidden="true" />
-          <p className="relative mono text-[8px] uppercase tracking-[.16em] text-[#d5a48a]">Highest estimated probability</p>
-          {bestPick ? <>
-            <h3 className="relative mt-2 text-[17px] font-extrabold tracking-[-.035em]" data-testid="insight-best-pick-label">{bestPick.label}</h3>
-            <p className="relative mono mt-1 text-[30px] leading-none tracking-[-.06em] text-[#d7e4d8]" data-testid="insight-best-pick-probability">{pct(bestPick.probability)}</p>
-            <div className="relative mt-4 border-t border-[#51636a] pt-3 text-[8px] leading-5 text-[#c5d0c9]" data-testid="insight-best-pick-evidence">
-              <p>Support: {bestPick.group === '1X2' ? `${match.home.name} W/D/L ${home?.wins}/${home?.draws}/${home?.losses}; ${match.away.name} W/D/L ${away?.wins}/${away?.draws}/${away?.losses}.` : `Expected goals ${homeLambda.toFixed(2)} – ${awayLambda.toFixed(2)} from recent scoring and conceding rates${blended ? ', adjusted by qualifying H2H scoring' : ''}.`}</p>
-              <p className="mt-1 text-[#d5b4a0]">Caveat: {h2h.rows.length < 3 ? 'No qualifying H2H result blend; estimates lean on the available form sample.' : `H2H: ${h2h.homeWins} home-side wins, ${h2h.draws} draws, ${h2h.awayWins} away-side wins.`} {home && away ? `Overall TMP ${home.overallTmp} / ${away.overallTmp}; shown as context, not a separate weight.` : ''}</p>
-            </div>
-          </> : <p className="relative mt-3 text-[9px] text-[#d3d9d4]">No pick can be selected until both team samples are available.</p>}
-        </article>
+      <section className="overflow-hidden rounded-xl border border-[#deddd4] bg-[#fbfaf6]" data-testid="insight-correct-scores">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e8e6de] bg-[#f3f2eb] px-4 py-3">
+          <div><h3 className="text-[10px] font-extrabold text-[#43575a]">Correct-score probabilities</h3><p className="mt-1 text-[8px] text-[#898d84]">Most likely model outcomes, not recommended selections</p></div>
+          <span className="mono text-[8px] text-[#898d84]">Top 3 estimates</span>
+        </div>
+        {topScores.map((score, index) => <div key={`${score.homeGoals}-${score.awayGoals}`} className="grid grid-cols-[30px_1fr_auto] items-center gap-3 border-b border-[#e9e7df] px-4 py-3 last:border-0" data-testid={`insight-correct-score-${index + 1}`}>
+          <span className="mono text-[8px] text-[#9b7160]">0{index + 1}</span><span className="mono text-[14px] font-medium text-[#43575a]">{score.homeGoals} – {score.awayGoals}</span><span className="mono text-[11px] text-[#537867]">{pct(score.probability)}</span>
+        </div>)}
       </section>
 
       <section className="space-y-3" data-testid="insight-context-evidence">
@@ -365,23 +393,13 @@ export function MatchInsightsPanel({ details, context, isLoading, isError, error
         </div>
       </section>
 
-      <section className="overflow-hidden rounded-xl border border-[#deddd4] bg-[#fbfaf6]" data-testid="insight-current-odds">
-        <div className="border-b border-[#e8e6de] bg-[#f3f2eb] px-4 py-3"><h3 className="text-[10px] font-extrabold text-[#43575a]">Current fixture odds · comparison</h3><p className="mt-1 text-[8px] leading-4 text-[#898d84]">Source quotes are shown as supplied, not verified pre-match prices; no timestamp is available here. Odds do not alter model estimates.</p></div>
-        {details.oddsMarkets.length ? <div className="divide-y divide-[#e9e7df]">{details.oddsMarkets.map((market) => {
-          const isResultMarket = market.category === '1x2' || /1x2|match result|full.?time result/i.test(market.name);
-          const implied = normalize(market.selections.map((selection) => selection.odd > 0 ? 1 / selection.odd : 0));
-          return <div key={market.marketId} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3" data-testid={`insight-current-market-${market.marketId}`}>
-            <div><p className="text-[9px] font-bold text-[#52615e]">{market.name}</p><p className="mono mt-1 text-[7px] uppercase text-[#9a9a90]">{market.category} · source quote</p></div>
-            <div className="flex flex-wrap gap-1.5">{market.selections.map((selection, index) => <span key={`${selection.selection}-${index}`} className="rounded-md border border-[#dce2d9] bg-[#f2f5ef] px-2 py-1 text-[8px] text-[#617467]" data-testid={`insight-current-selection-${market.marketId}-${index}`}>{selection.selection} · {selection.odd} · {selection.bookmakerCount} books{isResultMarket && implied[index] > 0 ? ` · ${pct(implied[index])} implied` : ''}</span>)}</div>
-            {isResultMarket && resultSignal && <p className="basis-full text-right text-[7px] leading-4 text-[#898d84]" data-testid={`insight-market-model-compare-${market.marketId}`}>Model 1X2: {pct(resultSignal[0])} / {pct(resultSignal[1])} / {pct(resultSignal[2])} · source implied shares normalized across selections</p>}
-          </div>;
-        })}</div> : <p className="px-4 py-4 text-[8px] text-[#858982]" data-testid="insight-current-odds-empty">No current fixture odds were supplied. No market adjustment is applied.</p>}
-      </section>
     </>}
 
     {details.issues.map((issue, index) => <IssueNotice key={`${issue.section}-${index}`} message={issue.message} testId={`insight-details-issue-${issue.section}`} />)}
     {context && context.issues.map((issue, index) => <IssueNotice key={`${issue.section}-${index}`} message={issue.message} testId={`insight-context-issue-${issue.section}`} />)}
     {context && !context.oddsHistory.length && !context.seasonStandings.length && <div className="flex items-center gap-2 rounded-lg border border-[#e5e3da] bg-[#f7f6f0] px-4 py-3 text-[8px] text-[#858982]" data-testid="insight-context-empty"><ArrowDownRight size={12} /> Historical market and TMP-context standings were not returned.</div>}
-    {home && away && <p className="text-[8px] leading-4 text-[#92958b]" data-testid="insight-expected-goals">Expected goals: {match.home.name} {homeLambda.toFixed(2)} · {match.away.name} {awayLambda.toFixed(2)}. Form inputs {home.goalsForAverage.toFixed(2)} scored / {away.goalsAgainstAverage.toFixed(2)} conceded and {away.goalsForAverage.toFixed(2)} scored / {home.goalsAgainstAverage.toFixed(2)} conceded{blended ? `; H2H scoring averages ${h2h.homeGoals?.toFixed(2)} / ${h2h.awayGoals?.toFixed(2)}` : '; no H2H scoring blend applied'}.</p>}
+    {home && away && <p className="text-[8px] leading-4 text-[#92958b]" data-testid="insight-expected-goals">
+      Expected goals: {match.home.name} {homeLambda.toFixed(2)} · {match.away.name} {awayLambda.toFixed(2)}. Five-match attack rates {homeAttackRate.toFixed(2)} / {awayAttackRate.toFixed(2)} and xG-against rates {homeDefenseRate.toFixed(2)} / {awayDefenseRate.toFixed(2)} when returned; five-match xG is blended 70/30 with goals at ≥3 observations, otherwise five-match goals are used. The 15-result rates remain the fallback when last-five records are missing{blended ? `; H2H scoring averages ${h2h.homeGoals?.toFixed(2)} / ${h2h.awayGoals?.toFixed(2)}` : '; no H2H scoring blend applied'}.
+    </p>}
   </section>;
 }

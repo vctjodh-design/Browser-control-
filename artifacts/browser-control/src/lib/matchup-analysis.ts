@@ -30,10 +30,14 @@ export type MatchupPlayerLeader = {
   averageRating: number | null;
   goals: number;
   assists: number;
+  shots: number;
+  shotsOnTarget: number;
   expectedGoals: number | null;
   expectedAssists: number | null;
   keyPasses: number;
   tackles: number;
+  duelsWon: number;
+  interceptions: number;
 };
 
 export type MatchupAvailability = {
@@ -82,6 +86,12 @@ export type MatchupTeamAnalysis = {
   shotsForAverage: number | null;
   shotsAgainstAverage: number | null;
   shotsOnTargetAverage: number | null;
+  tacklesAverage: number | null;
+  interceptionsAverage: number | null;
+  boxTouchesAverage: number | null;
+  finalThirdEntriesAverage: number | null;
+  cornersAverage: number | null;
+  yellowCardsAverage: number | null;
   possessionAverage: number | null;
   passAccuracyAverage: number | null;
   bigChancesForAverage: number | null;
@@ -212,10 +222,14 @@ function buildPlayerLeaders(team: TeamRecord): MatchupPlayerLeader[] {
     ratings: number[];
     goals: number;
     assists: number;
+    shots: number;
+    shotsOnTarget: number;
     expectedGoals: number[];
     expectedAssists: number[];
     keyPasses: number;
     tackles: number;
+    duelsWon: number;
+    interceptions: number;
   }>();
 
   for (const record of team.matches) {
@@ -234,10 +248,14 @@ function buildPlayerLeaders(team: TeamRecord): MatchupPlayerLeader[] {
         ratings: [],
         goals: 0,
         assists: 0,
+        shots: 0,
+        shotsOnTarget: 0,
         expectedGoals: [],
         expectedAssists: [],
         keyPasses: 0,
         tackles: 0,
+        duelsWon: 0,
+        interceptions: 0,
       };
       const minutes = minutesFor(player);
       if (minutes > 0) {
@@ -248,6 +266,8 @@ function buildPlayerLeaders(team: TeamRecord): MatchupPlayerLeader[] {
       if (rating !== null && minutes > 0) item.ratings.push(rating);
       item.goals += playerStat(player, 'Player · goals · total') ?? 0;
       item.assists += playerStat(player, 'Player · goals · assists') ?? 0;
+      item.shots += playerStat(player, 'Player · shots · total') ?? 0;
+      item.shotsOnTarget += playerStat(player, 'Player · shots · on') ?? 0;
       const expectedGoals = playerStat(player, 'Player · bsd · statistics · expected_goals')
         ?? playerStat(player, 'Player · expected_goals');
       const expectedAssists = playerStat(player, 'Player · bsd · statistics · expected_assists')
@@ -256,6 +276,8 @@ function buildPlayerLeaders(team: TeamRecord): MatchupPlayerLeader[] {
       if (minutes > 0 && expectedAssists !== null) item.expectedAssists.push(expectedAssists);
       item.keyPasses += playerStat(player, 'Player · passes · key') ?? 0;
       item.tackles += playerStat(player, 'Player · tackles · total') ?? 0;
+      item.duelsWon += playerStat(player, 'Player · duels · won') ?? 0;
+      item.interceptions += playerStat(player, 'Player · tackles · interceptions') ?? 0;
       players.set(key, item);
     }
 
@@ -282,10 +304,14 @@ function buildPlayerLeaders(team: TeamRecord): MatchupPlayerLeader[] {
       averageRating: average(player.ratings),
       goals: player.goals,
       assists: player.assists,
+      shots: player.shots,
+      shotsOnTarget: player.shotsOnTarget,
       expectedGoals: average(player.expectedGoals),
       expectedAssists: average(player.expectedAssists),
       keyPasses: player.keyPasses,
       tackles: player.tackles,
+      duelsWon: player.duelsWon,
+      interceptions: player.interceptions,
     }))
     .filter((player) => player.appearances > 0)
     .sort((left, right) => {
@@ -391,6 +417,12 @@ function buildTeamAnalysis(team: TeamRecord): MatchupTeamAnalysis {
   const shotsForValues: number[] = [];
   const shotsAgainstValues: number[] = [];
   const shotsOnTargetValues: number[] = [];
+  const tacklesValues: number[] = [];
+  const interceptionsValues: number[] = [];
+  const boxTouchesValues: number[] = [];
+  const finalThirdEntriesValues: number[] = [];
+  const cornersValues: number[] = [];
+  const yellowCardsValues: number[] = [];
   const possessionValues: number[] = [];
   const passAccuracyValues: number[] = [];
   const bigChancesForValues: number[] = [];
@@ -419,6 +451,12 @@ function buildTeamAnalysis(team: TeamRecord): MatchupTeamAnalysis {
     const shotsFor = statFor(own, 'total_shots');
     const shotsAgainst = statFor(opponent, 'total_shots');
     const shotsOnTarget = statFor(own, 'shots_on_goal');
+    const tackles = statFor(own, 'total_tackles') ?? statFor(own, 'tackles');
+    const interceptions = statFor(own, 'interceptions');
+    const boxTouches = statFor(own, 'touches_in_opposition_box');
+    const finalThirdEntries = statFor(own, 'final_third_entries');
+    const corners = statFor(own, 'corner_kicks');
+    const yellowCards = statFor(own, 'yellow_cards');
     const possession = statFor(own, 'ball_possession');
     const passAccuracy = statFor(own, 'passes %');
     const bigChancesFor = statFor(own, 'big_chances');
@@ -430,6 +468,12 @@ function buildTeamAnalysis(team: TeamRecord): MatchupTeamAnalysis {
       [shotsFor, shotsForValues],
       [shotsAgainst, shotsAgainstValues],
       [shotsOnTarget, shotsOnTargetValues],
+      [tackles, tacklesValues],
+      [interceptions, interceptionsValues],
+      [boxTouches, boxTouchesValues],
+      [finalThirdEntries, finalThirdEntriesValues],
+      [corners, cornersValues],
+      [yellowCards, yellowCardsValues],
       [possession, possessionValues],
       [passAccuracy, passAccuracyValues],
       [bigChancesFor, bigChancesForValues],
@@ -550,6 +594,12 @@ function buildTeamAnalysis(team: TeamRecord): MatchupTeamAnalysis {
     shotsForAverage: average(shotsForValues),
     shotsAgainstAverage: average(shotsAgainstValues),
     shotsOnTargetAverage: average(shotsOnTargetValues),
+    tacklesAverage: average(tacklesValues),
+    interceptionsAverage: average(interceptionsValues),
+    boxTouchesAverage: average(boxTouchesValues),
+    finalThirdEntriesAverage: average(finalThirdEntriesValues),
+    cornersAverage: average(cornersValues),
+    yellowCardsAverage: average(yellowCardsValues),
     possessionAverage: average(possessionValues),
     passAccuracyAverage: average(passAccuracyValues),
     bigChancesForAverage: average(bigChancesForValues),
@@ -584,6 +634,12 @@ export function buildMatchupAnalysis(data: FootballMatchLastFive): MatchupAnalys
       { label: 'Expected goals', homeValue: home.expectedGoalsForAverage, awayValue: away.expectedGoalsForAverage, unit: '/ match' },
       { label: 'Expected goals against', homeValue: home.expectedGoalsAgainstAverage, awayValue: away.expectedGoalsAgainstAverage, unit: '/ match', lowerIsBetter: true },
       { label: 'Shots on target', homeValue: home.shotsOnTargetAverage, awayValue: away.shotsOnTargetAverage, unit: '/ match' },
+      { label: 'Tackles', homeValue: home.tacklesAverage, awayValue: away.tacklesAverage, unit: '/ match' },
+      { label: 'Interceptions', homeValue: home.interceptionsAverage, awayValue: away.interceptionsAverage, unit: '/ match' },
+      { label: 'Touches in box', homeValue: home.boxTouchesAverage, awayValue: away.boxTouchesAverage, unit: '/ match' },
+      { label: 'Final-third entries', homeValue: home.finalThirdEntriesAverage, awayValue: away.finalThirdEntriesAverage, unit: '/ match' },
+      { label: 'Corners', homeValue: home.cornersAverage, awayValue: away.cornersAverage, unit: '/ match' },
+      { label: 'Yellow cards', homeValue: home.yellowCardsAverage, awayValue: away.yellowCardsAverage, unit: '/ match', lowerIsBetter: true },
       { label: 'Possession', homeValue: home.possessionAverage, awayValue: away.possessionAverage, unit: '%' },
       { label: 'Pass accuracy', homeValue: home.passAccuracyAverage, awayValue: away.passAccuracyAverage, unit: '%' },
       { label: 'Big chances', homeValue: home.bigChancesForAverage, awayValue: away.bigChancesForAverage, unit: '/ match' },

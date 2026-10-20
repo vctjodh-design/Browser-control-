@@ -51,6 +51,7 @@ function Card({ title, eyebrow, children, testId }: {
 
 function valueLabel(value: number | null, unit: string) {
   if (value === null) return 'Not enough data';
+  if (!unit) return number(value);
   return `${number(value)}${unit === '%' ? '%' : ` ${unit}`}`;
 }
 
@@ -73,6 +74,9 @@ function TeamEvidence({ team, accent, testId }: { team: MatchupTeamAnalysis; acc
         ['xG against', valueLabel(team.expectedGoalsAgainstAverage, '/ match')],
         ['Shots on target', valueLabel(team.shotsOnTargetAverage, '/ match')],
         ['Possession', percent(team.possessionAverage)],
+        ['Final-third entries', valueLabel(team.finalThirdEntriesAverage, '/ match')],
+        ['Touches in box', valueLabel(team.boxTouchesAverage, '/ match')],
+        ['Tackles', valueLabel(team.tacklesAverage, '/ match')],
       ].map(([label, val]) => <div key={label} className="border-l border-[#e2e1d8] pl-2.5">
         <p className="text-[7px] font-bold uppercase tracking-[.08em] text-[#92968d]">{label}</p>
         <p className="mono mt-1 text-[11px] text-[#4b6258]">{val}</p>
@@ -87,60 +91,61 @@ function TeamEvidence({ team, accent, testId }: { team: MatchupTeamAnalysis; acc
 }
 
 function Trends({ home, away }: { home: MatchupTeamAnalysis; away: MatchupTeamAnalysis }) {
-  const rows = [
-    ...home.trends.map((point) => ({ ...point, side: home.name, color: HOME })),
-    ...away.trends.map((point) => ({ ...point, side: away.name, color: AWAY })),
+  const sampleCount = Math.max(home.trends.length, away.trends.length);
+  const trendRows = Array.from({ length: sampleCount }, (_, index) => {
+    const homePoint = home.trends[index];
+    const awayPoint = away.trends[index];
+    return {
+      match: `Match ${index + 1}`,
+      tooltipLabel: [
+        homePoint ? `Home: ${date(homePoint.date)} · ${homePoint.opponent}` : 'Home: no match',
+        awayPoint ? `Away: ${date(awayPoint.date)} · ${awayPoint.opponent}` : 'Away: no match',
+      ].join(' / '),
+      homeGoalsFor: homePoint?.goalsFor ?? null,
+      homeGoalsAgainst: homePoint?.goalsAgainst ?? null,
+      awayGoalsFor: awayPoint?.goalsFor ?? null,
+      awayGoalsAgainst: awayPoint?.goalsAgainst ?? null,
+    };
+  });
+  const matchRows = [
+    ...home.trends.map((point) => ({ ...point, side: home.name, sideKey: 'home' })),
+    ...away.trends.map((point) => ({ ...point, side: away.name, sideKey: 'away' })),
   ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  const shared = new Map<number, { date: string; homeGoals: number | null; awayGoals: number | null; homeXg: number | null; awayXg: number | null; homeLabel: string; awayLabel: string }>();
-  home.trends.forEach((point, index) => {
-    shared.set(point.fixtureId, {
-      date: date(point.date), homeGoals: point.goalsFor, awayGoals: point.goalsAgainst,
-      homeXg: point.expectedGoalsFor, awayXg: point.expectedGoalsAgainst,
-      homeLabel: `${point.opponent} · ${point.score}`,
-      awayLabel: '',
-    });
-  });
-  away.trends.forEach((point) => {
-    const row = shared.get(point.fixtureId);
-    if (row) {
-      row.awayGoals = point.goalsFor;
-      row.awayXg = point.expectedGoalsFor;
-      row.awayLabel = `${point.opponent} · ${point.score}`;
-    }
-  });
-  const trendRows = rows.map((point, index) => ({
-    ...point,
-    label: `${point.side === home.name ? 'H' : 'A'} · ${date(point.date)} · ${point.opponent}`,
-    order: index + 1,
-  }));
   const bothXg = [...home.trends, ...away.trends].filter((point) => point.expectedGoalsFor !== null).length;
   return <div className="space-y-5">
     <div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[8px] font-bold uppercase tracking-[.1em] text-[#858982]">Goals scored and conceded · chronological</p>
-        <p className="mono text-[8px] text-[#9a9c93]">Each point is one completed match</p>
+        <p className="text-[8px] font-bold uppercase tracking-[.1em] text-[#858982]">Goals scored and conceded · each team ordered oldest to latest</p>
+        <p className="mono text-[8px] text-[#9a9c93]">Match 1–5 in each team's sample</p>
       </div>
       {trendRows.length ? <div className="h-[230px] w-full" data-testid="matchup-trend-chart">
         <ResponsiveContainer width="100%" height="100%" debounce={0}>
           <LineChart data={trendRows} margin={{ top: 8, right: 10, left: -20, bottom: 5 }}>
             <CartesianGrid stroke={GRID} strokeDasharray="3 4" />
-            <XAxis dataKey="label" hide />
+            <XAxis dataKey="match" tick={{ fontSize: 8, fill: TICK }} stroke={GRID} />
             <YAxis allowDecimals={false} tick={{ fontSize: 9, fill: TICK }} stroke={GRID} />
-            <Tooltip isAnimationActive={false} cursor={{ stroke: '#c8c7bd', strokeDasharray: '3 3' }} contentStyle={{ border: '1px solid #deddd4', borderRadius: 8, fontSize: 10, background: '#fbfaf6' }} labelFormatter={(_, payload) => payload?.[0]?.payload?.label ?? ''} />
-            <Line dataKey="goalsFor" name="Goals for" stroke={HOME} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} isAnimationActive={false} />
-            <Line dataKey="goalsAgainst" name="Goals against" stroke={AWAY} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} isAnimationActive={false} />
+            <Tooltip isAnimationActive={false} cursor={{ stroke: '#c8c7bd', strokeDasharray: '3 3' }} contentStyle={{ border: '1px solid #deddd4', borderRadius: 8, fontSize: 9, background: '#fbfaf6' }} labelFormatter={(_, payload) => payload?.[0]?.payload?.tooltipLabel ?? ''} />
+            <Line dataKey="homeGoalsFor" name={`${home.name} · scored`} stroke={HOME} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} isAnimationActive={false} connectNulls={false} />
+            <Line dataKey="homeGoalsAgainst" name={`${home.name} · conceded`} stroke="#dfa88f" strokeWidth={1.7} strokeDasharray="4 3" dot={{ r: 2 }} isAnimationActive={false} connectNulls={false} />
+            <Line dataKey="awayGoalsFor" name={`${away.name} · scored`} stroke={AWAY} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} isAnimationActive={false} connectNulls={false} />
+            <Line dataKey="awayGoalsAgainst" name={`${away.name} · conceded`} stroke="#9db4a2" strokeWidth={1.7} strokeDasharray="4 3" dot={{ r: 2 }} isAnimationActive={false} connectNulls={false} />
           </LineChart>
         </ResponsiveContainer>
       </div> : <p className="rounded-lg border border-dashed border-[#deddd4] px-3 py-5 text-center text-[9px] text-[#898d84]">No completed score trend is available.</p>}
-      <div className="mt-2 flex flex-wrap gap-3 text-[8px] text-[#737d76]"><span><i className="mr-1.5 inline-block h-0.5 w-3 align-middle" style={{ background: HOME }} />Goals for</span><span><i className="mr-1.5 inline-block h-0.5 w-3 align-middle" style={{ background: AWAY }} />Goals against</span></div>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5 text-[7px] text-[#737d76]">
+        <span><i className="mr-1 inline-block h-0.5 w-3 align-middle" style={{ background: HOME }} />{home.name} scored</span>
+        <span><i className="mr-1 inline-block h-0.5 w-3 align-middle" style={{ background: '#dfa88f' }} />{home.name} conceded</span>
+        <span><i className="mr-1 inline-block h-0.5 w-3 align-middle" style={{ background: AWAY }} />{away.name} scored</span>
+        <span><i className="mr-1 inline-block h-0.5 w-3 align-middle" style={{ background: '#9db4a2' }} />{away.name} conceded</span>
+      </div>
     </div>
     <div className="border-t border-[#e8e6de] pt-4">
       <p className="mb-2 text-[8px] font-bold uppercase tracking-[.1em] text-[#858982]">Recent match evidence, by side</p>
       {bothXg ? <div className="overflow-x-auto">
-        <table className="w-full min-w-[500px] text-left text-[8px]" data-testid="matchup-trend-table">
+         <table className="w-full min-w-[500px] text-left text-[8px]" data-testid="matchup-trend-table">
           <thead className="text-[7px] uppercase tracking-[.08em] text-[#92968d]"><tr><th className="pb-2">Side / opponent</th><th className="pb-2 text-center">Score</th><th className="pb-2 text-center">xG for</th><th className="pb-2 text-center">xG against</th><th className="pb-2 text-center">Shots</th><th className="pb-2 text-center">Poss.</th></tr></thead>
-          <tbody>{trendRows.map((point) => <tr key={`${point.fixtureId}-${point.side}`} className="border-t border-[#eceae2]" data-testid={`matchup-trend-${point.fixtureId}-${point.side === home.name ? 'home' : 'away'}`}>
-            <td className="py-2 pr-2"><span className="font-bold text-[#56675f]">{point.side === home.name ? 'H' : 'A'}</span> · {point.opponent} <span className="text-[#989a91]">· {date(point.date)}</span></td>
+           <tbody>{matchRows.map((point) => <tr key={`${point.fixtureId}-${point.sideKey}`} className="border-t border-[#eceae2]" data-testid={`matchup-trend-${point.fixtureId}-${point.sideKey}`}>
+             <td className="py-2 pr-2"><span className="font-bold text-[#56675f]">{point.sideKey === 'home' ? 'H' : 'A'}</span> · {point.opponent} <span className="text-[#989a91]">· {date(point.date)}</span></td>
             <td className="mono py-2 text-center">{point.score}</td><td className="mono py-2 text-center">{number(point.expectedGoalsFor)}</td><td className="mono py-2 text-center">{number(point.expectedGoalsAgainst)}</td><td className="mono py-2 text-center">{point.shotsFor ?? '—'} / {point.shotsAgainst ?? '—'}</td><td className="mono py-2 text-center">{percent(point.possession)}</td>
           </tr>)}</tbody>
         </table>
@@ -173,6 +178,19 @@ function TeamTactics({ team }: { team: MatchupTeamAnalysis }) {
       <p className="text-[7px] font-bold uppercase tracking-[.1em] text-[#92968d]">Observed formations</p>
       {team.formations.length ? <div className="mt-1.5 flex flex-wrap gap-1.5">{team.formations.map((formation) => <span key={formation.name} className="mono rounded-md border border-[#e3e4d9] bg-[#f3f4ed] px-2 py-1 text-[8px] text-[#607366]" data-testid={`matchup-formation-${team.id}-${formation.name}`}>{formation.name} · {formation.count}</span>)}</div> : <p className="mt-1 text-[8px] text-[#96998f]">Formation data not returned.</p>}
     </div>
+    <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-[#eceae2] pt-2.5">
+      {[
+        ['Possession', percent(team.possessionAverage)],
+        ['Pass accuracy', percent(team.passAccuracyAverage)],
+        ['Final-third entries', valueLabel(team.finalThirdEntriesAverage, '/ match')],
+        ['Touches in box', valueLabel(team.boxTouchesAverage, '/ match')],
+        ['Corners', valueLabel(team.cornersAverage, '/ match')],
+        ['Tackles · interceptions / match', `${valueLabel(team.tacklesAverage, '')} · ${valueLabel(team.interceptionsAverage, '')}`],
+      ].map(([label, value]) => <div key={label}>
+        <p className="text-[7px] font-bold uppercase tracking-[.07em] text-[#92968d]">{label}</p>
+        <p className="mono mt-0.5 text-[8px] text-[#68756d]">{value}</p>
+      </div>)}
+    </div>
     <div className="mt-3 border-t border-[#eceae2] pt-2.5">
       <p className="text-[7px] font-bold uppercase tracking-[.1em] text-[#92968d]">Substitution and later-goal record</p>
       {substitutions.matchesWithChanges ? <p className="mt-1.5 text-[8px] leading-4 text-[#737d76]" data-testid={`matchup-subs-${team.id}`}>
@@ -183,15 +201,89 @@ function TeamTactics({ team }: { team: MatchupTeamAnalysis }) {
   </article>;
 }
 
+function MatchFactors({ home, away, matchDate }: {
+  home: MatchupTeamAnalysis;
+  away: MatchupTeamAnalysis;
+  matchDate?: string;
+}) {
+  const factors: Array<{ team: string; text: string }> = [];
+  for (const team of [home, away]) {
+    if (team.expectedGoalsForAverage !== null && team.goalsForAverage !== null) {
+      const conversionGap = team.expectedGoalsForAverage - team.goalsForAverage;
+      if (Math.abs(conversionGap) >= 0.4) {
+        factors.push({
+          team: team.name,
+          text: conversionGap > 0
+            ? `Goals trailed xG by ${number(conversionGap)} per match. Similar chance volume without improved conversion could leave their scoring below their chance quality.`
+            : `Goals exceeded xG by ${number(Math.abs(conversionGap))} per match. Sustaining that finishing rate is uncertain unless chance quality also rises.`,
+        });
+      }
+    }
+    if (team.expectedGoalsAgainstAverage !== null && team.expectedGoalsAgainstAverage >= 1.5) {
+      factors.push({
+        team: team.name,
+        text: `Opponents averaged ${number(team.expectedGoalsAgainstAverage)} xG. Reducing the quality or volume of chances is a key defensive question.`,
+      });
+    }
+    if (team.goalsForVolatility !== null && team.goalsForVolatility >= 0.9) {
+      factors.push({
+        team: team.name,
+        text: `Scoring varied across the sample (goal standard deviation ${number(team.goalsForVolatility)}); recent output is less consistent.`,
+      });
+    }
+    if (team.formations.length > 1) {
+      factors.push({
+        team: team.name,
+        text: `More than one formation appeared in the five-match sample (${team.formations.map((item) => `${item.name} ${item.count}×`).join(', ')}). The shape selected for this fixture is not supplied.`,
+      });
+    }
+    const availability = team.playerAvailability.find((row) =>
+      row.withMatches >= 2 && row.withoutMatches >= 2 &&
+      row.pointsPerMatchWith !== null && row.pointsPerMatchWithout !== null &&
+      Math.abs(row.pointsPerMatchWith - row.pointsPerMatchWithout) >= 0.75,
+    );
+    if (availability) {
+      factors.push({
+        team: team.name,
+        text: `${availability.playerName} appeared in ${availability.withMatches} covered matches and was not recorded on the pitch in ${availability.withoutMatches}; points per match differed by ${number(Math.abs(availability.pointsPerMatchWith! - availability.pointsPerMatchWithout!))}. This small split is descriptive, not causal.`,
+      });
+    }
+  }
+
+  if (matchDate) {
+    const kickoff = new Date(matchDate).getTime();
+    for (const team of [home, away]) {
+      const latest = team.trends.at(-1);
+      const lastMatch = latest ? new Date(latest.date).getTime() : Number.NaN;
+      const restDays = Math.floor((kickoff - lastMatch) / 86_400_000);
+      if (Number.isFinite(kickoff) && Number.isFinite(lastMatch) && restDays >= 0 && restDays <= 30) {
+        factors.push({ team: team.name, text: `${restDays} day${restDays === 1 ? '' : 's'} between the latest recorded match and this fixture; schedule context only, not a fatigue measurement.` });
+      }
+    }
+  }
+
+  return <Card title="What could shift the matchup" eyebrow="Evidence-based watchlist" testId="matchup-watchlist">
+    {factors.length ? <ul className="space-y-2.5">
+      {factors.slice(0, 7).map((factor, index) => <li key={`${factor.team}-${index}`} className="flex gap-2 text-[8px] leading-4 text-[#68756d]" data-testid={`matchup-watch-factor-${index}`}>
+        <span className="mono mt-0.5 shrink-0 text-[8px] text-[#9b7160]">{factor.team === home.name ? 'H' : 'A'}</span>
+        <span><strong className="text-[#53635b]">{factor.team}:</strong> {factor.text}</span>
+      </li>)}
+    </ul> : <p className="text-[8px] leading-4 text-[#858982]">No standout conversion, defensive, volatility, or formation signal was found in the returned sample.</p>}
+    <p className="mt-3 border-t border-[#eceae2] pt-2.5 text-[7px] leading-4 text-[#92958b]" data-testid="matchup-watchlist-missing-context">
+      Confirmed lineups and injury/suspension reports are not included in the current fixture-detail feed, so they are not used to adjust these estimates. Watchlist items are possible swing factors, not predicted events.
+    </p>
+  </Card>;
+}
+
 function PlayerSection({ team }: { team: MatchupTeamAnalysis }) {
   return <section className="rounded-lg border border-[#e5e3da] bg-[#fcfbf7] p-3.5" data-testid={`matchup-players-${team.id}`}>
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h4 className="text-[10px] font-extrabold text-[#4b5d55]">{team.name}</h4><span className="mono text-[8px] text-[#92968d]">leaders from returned player records</span></div>
     {team.playerLeaders.length ? <div className="overflow-x-auto">
-      <table className="w-full min-w-[600px] text-left text-[8px]" data-testid={`matchup-player-table-${team.id}`}>
-        <thead className="text-[7px] uppercase tracking-[.08em] text-[#92968d]"><tr><th className="pb-2">Player</th><th className="pb-2 text-center">Apps / starts</th><th className="pb-2 text-center">Mins</th><th className="pb-2 text-center">Rating</th><th className="pb-2 text-center">G / A</th><th className="pb-2 text-center">xG / xA</th><th className="pb-2 text-center">Key pass / tackles</th></tr></thead>
+      <table className="w-full min-w-[800px] text-left text-[8px]" data-testid={`matchup-player-table-${team.id}`}>
+        <thead className="text-[7px] uppercase tracking-[.08em] text-[#92968d]"><tr><th className="pb-2">Player</th><th className="pb-2 text-center">Apps / starts</th><th className="pb-2 text-center">Minutes</th><th className="pb-2 text-center">Avg rating</th><th className="pb-2 text-center">G / A · total</th><th className="pb-2 text-center">xG / xA · per app</th><th className="pb-2 text-center">Shots / on · total</th><th className="pb-2 text-center">Key pass / tackles · total</th><th className="pb-2 text-center">Duels / interceptions · total</th></tr></thead>
         <tbody>{team.playerLeaders.map((player) => <tr key={player.id ?? player.name} className="border-t border-[#eceae2]" data-testid={`matchup-player-${team.id}-${player.id ?? player.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
           <td className="py-2 pr-2"><span className="font-bold text-[#52615b]">{player.name}</span>{player.position && <span className="ml-1 text-[#96998f]">{player.position}</span>}</td>
-          <td className="mono py-2 text-center">{player.appearances} / {player.starts}</td><td className="mono py-2 text-center">{player.minutes}</td><td className="mono py-2 text-center">{number(player.averageRating)}</td><td className="mono py-2 text-center">{player.goals} / {player.assists}</td><td className="mono py-2 text-center">{number(player.expectedGoals)} / {number(player.expectedAssists)}</td><td className="mono py-2 text-center">{player.keyPasses} / {player.tackles}</td>
+          <td className="mono py-2 text-center">{player.appearances} / {player.starts}</td><td className="mono py-2 text-center">{player.minutes}</td><td className="mono py-2 text-center">{number(player.averageRating)}</td><td className="mono py-2 text-center">{player.goals} / {player.assists}</td><td className="mono py-2 text-center">{number(player.expectedGoals)} / {number(player.expectedAssists)}</td><td className="mono py-2 text-center">{player.shots} / {player.shotsOnTarget}</td><td className="mono py-2 text-center">{player.keyPasses} / {player.tackles}</td><td className="mono py-2 text-center">{player.duelsWon} / {player.interceptions}</td>
         </tr>)}</tbody>
       </table>
     </div> : <p className="rounded-lg border border-dashed border-[#deddd4] px-3 py-4 text-[8px] text-[#898d84]">Player records are not sufficient to compare leaders.</p>}
@@ -205,8 +297,9 @@ function PlayerSection({ team }: { team: MatchupTeamAnalysis }) {
   </section>;
 }
 
-export function MatchupAnalysisPanel({ data, isLoading, isError, error, onRetry }: {
+export function MatchupAnalysisPanel({ data, matchDate, isLoading, isError, error, onRetry }: {
   data?: FootballMatchLastFive;
+  matchDate?: string;
   isLoading: boolean;
   isError: boolean;
   error: unknown;
@@ -260,6 +353,8 @@ export function MatchupAnalysisPanel({ data, isLoading, isError, error, onRetry 
       <p className="mt-3 border-t border-[#eceae2] pt-2.5 text-[8px] leading-4 text-[#92958b]" data-testid="matchup-sample-limit">Five-match samples are small and may omit relevant context. xG is available for {pairedXg} team-match observations; recorded coverage is shown beside each metric.</p>
     </Card>
 
+    <MatchFactors home={home} away={away} matchDate={matchDate} />
+
     <Card title="Recent match-to-match shape" eyebrow="Results and chance profile" testId="matchup-trends">
       <Trends home={home} away={away} />
     </Card>
@@ -300,6 +395,6 @@ export function MatchupAnalysisPanel({ data, isLoading, isError, error, onRetry 
       <p className="mt-3 rounded-lg border border-[#e6e4dc] bg-[#f7f6f0] px-3 py-2 text-[8px] leading-4 text-[#858982]">With/without results describe only the sample in which lineup and player-stat records were available. These splits are descriptive, not causal; absence from a record does not establish injury, selection reason, or tactical intent.</p>
     </Card>
 
-    <p className="rounded-lg border border-[#e4d7c9] bg-[#faf4ed] px-3.5 py-2.5 text-[8px] leading-4 text-[#806b59]" data-testid="matchup-data-limitations">Source limits: no shot coordinates, xG progression timeline, or archived completed-fixture odds are available in this feed. Current-fixture markets, when supplied, are shown in the model section below.</p>
+    <p className="rounded-lg border border-[#e4d7c9] bg-[#faf4ed] px-3.5 py-2.5 text-[8px] leading-4 text-[#806b59]" data-testid="matchup-data-limitations">Source limits: shot coordinates and xG progression timelines are not supplied; archived odds may be missing for completed matches. The Last five tab shows any markets that were returned. Current-fixture markets, when supplied, are compared in the price section above.</p>
   </section>;
 }
