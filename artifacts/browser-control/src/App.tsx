@@ -44,7 +44,7 @@ import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter
 import FixturesPage from '@/pages/fixtures';
 import MatchDetailsPage from '@/pages/match-details';
 import ProcessingPage from '@/pages/processing';
-import DatabasePage from '@/pages/database';
+import DatabasePage, { TesterPage } from '@/pages/database';
 
 const queryClient = new QueryClient();
 
@@ -824,6 +824,7 @@ function Router() {
         <Route path="/matches/:fixtureId" component={MatchDetailsPage} />
         <Route path="/processing" component={ProcessingPage} />
         <Route path="/database" component={DatabasePage} />
+        <Route path="/tester" component={TesterPage} />
         <Route component={NotFound} />
       </Switch>
     </RoutedErrorBoundary>

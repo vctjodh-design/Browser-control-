@@ -18,7 +18,7 @@ import {
 } from '@workspace/api-client-react';
 import type { FootballProcessedMatchSummary, FootballTesterMatchSummary } from '@workspace/api-client-react';
 import { Link, useLocation } from 'wouter';
-import { Archive, Braces, Check, ChevronRight, CircleAlert, Database, FileJson2, FlaskConical, RefreshCw, Search, Trash2, Trophy, X } from 'lucide-react';
+import { Archive, Braces, CalendarDays, Check, ChevronRight, CircleAlert, Database, FileJson2, FlaskConical, RefreshCw, Search, Trash2, Trophy, X } from 'lucide-react';
 
 type ArchiveKind = 'database' | 'tester';
 type ArchiveRecord = FootballProcessedMatchSummary | FootballTesterMatchSummary;
@@ -129,13 +129,14 @@ function ArchivePage({ kind }: { kind: ArchiveKind }) {
   const [routeSearch, setRouteSearch] = useState(() => new URLSearchParams(window.location.search));
   const [searchText, setSearchText] = useState('');
   const [offset, setOffset] = useState(0);
+  const [date, setDate] = useState(() => new URLSearchParams(window.location.search).get('date') ?? '');
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearError, setClearError] = useState('');
   const detailRef = useRef<HTMLDivElement>(null);
   const deleteArchive = useDeleteAllFootballProcessedMatches();
   const deleteTester = useDeleteAllFootballTesterMatches();
   const limit = 50;
-  const params = useMemo(() => ({ limit, offset }), [offset]);
+  const params = useMemo(() => ({ limit, offset, ...(date ? { date } : {}) }), [date, offset]);
   const archiveQuery = useGetFootballProcessedMatches(params, {
     query: { enabled: kind === 'database', queryKey: getGetFootballProcessedMatchesQueryKey(params) },
   });
@@ -155,6 +156,7 @@ function ArchivePage({ kind }: { kind: ArchiveKind }) {
     const syncRouteSearch = () => {
       const next = new URLSearchParams(window.location.search);
       setRouteSearch(next);
+      setDate(next.get('date') ?? '');
       setOffset(0);
     };
     window.addEventListener('popstate', syncRouteSearch);
@@ -171,7 +173,17 @@ function ArchivePage({ kind }: { kind: ArchiveKind }) {
 
   const selectRecord = (id: number | null) => {
     const query = new URLSearchParams();
+    if (date) query.set('date', date);
     if (id) query.set('fixture', String(id));
+    setRouteSearch(query);
+    setLocation(`/${kind}${query.size ? `?${query.toString()}` : ''}`);
+  };
+  const changeDate = (value: string) => {
+    setDate(value);
+    setOffset(0);
+    const query = new URLSearchParams();
+    if (value) query.set('date', value);
+    if (selectedId) query.set('fixture', String(selectedId));
     setRouteSearch(query);
     setLocation(`/${kind}${query.size ? `?${query.toString()}` : ''}`);
   };
@@ -194,12 +206,12 @@ function ArchivePage({ kind }: { kind: ArchiveKind }) {
   };
 
   return <main className="screen-noise min-h-[100dvh] bg-[#f2f0e8] text-[#243443]">
-    <Header />
+    <Header kind={kind} />
     <div className="mx-auto max-w-[1420px] px-4 pb-12 pt-7 sm:px-7 sm:pt-10">
       <div className="animate-rise mb-7 flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
         <div><p className="mono mb-2 text-[10px] uppercase tracking-[.19em] text-[#9b7160]">Research archive / 02</p><h1 className="text-[32px] font-extrabold leading-[1.04] tracking-[-.06em] text-[#263746] sm:text-[46px]">A record you can <span className="text-[#d96f51]">inspect.</span></h1><p className="mt-3 max-w-[560px] text-[12px] leading-6 text-[#727973]">Search saved match summaries by date, then inspect the exact analysis payloads stored for each fixture.</p></div>
         <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
-          <button type="button" onClick={() => { setClearError(''); setConfirmClear(true); }} disabled={totalSaved === 0 || allRecordsQuery.isLoading || deleteAll.isPending} className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#e5c7ba] bg-[#fff8f3] px-3.5 text-[10px] font-extrabold text-[#a45340] hover:bg-white disabled:cursor-not-allowed disabled:opacity-45" data-testid="button-clear-archive"><Trash2 size={13} /> Delete all matches</button>
+          <button type="button" onClick={() => { setClearError(''); setConfirmClear(true); }} disabled={totalSaved === 0 || listQuery.isLoading || deletePending} className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#e5c7ba] bg-[#fff8f3] px-3.5 text-[10px] font-extrabold text-[#a45340] hover:bg-white disabled:cursor-not-allowed disabled:opacity-45" data-testid="button-clear-archive"><Trash2 size={13} /> Delete all matches</button>
           <Link href={date ? `/processing?date=${date}` : '/processing'} className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f9f8f3] px-3.5 text-[10px] font-extrabold text-[#60716a] hover:bg-white" data-testid="link-start-processing"><RefreshCw size={13} /> Start an import</Link>
         </div>
       </div>
@@ -214,24 +226,32 @@ function ArchivePage({ kind }: { kind: ArchiveKind }) {
           : listQuery.isError ? <div className="m-4 rounded-xl border border-[#e3c3b6] bg-[#fff6f0] p-5" role="alert" data-testid="status-archive-error"><div className="flex gap-2 text-[11px] font-bold text-[#784b3e]"><CircleAlert size={15} /> Archive unavailable</div><p className="mt-2 text-[10px] text-[#8c6b5e]">{errorText(listQuery.error)}</p><button onClick={()=>void listQuery.refetch()} className="mt-3 inline-flex items-center gap-2 text-[10px] font-extrabold text-[#855542]" data-testid="button-retry-archive"><RefreshCw size={12} /> Retry</button></div>
           : rows.length ? <><div className="divide-y divide-[#e8e6de]" data-testid="list-processed-matches">{rows.map((match)=> <button key={match.fixtureId} type="button" onClick={()=>selectRecord(match.fixtureId)} className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-left transition hover:bg-[#fbfaf6] ${selectedId === match.fixtureId ? 'bg-[#edf2ec]' : ''}`} data-testid={`row-processed-match-${match.fixtureId}`} aria-pressed={selectedId === match.fixtureId}>
             <span className="min-w-0"><span className="flex flex-wrap items-center gap-1.5"><span className="truncate text-[10px] font-extrabold text-[#455951]">{match.homeTeamName} <span className="font-medium text-[#9a9a90]">vs</span> {match.awayTeamName}</span><span className={`rounded-full px-1.5 py-0.5 text-[7px] font-extrabold uppercase ${match.completeness === 'complete' ? 'bg-[#e5eee7] text-[#4e755c]' : 'bg-[#fbf1df] text-[#986b32]'}`}>{match.completeness}</span></span><span className="mt-1 block truncate text-[8px] text-[#92958c]">{dateLabel(match.date)} · {match.competition} · #{match.fixtureId}</span><span className="mt-1 block text-[8px] text-[#899087]">{match.issueCount} issues · league avg {match.leagueAverageGoals === null ? 'unavailable' : match.leagueAverageGoals.toFixed(2)}</span></span>
-            <span className="flex items-center gap-2"><span className="mono text-[13px] font-medium text-[#344c43]">{score(match)}</span><ChevronRight size={14} className="text-[#9a9c92]" /></span>
+            <span className="flex items-center gap-2"><span className="mono text-[13px] font-medium text-[#344c43]">{kind === 'database' ? score(match as FootballProcessedMatchSummary) : 'PRE-MATCH'}</span><ChevronRight size={14} className="text-[#9a9c92]" /></span>
           </button>)}</div>
           <div className="flex items-center justify-between gap-3 border-t border-[#e8e6de] bg-[#f5f4ed] px-4 py-3"><span className="text-[9px] text-[#858982]">Showing {offset + 1}–{Math.min(offset + limit, data?.total ?? 0)} of {data?.total ?? 0}{normalized ? ' on this page' : ''}</span><div className="flex gap-1"><button type="button" onClick={()=>setOffset((value)=>Math.max(0,value-limit))} disabled={offset===0} className="rounded-md border border-[#d8d7ce] bg-[#fbfaf6] px-2.5 py-1.5 text-[9px] font-bold disabled:opacity-40" data-testid="button-previous-page">Previous</button><button type="button" onClick={()=>setOffset((value)=>value+limit)} disabled={offset+limit >= (data?.total ?? 0)} className="rounded-md border border-[#d8d7ce] bg-[#fbfaf6] px-2.5 py-1.5 text-[9px] font-bold disabled:opacity-40" data-testid="button-next-page">Next</button></div></div></>
           : <div className="flex min-h-[290px] flex-col items-center justify-center px-6 py-12 text-center" data-testid="status-archive-empty"><span className="grid size-12 place-items-center rounded-2xl border border-[#dfe4dc] bg-[#edf2ec] text-[#718879]"><Database size={20} /></span><h3 className="mt-4 text-[15px] font-extrabold text-[#354750]">{normalized ? 'No matching records' : date ? 'No saved matches for this date' : 'Archive is empty'}</h3><p className="mt-2 max-w-[320px] text-[10px] leading-5 text-[#858982]">{normalized ? 'Try a different team, competition or fixture ID.' : 'Completed match days imported through Processing will appear here. No records are fabricated or inferred.'}</p>{normalized && <button type="button" onClick={()=>setSearchText('')} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#253746] px-3 py-2 text-[9px] font-extrabold text-[#f8f2e7]" data-testid="button-reset-search"><X size={12} /> Clear search</button>}</div>}
         </section>
-        <div ref={detailRef} className={`min-w-0 scroll-mt-4 ${selectedId ? 'order-1 xl:order-2' : 'order-2'}`}><DetailPanel fixtureId={selectedId} /></div>
+        <div ref={detailRef} className={`min-w-0 scroll-mt-4 ${selectedId ? 'order-1 xl:order-2' : 'order-2'}`}><DetailPanel fixtureId={selectedId} kind={kind} /></div>
       </div>
       {confirmClear && <div className="fixed inset-0 z-50 grid place-items-center bg-[#17232c]/45 p-4" role="presentation">
         <section className="w-full max-w-md rounded-2xl border border-[#deddd4] bg-[#fbfaf6] p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="clear-archive-title" aria-describedby="clear-archive-description" data-testid="dialog-clear-archive">
           <div className="flex items-start gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#fbede6] text-[#a45340]"><Trash2 size={17} /></span><div><h2 id="clear-archive-title" className="text-[15px] font-extrabold text-[#344550]">Delete all archived matches?</h2><p id="clear-archive-description" className="mt-2 text-[11px] leading-5 text-[#727973]">This permanently deletes {totalSaved} saved match records. Processing job history stays. If any import is running, the archive will not be cleared until it finishes. This cannot be undone.</p></div></div>
           {clearError && <p className="mt-4 rounded-lg border border-[#e3c3b6] bg-[#fff6f0] px-3 py-2 text-[10px] text-[#8c5144]" role="alert" data-testid="error-clear-archive">{clearError}</p>}
           <div className="mt-5 flex justify-end gap-2">
-            <button type="button" onClick={() => setConfirmClear(false)} disabled={deleteAll.isPending} className="h-10 rounded-lg border border-[#d8d7ce] bg-white px-4 text-[10px] font-extrabold text-[#64716d] disabled:opacity-50" data-testid="button-cancel-clear">Cancel</button>
-            <button type="button" onClick={clearArchive} disabled={deleteAll.isPending} className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#aa513e] px-4 text-[10px] font-extrabold text-white hover:bg-[#923f2f] disabled:opacity-50" data-testid="button-confirm-clear">{deleteAll.isPending && <RefreshCw size={13} className="animate-spin" />}{deleteAll.isPending ? 'Deleting…' : 'Delete all matches'}</button>
+            <button type="button" onClick={() => setConfirmClear(false)} disabled={deletePending} className="h-10 rounded-lg border border-[#d8d7ce] bg-white px-4 text-[10px] font-extrabold text-[#64716d] disabled:opacity-50" data-testid="button-cancel-clear">Cancel</button>
+            <button type="button" onClick={clearArchive} disabled={deletePending} className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#aa513e] px-4 text-[10px] font-extrabold text-white hover:bg-[#923f2f] disabled:opacity-50" data-testid="button-confirm-clear">{deletePending && <RefreshCw size={13} className="animate-spin" />}{deletePending ? 'Deleting…' : 'Delete all matches'}</button>
           </div>
         </section>
       </div>}
       <footer className="mt-5 flex flex-wrap items-center gap-2 px-1 text-[9px] text-[#8b8d84]"><Check size={12} /> Stored payloads are displayed as received; unavailable fields remain unavailable. <span className="text-[#9b7160]">Published deployments reset local files on restart or republication, so this SQLite archive is not production-durable.</span></footer>
     </div>
   </main>;
+}
+
+export default function DatabasePage() {
+  return <ArchivePage kind="database" />;
+}
+
+export function TesterPage() {
+  return <ArchivePage kind="tester" />;
 }
