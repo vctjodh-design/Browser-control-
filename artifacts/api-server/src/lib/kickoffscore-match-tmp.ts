@@ -570,7 +570,7 @@ async function loadTmpContext(
   ]);
   const issues: FootballMatchTmpIssue[] = [];
 
-  const oddsHistory = await withConcurrency(matches, 6, async (match) => {
+  const oddsHistory = await withConcurrency(matches, 2, async (match) => {
     try {
       return await getOddsForMatch(match);
     } catch (error) {
@@ -591,7 +591,7 @@ async function loadTmpContext(
   const leagueSeasons = uniqueLeagueSeasons(matches);
   const standingsResults = await withConcurrency(
     leagueSeasons,
-    4,
+    1,
     async (leagueSeason) => {
       try {
         return {

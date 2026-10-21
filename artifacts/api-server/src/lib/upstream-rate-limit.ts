@@ -4,7 +4,10 @@ type RateLimitState = {
 };
 
 const MAX_FALLBACK_DELAY_MS = 60_000;
+const MIN_REQUEST_INTERVAL_MS = 400;
 const rateLimits = new Map<string, RateLimitState>();
+const requestTails = new Map<string, Promise<void>>();
+const lastRequestAt = new Map<string, number>();
 
 export class UpstreamRateLimitError extends Error {
   constructor(
@@ -49,6 +52,40 @@ function rateLimitError(state: RateLimitState): UpstreamRateLimitError {
   );
 }
 
+function pause(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function fetchAtPoliteRate(
+  origin: string,
+  input: string | URL,
+  init: RequestInit,
+): Promise<Response> {
+  const previous = requestTails.get(origin) ?? Promise.resolve();
+  let release = () => {};
+  const turn = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => turn);
+  requestTails.set(origin, tail);
+  await previous;
+  try {
+    const wait = (lastRequestAt.get(origin) ?? 0) + MIN_REQUEST_INTERVAL_MS - Date.now();
+    if (wait > 0) await pause(wait);
+
+    const activeLimit = rateLimits.get(origin);
+    if (activeLimit && activeLimit.retryAt > Date.now()) {
+      throw rateLimitError(activeLimit);
+    }
+
+    lastRequestAt.set(origin, Date.now());
+    return await fetch(input, init);
+  } finally {
+    release();
+    if (requestTails.get(origin) === tail) requestTails.delete(origin);
+  }
+}
+
 export async function fetchRespectingRateLimits(
   input: string | URL,
   init: RequestInit,
@@ -61,7 +98,7 @@ export async function fetchRespectingRateLimits(
     throw rateLimitError(existing);
   }
 
-  const response = await fetch(input, init);
+  const response = await fetchAtPoliteRate(origin, input, init);
 
   const remainingHeader =
     response.headers.get("x-ratelimit-remaining") ??

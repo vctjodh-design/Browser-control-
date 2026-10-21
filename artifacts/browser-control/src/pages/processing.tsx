@@ -1,9 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
+  getGetFootballProcessingForDateQueryKey,
   getGetFootballProcessedMatchesQueryKey,
   getGetFootballProcessingJobQueryKey,
   useGetFootballProcessedMatches,
+  useGetFootballProcessingForDate,
   useGetFootballProcessingJob,
   useStartFootballBulkProcessing,
 } from '@workspace/api-client-react';
@@ -15,6 +17,28 @@ function localDate(date = new Date()) {
 }
 function lastCompletedDate() {
   return localDate(new Date(Date.now() - 86400000));
+}
+
+function savedProcessingDate() {
+  const urlDate = new URLSearchParams(window.location.search).get('date');
+  try {
+    const saved = urlDate ?? localStorage.getItem('football-processing-date');
+    const parsed = saved ? new Date(`${saved}T00:00:00.000Z`) : null;
+    const isValidPastDate = Boolean(
+      saved &&
+      /^\d{4}-\d{2}-\d{2}$/.test(saved) &&
+      parsed &&
+      parsed.toISOString().slice(0, 10) === saved &&
+      saved < localDate(),
+    );
+    if (isValidPastDate && saved) {
+      localStorage.setItem('football-processing-date', saved);
+      return saved;
+    }
+  } catch {
+    // Storage can be unavailable in private browsing; use the latest completed day.
+  }
+  return lastCompletedDate();
 }
 
 function readableError(error: unknown) {
@@ -40,8 +64,16 @@ function Header() {
 
 export default function ProcessingPage() {
   const client = useQueryClient();
-  const [date, setDate] = useState(lastCompletedDate);
-  const [jobId, setJobId] = useState('');
+  const [date, setDate] = useState(savedProcessingDate);
+  const lookupParams = { date };
+  const lookupQuery = useGetFootballProcessingForDate(lookupParams, {
+    query: {
+      enabled: Boolean(date),
+      queryKey: getGetFootballProcessingForDateQueryKey(lookupParams),
+      refetchOnMount: 'always',
+    },
+  });
+  const jobId = lookupQuery.data?.job?.id ?? '';
   const start = useStartFootballBulkProcessing();
   const jobQuery = useGetFootballProcessingJob(jobId, {
     query: { enabled: Boolean(jobId), queryKey: getGetFootballProcessingJobQueryKey(jobId), refetchInterval: (query) => {
@@ -65,8 +97,13 @@ export default function ProcessingPage() {
     if (!date || start.isPending) return;
     start.mutate({ data: { date } }, {
       onSuccess: (created) => {
-        setJobId(created.id);
+        try {
+          localStorage.setItem('football-processing-date', date);
+        } catch {
+          // The server-side job remains discoverable even when browser storage is disabled.
+        }
         client.setQueryData(getGetFootballProcessingJobQueryKey(created.id), created);
+        client.setQueryData(getGetFootballProcessingForDateQueryKey(lookupParams), { job: created });
         void client.invalidateQueries({ queryKey: getGetFootballProcessedMatchesQueryKey({ date, limit: 100, offset: 0 }) });
       },
     });
@@ -86,7 +123,14 @@ export default function ProcessingPage() {
         <form onSubmit={submit} className="rounded-[15px] border border-[#d8d7ce] bg-[#f9f8f3] p-4 shadow-[0_10px_30px_rgba(47,59,64,.045)]" aria-label="Start match-day import">
           <label htmlFor="processing-date" className="mb-2 block text-[10px] font-extrabold uppercase tracking-[.13em] text-[#687570]">Completed match day</label>
           <div className="flex gap-2">
-            <input id="processing-date" type="date" max={lastCompletedDate()} value={date} onChange={(e) => setDate(e.target.value)} className="h-11 min-w-0 flex-1 rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[12px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none" data-testid="input-processing-date" />
+            <input id="processing-date" type="date" max={lastCompletedDate()} value={date} onChange={(e) => {
+              setDate(e.target.value);
+              try {
+                localStorage.setItem('football-processing-date', e.target.value);
+              } catch {
+                // The server-side job remains discoverable even when browser storage is disabled.
+              }
+            }} className="h-11 min-w-0 flex-1 rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[12px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none" data-testid="input-processing-date" />
             <button type="submit" disabled={!date || start.isPending} className="inline-flex h-11 shrink-0 items-center gap-2 rounded-lg bg-[#d96f51] px-4 text-[10px] font-extrabold text-white transition hover:bg-[#c95f43] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-start-import">
               {start.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Activity size={14} />} {start.isPending ? 'Starting' : 'Import day'}
             </button>
@@ -102,7 +146,9 @@ export default function ProcessingPage() {
             <div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl bg-[#e6eee8] text-[#537867]"><Activity size={16} /></span><div><h2 id="job-heading" className="text-[14px] font-extrabold text-[#344550]">Import status</h2><p className="mt-0.5 text-[10px] text-[#858982]">Persistent job · live polling</p></div></div>
             {job && <span className={`rounded-full px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-[.1em] ${statusTone}`} data-testid="status-job">{job.status}</span>}
           </div>
-          {!jobId ? <div className="flex min-h-[280px] flex-col items-center justify-center px-6 py-12 text-center" data-testid="status-job-empty">
+          {lookupQuery.isLoading ? <div className="space-y-4 p-5" role="status" aria-label="Checking saved job state" data-testid="status-job-lookup-loading"><div className="h-3 w-36 animate-pulse rounded bg-[#e6e4dc]" /><div className="h-20 rounded-xl bg-[#eeede6]" /></div>
+          : lookupQuery.isError ? <div className="m-5 rounded-xl border border-[#e3c3b6] bg-[#fff6f0] p-4" role="alert" data-testid="status-job-lookup-error"><div className="flex gap-2 text-[11px] font-bold text-[#784b3e]"><CircleAlert size={15} /> Couldn’t restore saved job</div><p className="mt-2 text-[10px] text-[#8c6b5e]">{readableError(lookupQuery.error)}</p><button onClick={() => void lookupQuery.refetch()} className="mt-3 inline-flex items-center gap-2 text-[10px] font-extrabold text-[#855542]"><RefreshCw size={12} /> Retry</button></div>
+          : !jobId ? <div className="flex min-h-[280px] flex-col items-center justify-center px-6 py-12 text-center" data-testid="status-job-empty">
             <span className="grid size-12 place-items-center rounded-2xl border border-[#dfe4dc] bg-[#edf2ec] text-[#718879]"><Clock3 size={20} /></span><h3 className="mt-4 text-[15px] font-extrabold text-[#354750]">No import running</h3><p className="mt-2 max-w-[330px] text-[10px] leading-5 text-[#858982]">Choose a completed match day to create a job. Its progress and final counts will stay visible here.</p>
           </div> : jobQuery.isLoading ? <div className="space-y-4 p-5" role="status" aria-label="Loading job state" data-testid="status-job-loading"><div className="h-3 w-36 animate-pulse rounded bg-[#e6e4dc]" /><div className="h-3 w-full animate-pulse rounded bg-[#e9e8df]" /><div className="grid grid-cols-2 gap-3">{[0,1,2,3].map(i=><div key={i} className="h-16 animate-pulse rounded-lg bg-[#eeede6]" />)}</div></div> : jobQuery.isError ? <div className="m-5 rounded-xl border border-[#e3c3b6] bg-[#fff6f0] p-4" role="alert" data-testid="status-job-error"><div className="flex gap-2 text-[11px] font-bold text-[#784b3e]"><CircleAlert size={15} /> Couldn’t load job status</div><p className="mt-2 text-[10px] text-[#8c6b5e]">{readableError(jobQuery.error)}</p><button onClick={() => void jobQuery.refetch()} className="mt-3 inline-flex items-center gap-2 text-[10px] font-extrabold text-[#855542]"><RefreshCw size={12} /> Retry</button></div> : job ? <div className="p-4 sm:p-5">
             <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="mono text-[9px] uppercase tracking-[.13em] text-[#9b7160]">Match day · {job.date}</p><p className="mono mt-1 text-[9px] text-[#92958c]">JOB / {job.id}</p></div><span className="text-[9px] text-[#828980]">{terminal ? 'Finished' : 'Updated'} · {new Date(job.updatedAt).toLocaleString()}</span></div>

@@ -75,6 +75,30 @@ paths:
               schema:
                 $ref: "#/components/schemas/FootballFixtureError"
   /football/processings:
+    get:
+      operationId: getFootballProcessingForDate
+      tags: [processing]
+      summary: Get the latest processing job for a match date
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Latest saved processing job for the date, if one exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballProcessingJobLookup"
+        "400":
+          description: Invalid date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
     post:
       operationId: startFootballBulkProcessing
       tags: [processing]
@@ -181,11 +205,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballFixtureError"
+    delete:
+      operationId: deleteAllFootballProcessedMatches
+      tags: [processing]
+      summary: Delete all archived match records
+      description: Deletes every saved match record but retains processing job history; refuses while a job is running
+      responses:
+        "200":
+          description: Number of match records deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteFootballProcessedMatchesResponse"
+        "409":
+          description: A processing job is still running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
   /football/processed-matches/{fixtureId}:
     get:
       operationId: getFootballProcessedMatch
       tags: [processing]
-      summary: Get all stored analysis data for one match
+      summary: Get the saved summary for one match
       parameters:
         - name: fixtureId
           in: path
@@ -195,13 +237,50 @@ paths:
             minimum: 1
       responses:
         "200":
-          description: Saved match metadata and full analysis payloads
+          description: Small saved match metadata response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FootballProcessedMatchRecord"
+                $ref: "#/components/schemas/FootballProcessedMatchSummary"
         "400":
           description: Invalid match ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "404":
+          description: Saved match was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+  /football/processed-match-payload:
+    get:
+      operationId: getFootballProcessedMatchPayload
+      tags: [processing]
+      summary: Get one stored analysis payload for a match
+      parameters:
+        - name: fixtureId
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: section
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [details, lastFive, tmp]
+      responses:
+        "200":
+          description: Requested payload section; responses are gzip-compressed when supported
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballProcessedMatchPayload"
+        "400":
+          description: Invalid match ID or section
           content:
             application/json:
               schema:
@@ -720,6 +799,33 @@ components:
         - error
         - createdAt
         - updatedAt
+    FootballProcessingJobLookup:
+      type: object
+      properties:
+        job:
+          oneOf:
+            - $ref: "#/components/schemas/FootballProcessingJob"
+            - type: "null"
+      required: [job]
+    DeleteFootballProcessedMatchesResponse:
+      type: object
+      properties:
+        deletedCount:
+          type: integer
+          minimum: 0
+      required: [deletedCount]
+    FootballProcessedMatchPayload:
+      type: object
+      properties:
+        fixtureId:
+          type: integer
+        section:
+          type: string
+          enum: [details, lastFive, tmp]
+        payload:
+          type: object
+          additionalProperties: true
+      required: [fixtureId, section, payload]
     FootballProcessedMatchSummary:
       type: object
       properties:

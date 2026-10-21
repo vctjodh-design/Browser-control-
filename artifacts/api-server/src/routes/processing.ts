@@ -1,5 +1,11 @@
 import { Router, type IRouter } from "express";
+import { gzipSync } from "node:zlib";
 import {
+  DeleteAllFootballProcessedMatchesResponse,
+  GetFootballProcessingForDateQueryParams,
+  GetFootballProcessingForDateResponse,
+  GetFootballProcessedMatchPayloadQueryParams,
+  GetFootballProcessedMatchPayloadResponse,
   GetFootballProcessedMatchParams,
   GetFootballProcessedMatchResponse,
   GetFootballProcessedMatchesQueryParams,
@@ -19,9 +25,13 @@ import {
 import { getKickoffScoreMatchLastFive } from "../lib/kickoffscore-last-five";
 import { getKickoffScoreMatchTmp } from "../lib/kickoffscore-match-tmp";
 import {
+  deleteAllProcessedMatches,
+  findAnyActiveProcessingJob,
   createProcessingJob,
   findActiveProcessingJob,
-  getProcessedMatch,
+  getLatestProcessingJob,
+  getProcessedMatchPayload,
+  getProcessedMatchSummary,
   getProcessingJob,
   listProcessedMatches,
   saveProcessedMatch,
@@ -52,6 +62,17 @@ function fixtureIdFromUrl(value: string): number | null {
   } catch {
     return null;
   }
+}
+
+function uniqueFixtures(fixtures: Fixture[]): Fixture[] {
+  const seen = new Set<string>();
+  return fixtures.filter((fixture) => {
+    const fixtureId = fixtureIdFromUrl(fixture.matchUrl);
+    const key = fixtureId === null ? `url:${fixture.matchUrl}` : `id:${fixtureId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function isFinal(fixture: Fixture): boolean {
@@ -128,7 +149,7 @@ async function runProcessing(job: FootballProcessingJob, fixtures: Fixture[]) {
             "League goal average was unavailable while archiving a match",
           );
           if (error instanceof UpstreamRateLimitError) {
-            stopMessage = `KickoffScore is rate limiting requests. Processing stopped after ${counts.processed} of ${fixtures.length} fixtures.`;
+            stopMessage = `KickoffScore asked us to pause requests. Wait ${error.retryAfterSeconds} seconds before restarting; processing stopped after ${counts.processed} of ${fixtures.length} fixtures.`;
           }
         }
       }
@@ -170,7 +191,7 @@ async function runProcessing(job: FootballProcessingJob, fixtures: Fixture[]) {
         "Could not process a KickoffScore match",
       );
       if (error instanceof UpstreamRateLimitError) {
-        stopMessage = `KickoffScore is rate limiting requests. Processing stopped after ${counts.processed} of ${fixtures.length} fixtures.`;
+        stopMessage = `KickoffScore asked us to pause requests. Wait ${error.retryAfterSeconds} seconds before restarting; processing stopped after ${counts.processed} of ${fixtures.length} fixtures.`;
       }
     }
 
@@ -203,6 +224,23 @@ async function runProcessing(job: FootballProcessingJob, fixtures: Fixture[]) {
   writeProgress(job.id, status, counts, error);
 }
 
+router.get("/football/processings", (req, res): void => {
+  const rawDate = req.query.date;
+  const date = typeof rawDate === "string" ? validDate(rawDate) : null;
+  const parsed = GetFootballProcessingForDateQueryParams.safeParse({
+    date: date ? new Date(`${date}T00:00:00.000Z`) : null,
+  });
+  if (!date || !parsed.success) {
+    res.status(400).json({ error: "Choose a valid match date." });
+    return;
+  }
+  res.json(
+    GetFootballProcessingForDateResponse.parse({
+      job: getLatestProcessingJob(date),
+    }),
+  );
+});
+
 router.post("/football/processings", async (req, res): Promise<void> => {
   const input = StartFootballBulkProcessingBody.safeParse(req.body);
   const date = validDate(req.body?.date);
@@ -219,15 +257,16 @@ router.post("/football/processings", async (req, res): Promise<void> => {
 
   try {
     const page = await getKickoffScoreFixtures(date);
+    const fixtures = uniqueFixtures(page.fixtures);
     const activeAfterFetch = findActiveProcessingJob(date);
     if (activeAfterFetch) {
       res.status(202).json(StartFootballBulkProcessingResponse.parse(activeAfterFetch));
       return;
     }
-    const job = createProcessingJob(date, page.fixtures.length);
+    const job = createProcessingJob(date, fixtures.length);
     res.status(202).json(StartFootballBulkProcessingResponse.parse(job));
     setImmediate(() => {
-      void runProcessing(job, page.fixtures).catch((error: unknown) => {
+      void runProcessing(job, fixtures).catch((error: unknown) => {
         logger.error(
           { jobId: job.id, errorName: error instanceof Error ? error.name : "UnknownError" },
           "Bulk match processing job failed",
@@ -301,13 +340,62 @@ router.get("/football/processed-matches", (req, res): void => {
   }));
 });
 
+router.delete("/football/processed-matches", (_req, res): void => {
+  const activeJob = findAnyActiveProcessingJob();
+  if (activeJob) {
+    res.status(409).json({
+      error: `Wait for the ${activeJob.date.toISOString().slice(0, 10)} import to finish before clearing the archive.`,
+    });
+    return;
+  }
+  res.json(
+    DeleteAllFootballProcessedMatchesResponse.parse({
+      deletedCount: deleteAllProcessedMatches(),
+    }),
+  );
+});
+
+router.get("/football/processed-match-payload", (req, res): void => {
+  const params = GetFootballProcessedMatchPayloadQueryParams.safeParse(req.query);
+  if (!params.success) {
+    res.status(400).json({ error: "Choose a valid match ID and payload section." });
+    return;
+  }
+  const payload = getProcessedMatchPayload(
+    params.data.fixtureId,
+    params.data.section,
+  );
+  if (payload === null) {
+    res.status(404).json({ error: "Saved match was not found." });
+    return;
+  }
+  const response = GetFootballProcessedMatchPayloadResponse.parse({
+    fixtureId: params.data.fixtureId,
+    section: params.data.section,
+    payload,
+  });
+  const serialized = JSON.stringify(response);
+  if (req.acceptsEncodings("gzip")) {
+    const compressed = gzipSync(serialized);
+    res
+      .status(200)
+      .type("application/json")
+      .set("Content-Encoding", "gzip")
+      .vary("Accept-Encoding")
+      .set("Content-Length", String(compressed.byteLength))
+      .end(compressed);
+    return;
+  }
+  res.json(response);
+});
+
 router.get("/football/processed-matches/:fixtureId", (req, res): void => {
   const params = GetFootballProcessedMatchParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Choose a valid match ID." });
     return;
   }
-  const match = getProcessedMatch(params.data.fixtureId);
+  const match = getProcessedMatchSummary(params.data.fixtureId);
   if (!match) {
     res.status(404).json({ error: "Saved match was not found." });
     return;

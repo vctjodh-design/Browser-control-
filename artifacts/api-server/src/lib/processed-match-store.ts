@@ -7,13 +7,16 @@ import type {
   FootballMatchDetails,
   FootballMatchLastFive,
   FootballMatchTmpContext,
-  FootballProcessedMatchRecord,
   FootballProcessedMatchSummary,
   FootballProcessingJob,
   FootballProcessingJobStatus,
 } from "@workspace/api-zod";
 
 type SqlRow = Record<string, SQLOutputValue>;
+const SUMMARY_COLUMNS = `fixture_id, match_date, competition, league_id, season,
+  home_team_name, away_team_name, home_score, away_score, actual_outcome,
+  total_goals, league_average_goals, league_average_matches, average_source,
+  completeness, issue_count, processed_at`;
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const databasePath =
@@ -194,6 +197,30 @@ export function findActiveProcessingJob(
   return toJob(row);
 }
 
+export function getLatestProcessingJob(
+  date: string,
+): FootballProcessingJob | null {
+  const row = database
+    .prepare(
+      `SELECT * FROM bulk_processing_jobs
+       WHERE match_date = ?
+       ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(date) as SqlRow | undefined;
+  return toJob(row);
+}
+
+export function findAnyActiveProcessingJob(): FootballProcessingJob | null {
+  const row = database
+    .prepare(
+      `SELECT * FROM bulk_processing_jobs
+       WHERE status IN ('queued', 'running')
+       ORDER BY updated_at DESC LIMIT 1`,
+    )
+    .get() as SqlRow | undefined;
+  return toJob(row);
+}
+
 export function getProcessingJob(id: string): FootballProcessingJob | null {
   const row = database
     .prepare("SELECT * FROM bulk_processing_jobs WHERE id = ?")
@@ -316,13 +343,13 @@ export function listProcessedMatches(input: {
   const rows = (input.date
     ? database
         .prepare(
-          `SELECT * FROM processed_matches WHERE calendar_date = ?
+          `SELECT ${SUMMARY_COLUMNS} FROM processed_matches WHERE calendar_date = ?
            ORDER BY match_date DESC, fixture_id DESC LIMIT ? OFFSET ?`,
         )
         .all(input.date, input.limit, input.offset)
     : database
         .prepare(
-          `SELECT * FROM processed_matches
+          `SELECT ${SUMMARY_COLUMNS} FROM processed_matches
            ORDER BY match_date DESC, fixture_id DESC LIMIT ? OFFSET ?`,
         )
         .all(input.limit, input.offset)) as SqlRow[];
@@ -332,18 +359,39 @@ export function listProcessedMatches(input: {
   };
 }
 
-export function getProcessedMatch(
+export function getProcessedMatchSummary(
   fixtureId: number,
-): FootballProcessedMatchRecord | null {
+): FootballProcessedMatchSummary | null {
   const row = database
-    .prepare("SELECT * FROM processed_matches WHERE fixture_id = ?")
+    .prepare(
+      `SELECT ${SUMMARY_COLUMNS} FROM processed_matches WHERE fixture_id = ?`,
+    )
     .get(fixtureId) as SqlRow | undefined;
   if (!row) return null;
 
-  return {
-    ...summaryFromRow(row),
-    details: JSON.parse(stringValue(row.details_json)) as FootballMatchDetails,
-    lastFive: JSON.parse(stringValue(row.last_five_json)) as FootballMatchLastFive,
-    tmp: JSON.parse(stringValue(row.tmp_json)) as FootballMatchTmpContext,
-  };
+  return summaryFromRow(row);
+}
+
+export function getProcessedMatchPayload(
+  fixtureId: number,
+  section: "details" | "lastFive" | "tmp",
+): unknown | null {
+  const row = database
+    .prepare(
+      `SELECT details_json, last_five_json, tmp_json
+       FROM processed_matches WHERE fixture_id = ?`,
+    )
+    .get(fixtureId) as SqlRow | undefined;
+  if (!row) return null;
+  const column = {
+    details: row.details_json,
+    lastFive: row.last_five_json,
+    tmp: row.tmp_json,
+  }[section];
+  return JSON.parse(stringValue(column));
+}
+
+export function deleteAllProcessedMatches(): number {
+  const result = database.prepare("DELETE FROM processed_matches").run();
+  return Number(result.changes);
 }

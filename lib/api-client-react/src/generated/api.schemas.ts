@@ -60,6 +60,32 @@ export interface FootballProcessingJob {
   updatedAt: string;
 }
 
+export interface FootballProcessingJobLookup {
+  job: FootballProcessingJob | null;
+}
+
+export interface DeleteFootballProcessedMatchesResponse {
+  /** @minimum 0 */
+  deletedCount: number;
+}
+
+export type FootballProcessedMatchPayloadSection = typeof FootballProcessedMatchPayloadSection[keyof typeof FootballProcessedMatchPayloadSection];
+
+
+export const FootballProcessedMatchPayloadSection = {
+  details: 'details',
+  lastFive: 'lastFive',
+  tmp: 'tmp',
+} as const;
+
+export type FootballProcessedMatchPayloadPayload = { [key: string]: unknown };
+
+export interface FootballProcessedMatchPayload {
+  fixtureId: number;
+  section: FootballProcessedMatchPayloadSection;
+  payload: FootballProcessedMatchPayloadPayload;
+}
+
 /**
  * @nullable
  */
@@ -638,6 +664,10 @@ export type GetFootballFixturesParams = {
 date: string;
 };
 
+export type GetFootballProcessingForDateParams = {
+date: string;
+};
+
 export type GetFootballProcessedMatchesParams = {
 date?: string;
 /**
@@ -650,4 +680,21 @@ limit?: number;
  */
 offset?: number;
 };
+
+export type GetFootballProcessedMatchPayloadParams = {
+/**
+ * @minimum 1
+ */
+fixtureId: number;
+section: GetFootballProcessedMatchPayloadSection;
+};
+
+export type GetFootballProcessedMatchPayloadSection = typeof GetFootballProcessedMatchPayloadSection[keyof typeof GetFootballProcessedMatchPayloadSection];
+
+
+export const GetFootballProcessedMatchPayloadSection = {
+  details: 'details',
+  lastFive: 'lastFive',
+  tmp: 'tmp',
+} as const;
 
