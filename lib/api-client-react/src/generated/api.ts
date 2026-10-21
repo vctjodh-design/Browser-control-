@@ -25,12 +25,17 @@ import type {
   BrowserState,
   CreateBrowserSessionInput,
   CreateBrowserTabInput,
+  FootballBulkProcessingInput,
   FootballFixtureError,
   FootballFixtures,
   FootballMatchDetails,
   FootballMatchLastFive,
   FootballMatchTmpContext,
+  FootballProcessedMatchRecord,
+  FootballProcessedMatches,
+  FootballProcessingJob,
   GetFootballFixturesParams,
+  GetFootballProcessedMatchesParams,
   HealthStatus,
   MouseMoveResponse,
   MousePositionInput,
@@ -215,6 +220,333 @@ export function useGetFootballFixtures<TData = Awaited<ReturnType<typeof getFoot
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetFootballFixturesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getStartFootballBulkProcessingUrl = () => {
+
+
+
+
+  return `/api/football/processings`
+}
+
+/**
+ * Starts an asynchronous import of completed KickoffScore matches and their analysis data into the local SQLite archive
+ * @summary Start processing completed matches for a date
+ */
+export const startFootballBulkProcessing = async (footballBulkProcessingInput: FootballBulkProcessingInput, options?: Parameters<typeof customFetch>[1]): Promise<FootballProcessingJob> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<FootballProcessingJob>(getStartFootballBulkProcessingUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(footballBulkProcessingInput)
+  }
+);}
+
+
+
+
+
+export const getStartFootballBulkProcessingMutationKey = () => ['startFootballBulkProcessing'] as const;
+
+export const getStartFootballBulkProcessingMutationOptions = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startFootballBulkProcessing>>, TError,StartFootballBulkProcessingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startFootballBulkProcessing>>, TError,StartFootballBulkProcessingMutationVariables, TContext> => {
+
+const mutationKey = getStartFootballBulkProcessingMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startFootballBulkProcessing>>, StartFootballBulkProcessingMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  startFootballBulkProcessing(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartFootballBulkProcessingMutationResult = NonNullable<Awaited<ReturnType<typeof startFootballBulkProcessing>>>
+    export type StartFootballBulkProcessingMutationBody = BodyType<FootballBulkProcessingInput>
+    export type StartFootballBulkProcessingMutationError = ErrorType<FootballFixtureError>
+    export type StartFootballBulkProcessingMutationVariables = {data: BodyType<FootballBulkProcessingInput>}
+
+    /**
+ * @summary Start processing completed matches for a date
+ */
+export const useStartFootballBulkProcessing = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startFootballBulkProcessing>>, TError,StartFootballBulkProcessingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startFootballBulkProcessing>>,
+        TError,
+        StartFootballBulkProcessingMutationVariables,
+        TContext
+      > => {
+      return useMutation(getStartFootballBulkProcessingMutationOptions(options));
+    }
+
+export const getGetFootballProcessingJobUrl = (jobId: string,) => {
+
+
+
+
+  return `/api/football/processings/${jobId}`
+}
+
+/**
+ * @summary Get bulk processing progress
+ */
+export const getFootballProcessingJob = async (jobId: string, options?: Parameters<typeof customFetch>[1]): Promise<FootballProcessingJob> => {
+
+  return customFetch<FootballProcessingJob>(getGetFootballProcessingJobUrl(jobId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballProcessingJobQueryKey = (jobId: string,) => {
+    return [
+    `/api/football/processings/${jobId}`
+    ] as const;
+    }
+
+
+export const getGetFootballProcessingJobQueryOptions = <TData = Awaited<ReturnType<typeof getFootballProcessingJob>>, TError = ErrorType<FootballFixtureError>>(jobId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballProcessingJob>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballProcessingJobQueryKey(jobId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballProcessingJob>>> = ({ signal }) => getFootballProcessingJob(jobId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: jobId !== null && jobId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballProcessingJob>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballProcessingJobQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballProcessingJob>>>
+export type GetFootballProcessingJobQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary Get bulk processing progress
+ */
+
+export function useGetFootballProcessingJob<TData = Awaited<ReturnType<typeof getFootballProcessingJob>>, TError = ErrorType<FootballFixtureError>>(
+ jobId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballProcessingJob>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballProcessingJobQueryOptions(jobId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFootballProcessedMatchesUrl = (params?: GetFootballProcessedMatchesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/football/processed-matches?${stringifiedParams}` : `/api/football/processed-matches`
+}
+
+/**
+ * @summary List saved match records
+ */
+export const getFootballProcessedMatches = async (params?: GetFootballProcessedMatchesParams, options?: Parameters<typeof customFetch>[1]): Promise<FootballProcessedMatches> => {
+
+  return customFetch<FootballProcessedMatches>(getGetFootballProcessedMatchesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballProcessedMatchesQueryKey = (params?: GetFootballProcessedMatchesParams,) => {
+    return [
+    `/api/football/processed-matches`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFootballProcessedMatchesQueryOptions = <TData = Awaited<ReturnType<typeof getFootballProcessedMatches>>, TError = ErrorType<FootballFixtureError>>(params?: GetFootballProcessedMatchesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballProcessedMatches>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballProcessedMatchesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballProcessedMatches>>> = ({ signal }) => getFootballProcessedMatches(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballProcessedMatches>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballProcessedMatchesQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballProcessedMatches>>>
+export type GetFootballProcessedMatchesQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary List saved match records
+ */
+
+export function useGetFootballProcessedMatches<TData = Awaited<ReturnType<typeof getFootballProcessedMatches>>, TError = ErrorType<FootballFixtureError>>(
+ params?: GetFootballProcessedMatchesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballProcessedMatches>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballProcessedMatchesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFootballProcessedMatchUrl = (fixtureId: number,) => {
+
+
+
+
+  return `/api/football/processed-matches/${fixtureId}`
+}
+
+/**
+ * @summary Get all stored analysis data for one match
+ */
+export const getFootballProcessedMatch = async (fixtureId: number, options?: Parameters<typeof customFetch>[1]): Promise<FootballProcessedMatchRecord> => {
+
+  return customFetch<FootballProcessedMatchRecord>(getGetFootballProcessedMatchUrl(fixtureId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballProcessedMatchQueryKey = (fixtureId: number,) => {
+    return [
+    `/api/football/processed-matches/${fixtureId}`
+    ] as const;
+    }
+
+
+export const getGetFootballProcessedMatchQueryOptions = <TData = Awaited<ReturnType<typeof getFootballProcessedMatch>>, TError = ErrorType<FootballFixtureError>>(fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballProcessedMatch>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballProcessedMatchQueryKey(fixtureId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballProcessedMatch>>> = ({ signal }) => getFootballProcessedMatch(fixtureId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: fixtureId !== null && fixtureId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballProcessedMatch>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballProcessedMatchQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballProcessedMatch>>>
+export type GetFootballProcessedMatchQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary Get all stored analysis data for one match
+ */
+
+export function useGetFootballProcessedMatch<TData = Awaited<ReturnType<typeof getFootballProcessedMatch>>, TError = ErrorType<FootballFixtureError>>(
+ fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballProcessedMatch>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballProcessedMatchQueryOptions(fixtureId,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

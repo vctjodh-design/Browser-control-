@@ -43,6 +43,8 @@ import NotFound from '@/pages/not-found';
 import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import FixturesPage from '@/pages/fixtures';
 import MatchDetailsPage from '@/pages/match-details';
+import ProcessingPage from '@/pages/processing';
+import DatabasePage from '@/pages/database';
 
 const queryClient = new QueryClient();
 
@@ -444,6 +446,8 @@ function BrowserConsole() {
               <Link href="/fixtures" className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6] hover:text-[#344550]" data-testid="link-fixtures">
                 <CalendarDays size={13} /> <span>Fixtures</span>
               </Link>
+              <Link href="/processing" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6] hover:text-[#344550]" data-testid="link-processing">Processing</Link>
+              <Link href="/database" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6] hover:text-[#344550]" data-testid="link-database">Database</Link>
             </nav>
             <span className={`relative flex size-2.5 rounded-full ${health.isError ? 'bg-[#c76c5c]' : health.isLoading ? 'bg-[#d59a42]' : 'bg-[#4d997e]'}`}>
               {health.isLoading && <span className="absolute inset-0 animate-ping rounded-full bg-current opacity-30" />}
@@ -818,6 +822,8 @@ function Router() {
         <Route path="/" component={BrowserConsole} />
         <Route path="/fixtures" component={FixturesPage} />
         <Route path="/matches/:fixtureId" component={MatchDetailsPage} />
+        <Route path="/processing" component={ProcessingPage} />
+        <Route path="/database" component={DatabasePage} />
         <Route component={NotFound} />
       </Switch>
     </RoutedErrorBoundary>

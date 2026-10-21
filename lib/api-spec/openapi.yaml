@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: fixtures
     description: Football fixtures from KickoffScore
+  - name: processing
+    description: Bulk processing and locally stored match records
   - name: browser
     description: Remote Chromium browser sessions and controls
 paths:
@@ -68,6 +70,144 @@ paths:
                 $ref: "#/components/schemas/FootballFixtureError"
         "502":
           description: KickoffScore could not be reached or its page could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+  /football/processings:
+    post:
+      operationId: startFootballBulkProcessing
+      tags: [processing]
+      summary: Start processing completed matches for a date
+      description: Starts an asynchronous import of completed KickoffScore matches and their analysis data into the local SQLite archive
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FootballBulkProcessingInput"
+      responses:
+        "202":
+          description: Processing job started or an active job for the date was returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballProcessingJob"
+        "400":
+          description: Invalid date or date is not in the past
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "429":
+          description: KickoffScore is temporarily rate limiting requests
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait before trying again
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "502":
+          description: KickoffScore fixtures could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+  /football/processings/{jobId}:
+    get:
+      operationId: getFootballProcessingJob
+      tags: [processing]
+      summary: Get bulk processing progress
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Processing job progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballProcessingJob"
+        "404":
+          description: Processing job was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+  /football/processed-matches:
+    get:
+      operationId: getFootballProcessedMatches
+      tags: [processing]
+      summary: List saved match records
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Saved matches and pagination metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballProcessedMatches"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+  /football/processed-matches/{fixtureId}:
+    get:
+      operationId: getFootballProcessedMatch
+      tags: [processing]
+      summary: Get all stored analysis data for one match
+      parameters:
+        - name: fixtureId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Saved match metadata and full analysis payloads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballProcessedMatchRecord"
+        "400":
+          description: Invalid match ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "404":
+          description: Saved match was not found
           content:
             application/json:
               schema:
@@ -531,6 +671,145 @@ components:
           items:
             $ref: "#/components/schemas/FootballFixture"
       required: [date, sourceUrl, fixtures]
+    FootballBulkProcessingInput:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+      required: [date]
+    FootballProcessingJob:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        date:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [queued, running, completed, partial, failed]
+        totalFixtures:
+          type: integer
+        processedFixtures:
+          type: integer
+        savedFixtures:
+          type: integer
+        skippedFixtures:
+          type: integer
+        failedFixtures:
+          type: integer
+        error:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - date
+        - status
+        - totalFixtures
+        - processedFixtures
+        - savedFixtures
+        - skippedFixtures
+        - failedFixtures
+        - error
+        - createdAt
+        - updatedAt
+    FootballProcessedMatchSummary:
+      type: object
+      properties:
+        fixtureId:
+          type: integer
+        date:
+          type: string
+          format: date-time
+        competition:
+          type: string
+        leagueId:
+          type: ["integer", "null"]
+        season:
+          type: ["integer", "null"]
+        homeTeamName:
+          type: string
+        awayTeamName:
+          type: string
+        homeScore:
+          type: ["integer", "null"]
+        awayScore:
+          type: ["integer", "null"]
+        actualOutcome:
+          type: ["string", "null"]
+          enum: [home, draw, away, null]
+        totalGoals:
+          type: ["integer", "null"]
+        leagueAverageGoals:
+          type: ["number", "null"]
+          description: Current season goals per match derived from the league standings available at processing time
+        leagueAverageMatches:
+          type: ["integer", "null"]
+        averageSource:
+          type: string
+          enum: [season-standings-at-processing-time, unavailable]
+        completeness:
+          type: string
+          enum: [complete, partial]
+        issueCount:
+          type: integer
+        processedAt:
+          type: string
+          format: date-time
+      required:
+        - fixtureId
+        - date
+        - competition
+        - leagueId
+        - season
+        - homeTeamName
+        - awayTeamName
+        - homeScore
+        - awayScore
+        - actualOutcome
+        - totalGoals
+        - leagueAverageGoals
+        - leagueAverageMatches
+        - averageSource
+        - completeness
+        - issueCount
+        - processedAt
+    FootballProcessedMatchRecord:
+      allOf:
+        - $ref: "#/components/schemas/FootballProcessedMatchSummary"
+        - type: object
+          properties:
+            details:
+              $ref: "#/components/schemas/FootballMatchDetails"
+            lastFive:
+              $ref: "#/components/schemas/FootballMatchLastFive"
+            tmp:
+              $ref: "#/components/schemas/FootballMatchTmpContext"
+          required: [details, lastFive, tmp]
+    FootballProcessedMatches:
+      type: object
+      properties:
+        matches:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballProcessedMatchSummary"
+        total:
+          type: integer
+        date:
+          type: ["string", "null"]
+          format: date
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [matches, total, date, limit, offset]
     FootballMatchParticipant:
       type: object
       properties:

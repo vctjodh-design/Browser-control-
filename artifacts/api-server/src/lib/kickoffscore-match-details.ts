@@ -42,6 +42,23 @@ const detailsCache = new Map<
   { expiresAt: number; details: FootballMatchDetails }
 >();
 const inFlightDetails = new Map<number, Promise<FootballMatchDetails>>();
+const standingsCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    rows: FootballStandingsRow[];
+    goalsPerMatch: number | null;
+    matchesCount: number | null;
+  }
+>();
+const inFlightStandings = new Map<
+  string,
+  Promise<{
+    rows: FootballStandingsRow[];
+    goalsPerMatch: number | null;
+    matchesCount: number | null;
+  }>
+>();
 
 function asObject(value: unknown): JsonObject | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -334,6 +351,98 @@ export function parseStandings(payload: unknown): FootballStandingsRow[] {
   });
 }
 
+function parseLeagueGoalAverage(payload: unknown): {
+  goalsPerMatch: number | null;
+  matchesCount: number | null;
+} {
+  const data = asObject(payload);
+  const rows = Array.isArray(payload)
+    ? payload.flatMap((group) => asArray(group))
+    : asArray(data?.response);
+  let goalsFor = 0;
+  let played = 0;
+  let hasGoalData = false;
+
+  for (const value of rows) {
+    const row = asObject(value);
+    const all = asObject(row?.all);
+    const goals = asObject(all?.goals);
+    const teamPlayed = asInteger(all?.played);
+    const teamGoalsFor = asInteger(goals?.for);
+    if (teamPlayed !== null) played += teamPlayed;
+    if (teamGoalsFor !== null) {
+      goalsFor += teamGoalsFor;
+      hasGoalData = true;
+    }
+  }
+
+  const matchesCount = played > 0 ? Math.floor(played / 2) : null;
+  return {
+    goalsPerMatch:
+      hasGoalData && matchesCount
+        ? Number((goalsFor / matchesCount).toFixed(2))
+        : null,
+    matchesCount,
+  };
+}
+
+async function getLeagueStandings(
+  leagueId: number,
+  season: number,
+): Promise<{
+  rows: FootballStandingsRow[];
+  goalsPerMatch: number | null;
+  matchesCount: number | null;
+}> {
+  const key = `${leagueId}:${season}`;
+  const cached = standingsCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return {
+      rows: cached.rows,
+      goalsPerMatch: cached.goalsPerMatch,
+      matchesCount: cached.matchesCount,
+    };
+  }
+
+  const inFlight = inFlightStandings.get(key);
+  if (inFlight) return inFlight;
+
+  const request = fetchKickoffScoreJson("/api/standings", {
+    leagueId: String(leagueId),
+    season: String(season),
+  })
+    .then((payload) => ({
+      rows: parseStandings(payload),
+      ...parseLeagueGoalAverage(payload),
+    }))
+    .then((snapshot) => {
+      standingsCache.set(key, {
+        ...snapshot,
+        expiresAt: Date.now() + 60 * 60 * 1000,
+      });
+      if (standingsCache.size > 80) {
+        const oldest = standingsCache.keys().next().value;
+        if (oldest !== undefined) standingsCache.delete(oldest);
+      }
+      return snapshot;
+    })
+    .finally(() => inFlightStandings.delete(key));
+
+  inFlightStandings.set(key, request);
+  return request;
+}
+
+export async function getKickoffScoreLeagueGoalAverage(
+  leagueId: number,
+  season: number,
+): Promise<{ goalsPerMatch: number | null; matchesCount: number | null }> {
+  const snapshot = await getLeagueStandings(leagueId, season);
+  return {
+    goalsPerMatch: snapshot.goalsPerMatch,
+    matchesCount: snapshot.matchesCount,
+  };
+}
+
 export function oddsCategory(name: string): FootballOddsMarketCategory {
   const normalized = name.toLowerCase();
   if (/\b(first|1st|second|2nd)\s*half\b|half[- ]time/.test(normalized)) {
@@ -516,11 +625,8 @@ async function loadMatchDetails(
     await Promise.all([
       loadSection("standings", issues, async () => {
         if (leagueId === null || season === null) return [];
-        const payload = await fetchKickoffScoreJson("/api/standings", {
-          leagueId: String(leagueId),
-          season: String(season),
-        });
-        return parseStandings(payload);
+        const standings = await getLeagueStandings(leagueId, season);
+        return standings.rows;
       }),
       loadSection("odds", issues, async () => {
         const payload = await fetchKickoffScoreJson("/api/odds", {

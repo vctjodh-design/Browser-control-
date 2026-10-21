@@ -30,6 +30,95 @@ export interface FootballFixtures {
   fixtures: FootballFixture[];
 }
 
+export interface FootballBulkProcessingInput {
+  date: string;
+}
+
+export type FootballProcessingJobStatus = typeof FootballProcessingJobStatus[keyof typeof FootballProcessingJobStatus];
+
+
+export const FootballProcessingJobStatus = {
+  queued: 'queued',
+  running: 'running',
+  completed: 'completed',
+  partial: 'partial',
+  failed: 'failed',
+} as const;
+
+export interface FootballProcessingJob {
+  id: string;
+  date: string;
+  status: FootballProcessingJobStatus;
+  totalFixtures: number;
+  processedFixtures: number;
+  savedFixtures: number;
+  skippedFixtures: number;
+  failedFixtures: number;
+  /** @nullable */
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * @nullable
+ */
+export type FootballProcessedMatchSummaryActualOutcome = typeof FootballProcessedMatchSummaryActualOutcome[keyof typeof FootballProcessedMatchSummaryActualOutcome] | null;
+
+
+export const FootballProcessedMatchSummaryActualOutcome = {
+  home: 'home',
+  draw: 'draw',
+  away: 'away',
+} as const;
+
+export type FootballProcessedMatchSummaryAverageSource = typeof FootballProcessedMatchSummaryAverageSource[keyof typeof FootballProcessedMatchSummaryAverageSource];
+
+
+export const FootballProcessedMatchSummaryAverageSource = {
+  'season-standings-at-processing-time': 'season-standings-at-processing-time',
+  unavailable: 'unavailable',
+} as const;
+
+export type FootballProcessedMatchSummaryCompleteness = typeof FootballProcessedMatchSummaryCompleteness[keyof typeof FootballProcessedMatchSummaryCompleteness];
+
+
+export const FootballProcessedMatchSummaryCompleteness = {
+  complete: 'complete',
+  partial: 'partial',
+} as const;
+
+export interface FootballProcessedMatchSummary {
+  fixtureId: number;
+  date: string;
+  competition: string;
+  /** @nullable */
+  leagueId: number | null;
+  /** @nullable */
+  season: number | null;
+  homeTeamName: string;
+  awayTeamName: string;
+  /** @nullable */
+  homeScore: number | null;
+  /** @nullable */
+  awayScore: number | null;
+  /** @nullable */
+  actualOutcome: FootballProcessedMatchSummaryActualOutcome;
+  /** @nullable */
+  totalGoals: number | null;
+  /**
+     * Current season goals per match derived from the league standings available at processing time
+     * @nullable
+     */
+  leagueAverageGoals: number | null;
+  /** @nullable */
+  leagueAverageMatches: number | null;
+  averageSource: FootballProcessedMatchSummaryAverageSource;
+  completeness: FootballProcessedMatchSummaryCompleteness;
+  issueCount: number;
+  processedAt: string;
+}
+
 export interface FootballMatchParticipant {
   id: number;
   name: string;
@@ -59,23 +148,6 @@ export interface FootballMatchSummary {
   away: FootballMatchTeam;
 }
 
-export interface FootballRecentMatch {
-  fixtureId: number;
-  date: string;
-  competition: string;
-  status: string;
-  /** @nullable */
-  leagueId: number | null;
-  /** @nullable */
-  season: number | null;
-  homeTeam: FootballMatchParticipant;
-  awayTeam: FootballMatchParticipant;
-  /** @nullable */
-  homeScore: number | null;
-  /** @nullable */
-  awayScore: number | null;
-}
-
 export interface FootballStandingsRow {
   rank: number;
   teamId: number;
@@ -94,13 +166,6 @@ export interface FootballStandingsRow {
   awayGoalDifference: number;
 }
 
-export interface FootballOddsSelection {
-  selection: string;
-  odd: number;
-  bookmaker: string;
-  bookmakerCount: number;
-}
-
 export type FootballOddsMarketCategory = typeof FootballOddsMarketCategory[keyof typeof FootballOddsMarketCategory];
 
 
@@ -112,6 +177,13 @@ export const FootballOddsMarketCategory = {
   other: 'other',
 } as const;
 
+export interface FootballOddsSelection {
+  selection: string;
+  odd: number;
+  bookmaker: string;
+  bookmakerCount: number;
+}
+
 export interface FootballOddsMarket {
   marketId: string;
   name: string;
@@ -119,115 +191,21 @@ export interface FootballOddsMarket {
   selections: FootballOddsSelection[];
 }
 
-export interface FootballHistoricalMarketSelection {
-  selection: string;
-  /**
-     * @minimum 0
-     * @maximum 1
-     */
-  probability: number;
-  bookmakerCount: number;
-  verifiedBookmakerCount: number;
-  unverifiedBookmakerCount: number;
-}
-
-export type FootballHistoricalMarketCategory = typeof FootballHistoricalMarketCategory[keyof typeof FootballHistoricalMarketCategory];
-
-
-export const FootballHistoricalMarketCategory = {
-  '1x2': '1x2',
-  'first-half': 'first-half',
-  goals: 'goals',
-  handicap: 'handicap',
-  other: 'other',
-} as const;
-
-export interface FootballHistoricalMarket {
-  marketId: string;
-  name: string;
-  category: FootballHistoricalMarketCategory;
-  selections: FootballHistoricalMarketSelection[];
-}
-
-export type FootballMatchOddsHistoryMarketCategoriesItem = typeof FootballMatchOddsHistoryMarketCategoriesItem[keyof typeof FootballMatchOddsHistoryMarketCategoriesItem];
-
-
-export const FootballMatchOddsHistoryMarketCategoriesItem = {
-  '1x2': '1x2',
-  'first-half': 'first-half',
-  goals: 'goals',
-  handicap: 'handicap',
-  other: 'other',
-} as const;
-
-export type FootballMatchOddsHistoryQuoteSource = typeof FootballMatchOddsHistoryQuoteSource[keyof typeof FootballMatchOddsHistoryQuoteSource];
-
-
-export const FootballMatchOddsHistoryQuoteSource = {
-  verified: 'verified',
-  mixed: 'mixed',
-  unverified: 'unverified',
-  unavailable: 'unavailable',
-} as const;
-
-export interface FootballMatchOddsHistory {
+export interface FootballRecentMatch {
   fixtureId: number;
-  /**
-     * @minimum 0
-     * @maximum 1
-     * @nullable
-     */
-  homeProbability: number | null;
-  /**
-     * @minimum 0
-     * @maximum 1
-     * @nullable
-     */
-  drawProbability: number | null;
-  /**
-     * @minimum 0
-     * @maximum 1
-     * @nullable
-     */
-  awayProbability: number | null;
-  bookmakerCount: number;
-  verifiedBookmakerCount: number;
-  unverifiedBookmakerCount: number;
-  marketCount: number;
-  marketCategories: FootballMatchOddsHistoryMarketCategoriesItem[];
-  markets: FootballHistoricalMarket[];
-  quoteSource: FootballMatchOddsHistoryQuoteSource;
-}
-
-export interface FootballSeasonStanding {
-  leagueId: number;
-  season: number;
-  teamId: number;
-  teamName: string;
-  rank: number;
-  played: number;
-  points: number;
-  goalDifference: number;
-}
-
-export type FootballMatchTmpIssueSection = typeof FootballMatchTmpIssueSection[keyof typeof FootballMatchTmpIssueSection];
-
-
-export const FootballMatchTmpIssueSection = {
-  oddsHistory: 'oddsHistory',
-  standingsHistory: 'standingsHistory',
-} as const;
-
-export interface FootballMatchTmpIssue {
-  section: FootballMatchTmpIssueSection;
-  message: string;
-}
-
-export interface FootballMatchTmpContext {
-  fixtureId: number;
-  oddsHistory: FootballMatchOddsHistory[];
-  seasonStandings: FootballSeasonStanding[];
-  issues: FootballMatchTmpIssue[];
+  date: string;
+  competition: string;
+  status: string;
+  /** @nullable */
+  leagueId: number | null;
+  /** @nullable */
+  season: number | null;
+  homeTeam: FootballMatchParticipant;
+  awayTeam: FootballMatchParticipant;
+  /** @nullable */
+  homeScore: number | null;
+  /** @nullable */
+  awayScore: number | null;
 }
 
 export type FootballMatchDetailsIssueSection = typeof FootballMatchDetailsIssueSection[keyof typeof FootballMatchDetailsIssueSection];
@@ -335,16 +313,6 @@ export interface FootballLastFivePlayerGroup {
   players: FootballLastFivePlayer[];
 }
 
-export interface FootballLastFiveMarketSelection {
-  selection: string;
-  odd: number;
-}
-
-export interface FootballLastFiveMarketBookmaker {
-  name: string;
-  selections: FootballLastFiveMarketSelection[];
-}
-
 export type FootballLastFiveOddsMarketCategory = typeof FootballLastFiveOddsMarketCategory[keyof typeof FootballLastFiveOddsMarketCategory];
 
 
@@ -355,6 +323,16 @@ export const FootballLastFiveOddsMarketCategory = {
   handicap: 'handicap',
   other: 'other',
 } as const;
+
+export interface FootballLastFiveMarketSelection {
+  selection: string;
+  odd: number;
+}
+
+export interface FootballLastFiveMarketBookmaker {
+  name: string;
+  selections: FootballLastFiveMarketSelection[];
+}
 
 export interface FootballLastFiveOddsMarket {
   marketId: string;
@@ -385,6 +363,132 @@ export interface FootballMatchLastFive {
   home: FootballLastFiveTeam;
   away: FootballLastFiveTeam;
   issues: string[];
+}
+
+export type FootballMatchOddsHistoryMarketCategoriesItem = typeof FootballMatchOddsHistoryMarketCategoriesItem[keyof typeof FootballMatchOddsHistoryMarketCategoriesItem];
+
+
+export const FootballMatchOddsHistoryMarketCategoriesItem = {
+  '1x2': '1x2',
+  'first-half': 'first-half',
+  goals: 'goals',
+  handicap: 'handicap',
+  other: 'other',
+} as const;
+
+export type FootballHistoricalMarketCategory = typeof FootballHistoricalMarketCategory[keyof typeof FootballHistoricalMarketCategory];
+
+
+export const FootballHistoricalMarketCategory = {
+  '1x2': '1x2',
+  'first-half': 'first-half',
+  goals: 'goals',
+  handicap: 'handicap',
+  other: 'other',
+} as const;
+
+export interface FootballHistoricalMarketSelection {
+  selection: string;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  probability: number;
+  bookmakerCount: number;
+  verifiedBookmakerCount: number;
+  unverifiedBookmakerCount: number;
+}
+
+export interface FootballHistoricalMarket {
+  marketId: string;
+  name: string;
+  category: FootballHistoricalMarketCategory;
+  selections: FootballHistoricalMarketSelection[];
+}
+
+export type FootballMatchOddsHistoryQuoteSource = typeof FootballMatchOddsHistoryQuoteSource[keyof typeof FootballMatchOddsHistoryQuoteSource];
+
+
+export const FootballMatchOddsHistoryQuoteSource = {
+  verified: 'verified',
+  mixed: 'mixed',
+  unverified: 'unverified',
+  unavailable: 'unavailable',
+} as const;
+
+export interface FootballMatchOddsHistory {
+  fixtureId: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     * @nullable
+     */
+  homeProbability: number | null;
+  /**
+     * @minimum 0
+     * @maximum 1
+     * @nullable
+     */
+  drawProbability: number | null;
+  /**
+     * @minimum 0
+     * @maximum 1
+     * @nullable
+     */
+  awayProbability: number | null;
+  bookmakerCount: number;
+  verifiedBookmakerCount: number;
+  unverifiedBookmakerCount: number;
+  marketCount: number;
+  marketCategories: FootballMatchOddsHistoryMarketCategoriesItem[];
+  markets: FootballHistoricalMarket[];
+  quoteSource: FootballMatchOddsHistoryQuoteSource;
+}
+
+export interface FootballSeasonStanding {
+  leagueId: number;
+  season: number;
+  teamId: number;
+  teamName: string;
+  rank: number;
+  played: number;
+  points: number;
+  goalDifference: number;
+}
+
+export type FootballMatchTmpIssueSection = typeof FootballMatchTmpIssueSection[keyof typeof FootballMatchTmpIssueSection];
+
+
+export const FootballMatchTmpIssueSection = {
+  oddsHistory: 'oddsHistory',
+  standingsHistory: 'standingsHistory',
+} as const;
+
+export interface FootballMatchTmpIssue {
+  section: FootballMatchTmpIssueSection;
+  message: string;
+}
+
+export interface FootballMatchTmpContext {
+  fixtureId: number;
+  oddsHistory: FootballMatchOddsHistory[];
+  seasonStandings: FootballSeasonStanding[];
+  issues: FootballMatchTmpIssue[];
+}
+
+export type FootballProcessedMatchRecord = FootballProcessedMatchSummary & {
+  details: FootballMatchDetails;
+  lastFive: FootballMatchLastFive;
+  tmp: FootballMatchTmpContext;
+};
+
+export interface FootballProcessedMatches {
+  matches: FootballProcessedMatchSummary[];
+  total: number;
+  /** @nullable */
+  date: string | null;
+  limit: number;
+  offset: number;
 }
 
 export interface FootballFixtureError {
@@ -532,5 +636,18 @@ export type GetFootballFixturesParams = {
  * Calendar date in YYYY-MM-DD format
  */
 date: string;
+};
+
+export type GetFootballProcessedMatchesParams = {
+date?: string;
+/**
+ * @minimum 1
+ * @maximum 500
+ */
+limit?: number;
+/**
+ * @minimum 0
+ */
+offset?: number;
 };
 

@@ -190,6 +190,8 @@ export default function FixturesPage() {
             <Link href="/fixtures" aria-current="page" className="inline-flex h-8 items-center gap-2 rounded-lg bg-[#253746] px-3 text-[10px] font-extrabold text-[#f8f2e7] shadow-sm" data-testid="link-fixtures">
               <CalendarDays size={13} /> <span>Fixtures</span>
             </Link>
+            <Link href="/processing" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6]" data-testid="link-processing">Processing</Link>
+            <Link href="/database" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6]" data-testid="link-database">Database</Link>
           </nav>
         </div>
       </header>

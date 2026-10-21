@@ -1,0 +1,318 @@
+import { Router, type IRouter } from "express";
+import {
+  GetFootballProcessedMatchParams,
+  GetFootballProcessedMatchResponse,
+  GetFootballProcessedMatchesQueryParams,
+  GetFootballProcessedMatchesResponse,
+  GetFootballProcessingJobParams,
+  GetFootballProcessingJobResponse,
+  StartFootballBulkProcessingBody,
+  StartFootballBulkProcessingResponse,
+  type FootballProcessedMatchSummary,
+  type FootballProcessingJob,
+  type FootballProcessingJobStatus,
+} from "@workspace/api-zod";
+import {
+  getKickoffScoreLeagueGoalAverage,
+  getKickoffScoreMatchDetails,
+} from "../lib/kickoffscore-match-details";
+import { getKickoffScoreMatchLastFive } from "../lib/kickoffscore-last-five";
+import { getKickoffScoreMatchTmp } from "../lib/kickoffscore-match-tmp";
+import {
+  createProcessingJob,
+  findActiveProcessingJob,
+  getProcessedMatch,
+  getProcessingJob,
+  listProcessedMatches,
+  saveProcessedMatch,
+  updateProcessingJob,
+} from "../lib/processed-match-store";
+import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
+import { UpstreamRateLimitError } from "../lib/upstream-rate-limit";
+import { logger } from "../lib/logger";
+
+const router: IRouter = Router();
+type Fixture = Awaited<ReturnType<typeof getKickoffScoreFixtures>>["fixtures"][number];
+
+function validDate(value: unknown): string | null {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
+    ? value
+    : null;
+}
+
+function fixtureIdFromUrl(value: string): number | null {
+  try {
+    const url = new URL(value);
+    if (url.hostname !== "kickoffscore.com") return null;
+    const match = url.pathname.match(/\/match\/[^/]+\/(\d+)\/?$/);
+    const id = match ? Number(match[1]) : Number.NaN;
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function isFinal(fixture: Fixture): boolean {
+  return fixture.homeScore !== null &&
+    fixture.awayScore !== null &&
+    !/\b(not started|scheduled|postponed|cancelled|canceled|suspended|abandoned|in play|live|half[ -]?time|in progress)\b/i.test(fixture.status);
+}
+
+function outcome(home: number, away: number): NonNullable<FootballProcessedMatchSummary["actualOutcome"]> {
+  return home > away ? "home" : home < away ? "away" : "draw";
+}
+
+function writeProgress(
+  id: string,
+  status: FootballProcessingJobStatus,
+  counts: { processed: number; saved: number; skipped: number; failed: number },
+  error: string | null,
+) {
+  return updateProcessingJob(id, {
+    status,
+    processedFixtures: counts.processed,
+    savedFixtures: counts.saved,
+    skippedFixtures: counts.skipped,
+    failedFixtures: counts.failed,
+    error,
+  });
+}
+
+async function runProcessing(job: FootballProcessingJob, fixtures: Fixture[]) {
+  const counts = { processed: 0, saved: 0, skipped: 0, failed: 0 };
+  const failedMatches: string[] = [];
+  let stopMessage: string | null = null;
+  writeProgress(job.id, "running", counts, null);
+
+  for (const fixture of fixtures) {
+    const fixtureId = fixtureIdFromUrl(fixture.matchUrl);
+    if (!isFinal(fixture) || fixtureId === null) {
+      counts.processed += 1;
+      counts.skipped += 1;
+      writeProgress(job.id, "running", counts, `${counts.skipped} fixture(s) skipped: no final score was available.`);
+      continue;
+    }
+
+    try {
+      const [details, lastFive, tmp] = await Promise.all([
+        getKickoffScoreMatchDetails(fixtureId),
+        getKickoffScoreMatchLastFive(fixtureId),
+        getKickoffScoreMatchTmp(fixtureId),
+      ]);
+      const homeScore = details.match.home.score ?? fixture.homeScore;
+      const awayScore = details.match.away.score ?? fixture.awayScore;
+      if (homeScore === null || awayScore === null) {
+        counts.processed += 1;
+        counts.skipped += 1;
+        writeProgress(job.id, "running", counts, `${counts.skipped} fixture(s) skipped: no final score was available.`);
+        continue;
+      }
+
+      let leagueAverageGoals: number | null = null;
+      let leagueAverageMatches: number | null = null;
+      let averageSource: FootballProcessedMatchSummary["averageSource"] = "unavailable";
+      if (details.match.leagueId !== null && details.match.season !== null) {
+        try {
+          const average = await getKickoffScoreLeagueGoalAverage(
+            details.match.leagueId,
+            details.match.season,
+          );
+          leagueAverageGoals = average.goalsPerMatch;
+          leagueAverageMatches = average.matchesCount;
+          if (leagueAverageGoals !== null) averageSource = "season-standings-at-processing-time";
+        } catch (error) {
+          logger.warn(
+            { fixtureId, errorName: error instanceof Error ? error.name : "UnknownError" },
+            "League goal average was unavailable while archiving a match",
+          );
+          if (error instanceof UpstreamRateLimitError) {
+            stopMessage = `KickoffScore is rate limiting requests. Processing stopped after ${counts.processed} of ${fixtures.length} fixtures.`;
+          }
+        }
+      }
+
+      const issueCount =
+        details.issues.length +
+        lastFive.issues.length +
+        tmp.issues.length +
+        (leagueAverageGoals === null ? 1 : 0);
+      const matchDate = details.match.date instanceof Date
+        ? details.match.date
+        : new Date(String(details.match.date));
+      const summary: FootballProcessedMatchSummary = {
+        fixtureId,
+        date: matchDate,
+        competition: details.match.competition || fixture.competition,
+        leagueId: details.match.leagueId,
+        season: details.match.season,
+        homeTeamName: details.match.home.name || fixture.homeTeam,
+        awayTeamName: details.match.away.name || fixture.awayTeam,
+        homeScore,
+        awayScore,
+        actualOutcome: outcome(homeScore, awayScore),
+        totalGoals: homeScore + awayScore,
+        leagueAverageGoals,
+        leagueAverageMatches,
+        averageSource,
+        completeness: issueCount === 0 ? "complete" : "partial",
+        issueCount,
+        processedAt: new Date(),
+      };
+      saveProcessedMatch(job.date.toISOString().slice(0, 10), summary, { details, lastFive, tmp });
+      counts.saved += 1;
+    } catch (error) {
+      counts.failed += 1;
+      failedMatches.push(`${fixture.homeTeam} vs ${fixture.awayTeam}`);
+      logger.warn(
+        { jobId: job.id, fixtureId, errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not process a KickoffScore match",
+      );
+      if (error instanceof UpstreamRateLimitError) {
+        stopMessage = `KickoffScore is rate limiting requests. Processing stopped after ${counts.processed} of ${fixtures.length} fixtures.`;
+      }
+    }
+
+    counts.processed += 1;
+    const progressError = stopMessage ??
+      (counts.failed
+        ? `${counts.failed} match(es) failed to load all analysis data${failedMatches.length ? `: ${failedMatches.slice(0, 3).join("; ")}` : ""}.`
+        : counts.skipped
+          ? `${counts.skipped} fixture(s) skipped: no final score was available.`
+          : null);
+    writeProgress(job.id, "running", counts, progressError);
+    if (stopMessage) break;
+  }
+
+  const notAttempted = fixtures.length - counts.processed;
+  const status: FootballProcessingJobStatus =
+    counts.failed === 0 && counts.skipped === 0 && notAttempted === 0
+      ? "completed"
+      : counts.saved > 0
+        ? "partial"
+        : "failed";
+  const error = stopMessage ??
+    (counts.failed
+      ? `${counts.failed} match(es) failed to load all analysis data${failedMatches.length ? `: ${failedMatches.slice(0, 3).join("; ")}` : ""}.`
+      : counts.skipped
+        ? `${counts.skipped} fixture(s) skipped: no final score was available.`
+        : notAttempted
+          ? `Processing ended before ${notAttempted} fixture(s) could be attempted.`
+          : null);
+  writeProgress(job.id, status, counts, error);
+}
+
+router.post("/football/processings", async (req, res): Promise<void> => {
+  const input = StartFootballBulkProcessingBody.safeParse(req.body);
+  const date = validDate(req.body?.date);
+  if (!input.success || !date || date >= new Date().toISOString().slice(0, 10)) {
+    res.status(400).json({ error: "Choose a valid date earlier than today." });
+    return;
+  }
+
+  const active = findActiveProcessingJob(date);
+  if (active) {
+    res.status(202).json(StartFootballBulkProcessingResponse.parse(active));
+    return;
+  }
+
+  try {
+    const page = await getKickoffScoreFixtures(date);
+    const activeAfterFetch = findActiveProcessingJob(date);
+    if (activeAfterFetch) {
+      res.status(202).json(StartFootballBulkProcessingResponse.parse(activeAfterFetch));
+      return;
+    }
+    const job = createProcessingJob(date, page.fixtures.length);
+    res.status(202).json(StartFootballBulkProcessingResponse.parse(job));
+    setImmediate(() => {
+      void runProcessing(job, page.fixtures).catch((error: unknown) => {
+        logger.error(
+          { jobId: job.id, errorName: error instanceof Error ? error.name : "UnknownError" },
+          "Bulk match processing job failed",
+        );
+        const current = getProcessingJob(job.id);
+        if (current) {
+          writeProgress(job.id, "failed", {
+            processed: current.processedFixtures,
+            saved: current.savedFixtures,
+            skipped: current.skippedFixtures,
+            failed: current.failedFixtures,
+          }, "Processing stopped unexpectedly. Previously saved matches remain available.");
+        }
+      });
+    });
+  } catch (error) {
+    if (error instanceof UpstreamRateLimitError) {
+      res.set("Retry-After", String(error.retryAfterSeconds)).status(429).json({
+        error: `KickoffScore is rate limiting requests. Wait ${error.retryAfterSeconds} seconds and try again.`,
+      });
+      return;
+    }
+    req.log.error(
+      { errorName: error instanceof Error ? error.name : "UnknownError" },
+      "Could not load fixtures for bulk processing",
+    );
+    res.status(502).json({ error: "KickoffScore fixtures could not be loaded right now. Please try again." });
+  }
+});
+
+router.get("/football/processings/:jobId", (req, res): void => {
+  const params = GetFootballProcessingJobParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Choose a valid processing job." });
+    return;
+  }
+  const job = getProcessingJob(params.data.jobId);
+  if (!job) {
+    res.status(404).json({ error: "Processing job was not found." });
+    return;
+  }
+  res.json(GetFootballProcessingJobResponse.parse(job));
+});
+
+router.get("/football/processed-matches", (req, res): void => {
+  const rawDate = req.query.date;
+  const date = rawDate === undefined
+    ? undefined
+    : typeof rawDate === "string"
+      ? validDate(rawDate)
+      : null;
+  const parsed = GetFootballProcessedMatchesQueryParams.safeParse({
+    ...(date ? { date: new Date(`${date}T00:00:00.000Z`) } : {}),
+    limit: req.query.limit ?? 100,
+    offset: req.query.offset ?? 0,
+  });
+  if (!parsed.success || (rawDate !== undefined && date === null)) {
+    res.status(400).json({ error: "Use a valid date, a limit from 1 to 500, and a non-negative offset." });
+    return;
+  }
+  const result = listProcessedMatches({
+    date: date ?? undefined,
+    limit: parsed.data.limit,
+    offset: parsed.data.offset,
+  });
+  res.json(GetFootballProcessedMatchesResponse.parse({
+    ...result,
+    date: date ? new Date(`${date}T00:00:00.000Z`) : null,
+    limit: parsed.data.limit,
+    offset: parsed.data.offset,
+  }));
+});
+
+router.get("/football/processed-matches/:fixtureId", (req, res): void => {
+  const params = GetFootballProcessedMatchParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Choose a valid match ID." });
+    return;
+  }
+  const match = getProcessedMatch(params.data.fixtureId);
+  if (!match) {
+    res.status(404).json({ error: "Saved match was not found." });
+    return;
+  }
+  res.json(GetFootballProcessedMatchResponse.parse(match));
+});
+
+export default router;

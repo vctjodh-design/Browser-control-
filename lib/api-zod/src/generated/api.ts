@@ -44,6 +44,509 @@ export const GetFootballFixturesResponse = zod.object({
 
 
 /**
+ * Starts an asynchronous import of completed KickoffScore matches and their analysis data into the local SQLite archive
+ * @summary Start processing completed matches for a date
+ */
+export const StartFootballBulkProcessingBody = zod.object({
+  "date": zod.coerce.date()
+})
+
+export const StartFootballBulkProcessingResponse = zod.object({
+  "id": zod.string().uuid(),
+  "date": zod.coerce.date(),
+  "status": zod.enum(['queued', 'running', 'completed', 'partial', 'failed']),
+  "totalFixtures": zod.number().int(),
+  "processedFixtures": zod.number().int(),
+  "savedFixtures": zod.number().int(),
+  "skippedFixtures": zod.number().int(),
+  "failedFixtures": zod.number().int(),
+  "error": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Get bulk processing progress
+ */
+export const GetFootballProcessingJobParams = zod.object({
+  "jobId": zod.coerce.string().uuid()
+})
+
+export const GetFootballProcessingJobResponse = zod.object({
+  "id": zod.string().uuid(),
+  "date": zod.coerce.date(),
+  "status": zod.enum(['queued', 'running', 'completed', 'partial', 'failed']),
+  "totalFixtures": zod.number().int(),
+  "processedFixtures": zod.number().int(),
+  "savedFixtures": zod.number().int(),
+  "skippedFixtures": zod.number().int(),
+  "failedFixtures": zod.number().int(),
+  "error": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary List saved match records
+ */
+export const getFootballProcessedMatchesQueryLimitDefault = 100;
+export const getFootballProcessedMatchesQueryLimitMax = 500;
+
+export const getFootballProcessedMatchesQueryOffsetDefault = 0;
+export const getFootballProcessedMatchesQueryOffsetMin = 0;
+
+
+
+export const GetFootballProcessedMatchesQueryParams = zod.object({
+  "date": zod.date().optional(),
+  "limit": zod.coerce.number().int().min(1).max(getFootballProcessedMatchesQueryLimitMax).default(getFootballProcessedMatchesQueryLimitDefault),
+  "offset": zod.coerce.number().int().min(getFootballProcessedMatchesQueryOffsetMin).default(getFootballProcessedMatchesQueryOffsetDefault)
+})
+
+export const GetFootballProcessedMatchesResponse = zod.object({
+  "matches": zod.array(zod.object({
+  "fixtureId": zod.number().int(),
+  "date": zod.coerce.date(),
+  "competition": zod.string(),
+  "leagueId": zod.number().int().nullable(),
+  "season": zod.number().int().nullable(),
+  "homeTeamName": zod.string(),
+  "awayTeamName": zod.string(),
+  "homeScore": zod.number().int().nullable(),
+  "awayScore": zod.number().int().nullable(),
+  "actualOutcome": zod.union([zod.literal('home'),zod.literal('draw'),zod.literal('away'),zod.literal(null)]).nullable(),
+  "totalGoals": zod.number().int().nullable(),
+  "leagueAverageGoals": zod.number().nullable().describe('Current season goals per match derived from the league standings available at processing time'),
+  "leagueAverageMatches": zod.number().int().nullable(),
+  "averageSource": zod.enum(['season-standings-at-processing-time', 'unavailable']),
+  "completeness": zod.enum(['complete', 'partial']),
+  "issueCount": zod.number().int(),
+  "processedAt": zod.coerce.date()
+})),
+  "total": zod.number().int(),
+  "date": zod.coerce.date().nullable(),
+  "limit": zod.number().int(),
+  "offset": zod.number().int()
+})
+
+
+/**
+ * @summary Get all stored analysis data for one match
+ */
+
+
+
+export const GetFootballProcessedMatchParams = zod.object({
+  "fixtureId": zod.coerce.number().int().min(1)
+})
+
+export const getFootballProcessedMatchResponseTwoTmpOddsHistoryItemHomeProbabilityMin = 0;
+export const getFootballProcessedMatchResponseTwoTmpOddsHistoryItemHomeProbabilityMax = 1;
+
+export const getFootballProcessedMatchResponseTwoTmpOddsHistoryItemDrawProbabilityMin = 0;
+export const getFootballProcessedMatchResponseTwoTmpOddsHistoryItemDrawProbabilityMax = 1;
+
+export const getFootballProcessedMatchResponseTwoTmpOddsHistoryItemAwayProbabilityMin = 0;
+export const getFootballProcessedMatchResponseTwoTmpOddsHistoryItemAwayProbabilityMax = 1;
+
+export const getFootballProcessedMatchResponseTwoTmpOddsHistoryItemMarketsItemSelectionsItemProbabilityMin = 0;
+export const getFootballProcessedMatchResponseTwoTmpOddsHistoryItemMarketsItemSelectionsItemProbabilityMax = 1;
+
+
+
+export const GetFootballProcessedMatchResponse = zod.object({
+  "fixtureId": zod.number().int(),
+  "date": zod.coerce.date(),
+  "competition": zod.string(),
+  "leagueId": zod.number().int().nullable(),
+  "season": zod.number().int().nullable(),
+  "homeTeamName": zod.string(),
+  "awayTeamName": zod.string(),
+  "homeScore": zod.number().int().nullable(),
+  "awayScore": zod.number().int().nullable(),
+  "actualOutcome": zod.union([zod.literal('home'),zod.literal('draw'),zod.literal('away'),zod.literal(null)]).nullable(),
+  "totalGoals": zod.number().int().nullable(),
+  "leagueAverageGoals": zod.number().nullable().describe('Current season goals per match derived from the league standings available at processing time'),
+  "leagueAverageMatches": zod.number().int().nullable(),
+  "averageSource": zod.enum(['season-standings-at-processing-time', 'unavailable']),
+  "completeness": zod.enum(['complete', 'partial']),
+  "issueCount": zod.number().int(),
+  "processedAt": zod.coerce.date()
+}).and(zod.object({
+  "details": zod.object({
+  "sourceUrl": zod.string().url(),
+  "match": zod.object({
+  "fixtureId": zod.number().int(),
+  "date": zod.coerce.date(),
+  "competition": zod.string(),
+  "status": zod.string(),
+  "venue": zod.string().nullable(),
+  "leagueId": zod.number().int().nullable(),
+  "season": zod.number().int().nullable(),
+  "home": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}).and(zod.object({
+  "score": zod.number().int().nullable(),
+  "halfTimeScore": zod.number().int().nullable()
+})),
+  "away": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}).and(zod.object({
+  "score": zod.number().int().nullable(),
+  "halfTimeScore": zod.number().int().nullable()
+}))
+}),
+  "standings": zod.array(zod.object({
+  "rank": zod.number().int(),
+  "teamId": zod.number().int(),
+  "teamName": zod.string(),
+  "teamLogo": zod.string().url().nullable(),
+  "played": zod.number().int(),
+  "goalDifference": zod.number().int(),
+  "points": zod.number().int(),
+  "form": zod.string(),
+  "homePlayed": zod.number().int(),
+  "homePoints": zod.number().int(),
+  "homeGoalDifference": zod.number().int(),
+  "awayPlayed": zod.number().int(),
+  "awayPoints": zod.number().int(),
+  "awayGoalDifference": zod.number().int()
+})),
+  "oddsMarkets": zod.array(zod.object({
+  "marketId": zod.string(),
+  "name": zod.string(),
+  "category": zod.enum(['1x2', 'first-half', 'goals', 'handicap', 'other']),
+  "selections": zod.array(zod.object({
+  "selection": zod.string(),
+  "odd": zod.number(),
+  "bookmaker": zod.string(),
+  "bookmakerCount": zod.number().int()
+}))
+})),
+  "homeRecent": zod.array(zod.object({
+  "fixtureId": zod.number().int(),
+  "date": zod.coerce.date(),
+  "competition": zod.string(),
+  "status": zod.string(),
+  "leagueId": zod.number().int().nullable(),
+  "season": zod.number().int().nullable(),
+  "homeTeam": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}),
+  "awayTeam": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}),
+  "homeScore": zod.number().int().nullable(),
+  "awayScore": zod.number().int().nullable()
+})),
+  "awayRecent": zod.array(zod.object({
+  "fixtureId": zod.number().int(),
+  "date": zod.coerce.date(),
+  "competition": zod.string(),
+  "status": zod.string(),
+  "leagueId": zod.number().int().nullable(),
+  "season": zod.number().int().nullable(),
+  "homeTeam": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}),
+  "awayTeam": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}),
+  "homeScore": zod.number().int().nullable(),
+  "awayScore": zod.number().int().nullable()
+})),
+  "headToHead": zod.array(zod.object({
+  "fixtureId": zod.number().int(),
+  "date": zod.coerce.date(),
+  "competition": zod.string(),
+  "status": zod.string(),
+  "leagueId": zod.number().int().nullable(),
+  "season": zod.number().int().nullable(),
+  "homeTeam": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}),
+  "awayTeam": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}),
+  "homeScore": zod.number().int().nullable(),
+  "awayScore": zod.number().int().nullable()
+})),
+  "issues": zod.array(zod.object({
+  "section": zod.enum(['standings', 'odds', 'homeRecent', 'awayRecent', 'headToHead']),
+  "message": zod.string()
+}))
+}),
+  "lastFive": zod.object({
+  "fixtureId": zod.number().int(),
+  "home": zod.object({
+  "team": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}),
+  "matches": zod.array(zod.object({
+  "match": zod.object({
+  "fixtureId": zod.number().int(),
+  "date": zod.coerce.date(),
+  "competition": zod.string(),
+  "status": zod.string(),
+  "leagueId": zod.number().int().nullable(),
+  "season": zod.number().int().nullable(),
+  "homeTeam": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}),
+  "awayTeam": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}),
+  "homeScore": zod.number().int().nullable(),
+  "awayScore": zod.number().int().nullable()
+}),
+  "sourceUrl": zod.string().url(),
+  "statistics": zod.array(zod.object({
+  "teamId": zod.number().int().nullable(),
+  "teamName": zod.string(),
+  "statistics": zod.array(zod.object({
+  "label": zod.string(),
+  "value": zod.union([zod.string(),zod.number(),zod.null()])
+}))
+})),
+  "events": zod.array(zod.object({
+  "minute": zod.number().int().nullable(),
+  "extraMinute": zod.number().int().nullable(),
+  "teamId": zod.number().int().nullable(),
+  "teamName": zod.string().nullable(),
+  "player": zod.string().nullable(),
+  "assist": zod.string().nullable(),
+  "type": zod.string(),
+  "detail": zod.string().nullable(),
+  "comments": zod.string().nullable()
+})),
+  "lineups": zod.array(zod.object({
+  "teamId": zod.number().int().nullable(),
+  "teamName": zod.string(),
+  "formation": zod.string().nullable(),
+  "coach": zod.string().nullable(),
+  "starters": zod.array(zod.object({
+  "id": zod.number().int().nullable(),
+  "name": zod.string(),
+  "number": zod.number().int().nullable(),
+  "position": zod.string().nullable(),
+  "grid": zod.string().nullable()
+})),
+  "substitutes": zod.array(zod.object({
+  "id": zod.number().int().nullable(),
+  "name": zod.string(),
+  "number": zod.number().int().nullable(),
+  "position": zod.string().nullable(),
+  "grid": zod.string().nullable()
+}))
+})),
+  "players": zod.array(zod.object({
+  "teamId": zod.number().int().nullable(),
+  "teamName": zod.string(),
+  "players": zod.array(zod.object({
+  "id": zod.number().int().nullable(),
+  "name": zod.string(),
+  "photo": zod.string().url().nullable(),
+  "number": zod.number().int().nullable(),
+  "position": zod.string().nullable(),
+  "rating": zod.string().nullable(),
+  "statistics": zod.array(zod.object({
+  "label": zod.string(),
+  "value": zod.union([zod.string(),zod.number(),zod.null()])
+}))
+}))
+})),
+  "oddsMarkets": zod.array(zod.object({
+  "marketId": zod.string(),
+  "name": zod.string(),
+  "category": zod.enum(['1x2', 'first-half', 'goals', 'handicap', 'other']),
+  "bookmakers": zod.array(zod.object({
+  "name": zod.string(),
+  "selections": zod.array(zod.object({
+  "selection": zod.string(),
+  "odd": zod.number()
+}))
+}))
+})),
+  "prematchStats": zod.array(zod.object({
+  "label": zod.string(),
+  "value": zod.union([zod.string(),zod.number(),zod.null()])
+})),
+  "issues": zod.array(zod.string())
+}))
+}),
+  "away": zod.object({
+  "team": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}),
+  "matches": zod.array(zod.object({
+  "match": zod.object({
+  "fixtureId": zod.number().int(),
+  "date": zod.coerce.date(),
+  "competition": zod.string(),
+  "status": zod.string(),
+  "leagueId": zod.number().int().nullable(),
+  "season": zod.number().int().nullable(),
+  "homeTeam": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}),
+  "awayTeam": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}),
+  "homeScore": zod.number().int().nullable(),
+  "awayScore": zod.number().int().nullable()
+}),
+  "sourceUrl": zod.string().url(),
+  "statistics": zod.array(zod.object({
+  "teamId": zod.number().int().nullable(),
+  "teamName": zod.string(),
+  "statistics": zod.array(zod.object({
+  "label": zod.string(),
+  "value": zod.union([zod.string(),zod.number(),zod.null()])
+}))
+})),
+  "events": zod.array(zod.object({
+  "minute": zod.number().int().nullable(),
+  "extraMinute": zod.number().int().nullable(),
+  "teamId": zod.number().int().nullable(),
+  "teamName": zod.string().nullable(),
+  "player": zod.string().nullable(),
+  "assist": zod.string().nullable(),
+  "type": zod.string(),
+  "detail": zod.string().nullable(),
+  "comments": zod.string().nullable()
+})),
+  "lineups": zod.array(zod.object({
+  "teamId": zod.number().int().nullable(),
+  "teamName": zod.string(),
+  "formation": zod.string().nullable(),
+  "coach": zod.string().nullable(),
+  "starters": zod.array(zod.object({
+  "id": zod.number().int().nullable(),
+  "name": zod.string(),
+  "number": zod.number().int().nullable(),
+  "position": zod.string().nullable(),
+  "grid": zod.string().nullable()
+})),
+  "substitutes": zod.array(zod.object({
+  "id": zod.number().int().nullable(),
+  "name": zod.string(),
+  "number": zod.number().int().nullable(),
+  "position": zod.string().nullable(),
+  "grid": zod.string().nullable()
+}))
+})),
+  "players": zod.array(zod.object({
+  "teamId": zod.number().int().nullable(),
+  "teamName": zod.string(),
+  "players": zod.array(zod.object({
+  "id": zod.number().int().nullable(),
+  "name": zod.string(),
+  "photo": zod.string().url().nullable(),
+  "number": zod.number().int().nullable(),
+  "position": zod.string().nullable(),
+  "rating": zod.string().nullable(),
+  "statistics": zod.array(zod.object({
+  "label": zod.string(),
+  "value": zod.union([zod.string(),zod.number(),zod.null()])
+}))
+}))
+})),
+  "oddsMarkets": zod.array(zod.object({
+  "marketId": zod.string(),
+  "name": zod.string(),
+  "category": zod.enum(['1x2', 'first-half', 'goals', 'handicap', 'other']),
+  "bookmakers": zod.array(zod.object({
+  "name": zod.string(),
+  "selections": zod.array(zod.object({
+  "selection": zod.string(),
+  "odd": zod.number()
+}))
+}))
+})),
+  "prematchStats": zod.array(zod.object({
+  "label": zod.string(),
+  "value": zod.union([zod.string(),zod.number(),zod.null()])
+})),
+  "issues": zod.array(zod.string())
+}))
+}),
+  "issues": zod.array(zod.string())
+}),
+  "tmp": zod.object({
+  "fixtureId": zod.number().int(),
+  "oddsHistory": zod.array(zod.object({
+  "fixtureId": zod.number().int(),
+  "homeProbability": zod.number().min(getFootballProcessedMatchResponseTwoTmpOddsHistoryItemHomeProbabilityMin).max(getFootballProcessedMatchResponseTwoTmpOddsHistoryItemHomeProbabilityMax).nullable(),
+  "drawProbability": zod.number().min(getFootballProcessedMatchResponseTwoTmpOddsHistoryItemDrawProbabilityMin).max(getFootballProcessedMatchResponseTwoTmpOddsHistoryItemDrawProbabilityMax).nullable(),
+  "awayProbability": zod.number().min(getFootballProcessedMatchResponseTwoTmpOddsHistoryItemAwayProbabilityMin).max(getFootballProcessedMatchResponseTwoTmpOddsHistoryItemAwayProbabilityMax).nullable(),
+  "bookmakerCount": zod.number().int(),
+  "verifiedBookmakerCount": zod.number().int(),
+  "unverifiedBookmakerCount": zod.number().int(),
+  "marketCount": zod.number().int(),
+  "marketCategories": zod.array(zod.enum(['1x2', 'first-half', 'goals', 'handicap', 'other'])),
+  "markets": zod.array(zod.object({
+  "marketId": zod.string(),
+  "name": zod.string(),
+  "category": zod.enum(['1x2', 'first-half', 'goals', 'handicap', 'other']),
+  "selections": zod.array(zod.object({
+  "selection": zod.string(),
+  "probability": zod.number().min(getFootballProcessedMatchResponseTwoTmpOddsHistoryItemMarketsItemSelectionsItemProbabilityMin).max(getFootballProcessedMatchResponseTwoTmpOddsHistoryItemMarketsItemSelectionsItemProbabilityMax),
+  "bookmakerCount": zod.number().int(),
+  "verifiedBookmakerCount": zod.number().int(),
+  "unverifiedBookmakerCount": zod.number().int()
+}))
+})),
+  "quoteSource": zod.enum(['verified', 'mixed', 'unverified', 'unavailable'])
+})),
+  "seasonStandings": zod.array(zod.object({
+  "leagueId": zod.number().int(),
+  "season": zod.number().int(),
+  "teamId": zod.number().int(),
+  "teamName": zod.string(),
+  "rank": zod.number().int(),
+  "played": zod.number().int(),
+  "points": zod.number().int(),
+  "goalDifference": zod.number().int()
+})),
+  "issues": zod.array(zod.object({
+  "section": zod.enum(['oddsHistory', 'standingsHistory']),
+  "message": zod.string()
+}))
+})
+}))
+
+
+/**
  * Returns match details and related public data from KickoffScore
  * @summary Get match details, odds, standings, team form, and head-to-head
  */

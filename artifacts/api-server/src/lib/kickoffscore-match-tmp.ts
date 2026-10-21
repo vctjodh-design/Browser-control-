@@ -566,6 +566,7 @@ async function loadTmpContext(
   const matches = uniqueMatches([
     ...details.homeRecent.slice(0, 15),
     ...details.awayRecent.slice(0, 15),
+    ...details.headToHead,
   ]);
   const issues: FootballMatchTmpIssue[] = [];
 
