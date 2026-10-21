@@ -187,6 +187,7 @@ async function runProcessing(
       const matchDate = details.match.date instanceof Date
         ? details.match.date
         : new Date(String(details.match.date));
+      const completeness = issueCount === 0 ? "complete" as const : "partial" as const;
       const commonSummary = {
         fixtureId,
         date: matchDate,
@@ -198,7 +199,7 @@ async function runProcessing(
         leagueAverageGoals,
         leagueAverageMatches,
         averageSource,
-        completeness: issueCount === 0 ? "complete" : "partial",
+        completeness,
         issueCount,
         processedAt: new Date(),
       };

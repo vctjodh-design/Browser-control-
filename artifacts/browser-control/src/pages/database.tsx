@@ -129,14 +129,13 @@ function ArchivePage({ kind }: { kind: ArchiveKind }) {
   const [routeSearch, setRouteSearch] = useState(() => new URLSearchParams(window.location.search));
   const [searchText, setSearchText] = useState('');
   const [offset, setOffset] = useState(0);
-  const [date, setDate] = useState(() => new URLSearchParams(window.location.search).get('date') ?? '');
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearError, setClearError] = useState('');
   const detailRef = useRef<HTMLDivElement>(null);
   const deleteArchive = useDeleteAllFootballProcessedMatches();
   const deleteTester = useDeleteAllFootballTesterMatches();
   const limit = 50;
-  const params = useMemo(() => ({ limit, offset, ...(date ? { date } : {}) }), [date, offset]);
+  const params = useMemo(() => ({ limit, offset }), [offset]);
   const archiveQuery = useGetFootballProcessedMatches(params, {
     query: { enabled: kind === 'database', queryKey: getGetFootballProcessedMatchesQueryKey(params) },
   });
@@ -156,7 +155,6 @@ function ArchivePage({ kind }: { kind: ArchiveKind }) {
     const syncRouteSearch = () => {
       const next = new URLSearchParams(window.location.search);
       setRouteSearch(next);
-      setDate(next.get('date') ?? '');
       setOffset(0);
     };
     window.addEventListener('popstate', syncRouteSearch);
@@ -173,17 +171,7 @@ function ArchivePage({ kind }: { kind: ArchiveKind }) {
 
   const selectRecord = (id: number | null) => {
     const query = new URLSearchParams();
-    if (date) query.set('date', date);
     if (id) query.set('fixture', String(id));
-    setRouteSearch(query);
-    setLocation(`/${kind}${query.size ? `?${query.toString()}` : ''}`);
-  };
-  const changeDate = (value: string) => {
-    setDate(value);
-    setOffset(0);
-    const query = new URLSearchParams();
-    if (value) query.set('date', value);
-    if (selectedId) query.set('fixture', String(selectedId));
     setRouteSearch(query);
     setLocation(`/${kind}${query.size ? `?${query.toString()}` : ''}`);
   };
@@ -209,17 +197,16 @@ function ArchivePage({ kind }: { kind: ArchiveKind }) {
     <Header kind={kind} />
     <div className="mx-auto max-w-[1420px] px-4 pb-12 pt-7 sm:px-7 sm:pt-10">
       <div className="animate-rise mb-7 flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
-        <div><p className="mono mb-2 text-[10px] uppercase tracking-[.19em] text-[#9b7160]">Research archive / 02</p><h1 className="text-[32px] font-extrabold leading-[1.04] tracking-[-.06em] text-[#263746] sm:text-[46px]">A record you can <span className="text-[#d96f51]">inspect.</span></h1><p className="mt-3 max-w-[560px] text-[12px] leading-6 text-[#727973]">Search saved match summaries by date, then inspect the exact analysis payloads stored for each fixture.</p></div>
+        <div><p className="mono mb-2 text-[10px] uppercase tracking-[.19em] text-[#9b7160]">{kind === 'tester' ? 'Pre-match research / 03' : 'Research archive / 02'}</p><h1 className="text-[32px] font-extrabold leading-[1.04] tracking-[-.06em] text-[#263746] sm:text-[46px]">{kind === 'tester' ? <>Pre-match context, <span className="text-[#d96f51]">no outcomes.</span></> : <>A record you can <span className="text-[#d96f51]">inspect.</span></>}</h1><p className="mt-3 max-w-[560px] text-[12px] leading-6 text-[#727973]">{kind === 'tester' ? 'Search all saved pre-match records. The target match score and outcome are intentionally not stored.' : 'Search all completed-match summaries, then inspect the analysis and outcomes stored for each fixture.'}</p></div>
         <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
-          <button type="button" onClick={() => { setClearError(''); setConfirmClear(true); }} disabled={totalSaved === 0 || listQuery.isLoading || deletePending} className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#e5c7ba] bg-[#fff8f3] px-3.5 text-[10px] font-extrabold text-[#a45340] hover:bg-white disabled:cursor-not-allowed disabled:opacity-45" data-testid="button-clear-archive"><Trash2 size={13} /> Delete all matches</button>
-          <Link href={date ? `/processing?date=${date}` : '/processing'} className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f9f8f3] px-3.5 text-[10px] font-extrabold text-[#60716a] hover:bg-white" data-testid="link-start-processing"><RefreshCw size={13} /> Start an import</Link>
+          <button type="button" onClick={() => { setClearError(''); setConfirmClear(true); }} disabled={totalSaved === 0 || listQuery.isLoading || deletePending} className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#e5c7ba] bg-[#fff8f3] px-3.5 text-[10px] font-extrabold text-[#a45340] hover:bg-white disabled:cursor-not-allowed disabled:opacity-45" data-testid="button-clear-archive"><Trash2 size={13} /> Delete all {kind === 'tester' ? 'tester records' : 'matches'}</button>
+          <Link href="/processing" className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f9f8f3] px-3.5 text-[10px] font-extrabold text-[#60716a] hover:bg-white" data-testid="link-start-processing"><RefreshCw size={13} /> {kind === 'tester' ? 'Build pre-match data' : 'Start an import'}</Link>
         </div>
       </div>
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(430px,.88fr)]">
         <section className={`overflow-hidden rounded-[17px] border border-[#d6d5cc] bg-[#f9f8f3] shadow-[0_16px_50px_rgba(47,59,64,.055)] ${selectedId ? 'order-2 xl:order-1' : 'order-1'}`} aria-labelledby="archive-heading" data-testid="section-archive-list">
-          <div className="border-b border-[#e1dfd7] bg-[#f4f3ed] px-4 py-4 sm:px-5"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl bg-[#e6eee8] text-[#537867]"><Archive size={16} /></span><div><h2 id="archive-heading" className="text-[14px] font-extrabold text-[#344550]">Saved match summaries</h2><p className="mt-0.5 text-[10px] text-[#858982]" aria-live="polite" data-testid="text-archive-count">{data ? `${data.total} records · ${data.date ?? 'all dates'}` : 'Local analysis archive'}</p></div></div></div>
-          <div className="grid gap-2 border-b border-[#e8e6de] p-3 sm:grid-cols-[minmax(150px,.75fr)_minmax(0,1.25fr)]">
-            <label className="relative"><span className="sr-only">Filter archive by date</span><CalendarDays size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#9a7867]" /><input type="date" value={date} onChange={(e)=>changeDate(e.target.value)} className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] pl-9 pr-2 text-[10px] font-bold text-[#47595b]" aria-label="Filter saved matches by date" data-testid="input-database-date" /></label>
+          <div className="border-b border-[#e1dfd7] bg-[#f4f3ed] px-4 py-4 sm:px-5"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl bg-[#e6eee8] text-[#537867]"><Archive size={16} /></span><div><h2 id="archive-heading" className="text-[14px] font-extrabold text-[#344550]">{kind === 'tester' ? 'Saved pre-match records' : 'Saved match summaries'}</h2><p className="mt-0.5 text-[10px] text-[#858982]" aria-live="polite" data-testid="text-archive-count">{data ? `${data.total} total ${kind === 'tester' ? 'tester records' : 'matches'}` : 'Loading saved records'}</p></div></div></div>
+          <div className="border-b border-[#e8e6de] p-3">
             <label className="relative"><span className="sr-only">Search teams, competitions or fixture ID</span><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8b928a]" /><input value={searchText} onChange={(e)=>setSearchText(e.target.value)} placeholder="Search teams, competitions, fixture ID" className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] pl-9 pr-9 text-[10px] text-[#47595b] placeholder:text-[#9a9b93]" data-testid="input-database-search" />{searchText && <button type="button" onClick={()=>setSearchText('')} aria-label="Clear search" className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-[#78817b] hover:bg-[#efeee8]" data-testid="button-clear-search"><X size={13} /></button>}</label>
           </div>
           {listQuery.isLoading ? <div className="space-y-2 p-3" role="status" aria-label="Loading archive" data-testid="status-archive-loading">{[0,1,2,3,4,5].map(i=><div key={i} className="h-[66px] animate-pulse rounded-lg bg-[#eeede6]" />)}</div>
@@ -229,17 +216,17 @@ function ArchivePage({ kind }: { kind: ArchiveKind }) {
             <span className="flex items-center gap-2"><span className="mono text-[13px] font-medium text-[#344c43]">{kind === 'database' ? score(match as FootballProcessedMatchSummary) : 'PRE-MATCH'}</span><ChevronRight size={14} className="text-[#9a9c92]" /></span>
           </button>)}</div>
           <div className="flex items-center justify-between gap-3 border-t border-[#e8e6de] bg-[#f5f4ed] px-4 py-3"><span className="text-[9px] text-[#858982]">Showing {offset + 1}–{Math.min(offset + limit, data?.total ?? 0)} of {data?.total ?? 0}{normalized ? ' on this page' : ''}</span><div className="flex gap-1"><button type="button" onClick={()=>setOffset((value)=>Math.max(0,value-limit))} disabled={offset===0} className="rounded-md border border-[#d8d7ce] bg-[#fbfaf6] px-2.5 py-1.5 text-[9px] font-bold disabled:opacity-40" data-testid="button-previous-page">Previous</button><button type="button" onClick={()=>setOffset((value)=>value+limit)} disabled={offset+limit >= (data?.total ?? 0)} className="rounded-md border border-[#d8d7ce] bg-[#fbfaf6] px-2.5 py-1.5 text-[9px] font-bold disabled:opacity-40" data-testid="button-next-page">Next</button></div></div></>
-          : <div className="flex min-h-[290px] flex-col items-center justify-center px-6 py-12 text-center" data-testid="status-archive-empty"><span className="grid size-12 place-items-center rounded-2xl border border-[#dfe4dc] bg-[#edf2ec] text-[#718879]"><Database size={20} /></span><h3 className="mt-4 text-[15px] font-extrabold text-[#354750]">{normalized ? 'No matching records' : date ? 'No saved matches for this date' : 'Archive is empty'}</h3><p className="mt-2 max-w-[320px] text-[10px] leading-5 text-[#858982]">{normalized ? 'Try a different team, competition or fixture ID.' : 'Completed match days imported through Processing will appear here. No records are fabricated or inferred.'}</p>{normalized && <button type="button" onClick={()=>setSearchText('')} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#253746] px-3 py-2 text-[9px] font-extrabold text-[#f8f2e7]" data-testid="button-reset-search"><X size={12} /> Clear search</button>}</div>}
+          : <div className="flex min-h-[290px] flex-col items-center justify-center px-6 py-12 text-center" data-testid="status-archive-empty"><span className="grid size-12 place-items-center rounded-2xl border border-[#dfe4dc] bg-[#edf2ec] text-[#718879]"><Database size={20} /></span><h3 className="mt-4 text-[15px] font-extrabold text-[#354750]">{normalized ? 'No matching records' : kind === 'tester' ? 'No pre-match records yet' : 'Archive is empty'}</h3><p className="mt-2 max-w-[320px] text-[10px] leading-5 text-[#858982]">{normalized ? 'Try a different team, competition or fixture ID.' : kind === 'tester' ? 'Choose a past match day in Processing to build pre-match records for every fixture.' : 'Completed match days imported through Processing will appear here. No records are fabricated or inferred.'}</p>{normalized && <button type="button" onClick={()=>setSearchText('')} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#253746] px-3 py-2 text-[9px] font-extrabold text-[#f8f2e7]" data-testid="button-reset-search"><X size={12} /> Clear search</button>}</div>}
         </section>
         <div ref={detailRef} className={`min-w-0 scroll-mt-4 ${selectedId ? 'order-1 xl:order-2' : 'order-2'}`}><DetailPanel fixtureId={selectedId} kind={kind} /></div>
       </div>
       {confirmClear && <div className="fixed inset-0 z-50 grid place-items-center bg-[#17232c]/45 p-4" role="presentation">
         <section className="w-full max-w-md rounded-2xl border border-[#deddd4] bg-[#fbfaf6] p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="clear-archive-title" aria-describedby="clear-archive-description" data-testid="dialog-clear-archive">
-          <div className="flex items-start gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#fbede6] text-[#a45340]"><Trash2 size={17} /></span><div><h2 id="clear-archive-title" className="text-[15px] font-extrabold text-[#344550]">Delete all archived matches?</h2><p id="clear-archive-description" className="mt-2 text-[11px] leading-5 text-[#727973]">This permanently deletes {totalSaved} saved match records. Processing job history stays. If any import is running, the archive will not be cleared until it finishes. This cannot be undone.</p></div></div>
+          <div className="flex items-start gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#fbede6] text-[#a45340]"><Trash2 size={17} /></span><div><h2 id="clear-archive-title" className="text-[15px] font-extrabold text-[#344550]">Delete all {kind === 'tester' ? 'tester records' : 'archived matches'}?</h2><p id="clear-archive-description" className="mt-2 text-[11px] leading-5 text-[#727973]">This permanently deletes {totalSaved} saved {kind === 'tester' ? 'pre-match tester records' : 'match records'}. Processing job history stays. If a {kind === 'tester' ? 'tester job' : 'match import'} is running, the records cannot be cleared until it finishes. This cannot be undone.</p></div></div>
           {clearError && <p className="mt-4 rounded-lg border border-[#e3c3b6] bg-[#fff6f0] px-3 py-2 text-[10px] text-[#8c5144]" role="alert" data-testid="error-clear-archive">{clearError}</p>}
           <div className="mt-5 flex justify-end gap-2">
             <button type="button" onClick={() => setConfirmClear(false)} disabled={deletePending} className="h-10 rounded-lg border border-[#d8d7ce] bg-white px-4 text-[10px] font-extrabold text-[#64716d] disabled:opacity-50" data-testid="button-cancel-clear">Cancel</button>
-            <button type="button" onClick={clearArchive} disabled={deletePending} className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#aa513e] px-4 text-[10px] font-extrabold text-white hover:bg-[#923f2f] disabled:opacity-50" data-testid="button-confirm-clear">{deletePending && <RefreshCw size={13} className="animate-spin" />}{deletePending ? 'Deleting…' : 'Delete all matches'}</button>
+            <button type="button" onClick={clearArchive} disabled={deletePending} className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#aa513e] px-4 text-[10px] font-extrabold text-white hover:bg-[#923f2f] disabled:opacity-50" data-testid="button-confirm-clear">{deletePending && <RefreshCw size={13} className="animate-spin" />}{deletePending ? 'Deleting…' : `Delete all ${kind === 'tester' ? 'tester records' : 'matches'}`}</button>
           </div>
         </section>
       </div>}
