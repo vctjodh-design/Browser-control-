@@ -113,6 +113,53 @@ export const GetFootballProcessingJobResponse = zod.object({
 
 
 /**
+ * @summary Get the latest pre-match tester job for a match date
+ */
+export const GetFootballTesterProcessingForDateQueryParams = zod.object({
+  "date": zod.date()
+})
+
+export const GetFootballTesterProcessingForDateResponse = zod.object({
+  "job": zod.union([zod.object({
+  "id": zod.string().uuid(),
+  "date": zod.coerce.date(),
+  "status": zod.enum(['queued', 'running', 'completed', 'partial', 'failed']),
+  "totalFixtures": zod.number().int(),
+  "processedFixtures": zod.number().int(),
+  "savedFixtures": zod.number().int(),
+  "skippedFixtures": zod.number().int(),
+  "failedFixtures": zod.number().int(),
+  "error": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}),zod.null()])
+})
+
+
+/**
+ * Collects match context and historical features without storing the target match score or outcome
+ * @summary Build pre-match tester records for a date
+ */
+export const StartFootballTesterProcessingBody = zod.object({
+  "date": zod.coerce.date()
+})
+
+export const StartFootballTesterProcessingResponse = zod.object({
+  "id": zod.string().uuid(),
+  "date": zod.coerce.date(),
+  "status": zod.enum(['queued', 'running', 'completed', 'partial', 'failed']),
+  "totalFixtures": zod.number().int(),
+  "processedFixtures": zod.number().int(),
+  "savedFixtures": zod.number().int(),
+  "skippedFixtures": zod.number().int(),
+  "failedFixtures": zod.number().int(),
+  "error": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
  * @summary List saved match records
  */
 export const getFootballProcessedMatchesQueryLimitDefault = 100;
@@ -212,6 +259,104 @@ export const GetFootballProcessedMatchPayloadQueryParams = zod.object({
 })
 
 export const GetFootballProcessedMatchPayloadResponse = zod.object({
+  "fixtureId": zod.number().int(),
+  "section": zod.enum(['details', 'lastFive', 'tmp']),
+  "payload": zod.record(zod.string(), zod.unknown())
+})
+
+
+/**
+ * @summary List saved pre-match tester records
+ */
+export const getFootballTesterMatchesQueryLimitDefault = 100;
+export const getFootballTesterMatchesQueryLimitMax = 500;
+
+export const getFootballTesterMatchesQueryOffsetDefault = 0;
+export const getFootballTesterMatchesQueryOffsetMin = 0;
+
+
+
+export const GetFootballTesterMatchesQueryParams = zod.object({
+  "date": zod.date().optional(),
+  "limit": zod.coerce.number().int().min(1).max(getFootballTesterMatchesQueryLimitMax).default(getFootballTesterMatchesQueryLimitDefault),
+  "offset": zod.coerce.number().int().min(getFootballTesterMatchesQueryOffsetMin).default(getFootballTesterMatchesQueryOffsetDefault)
+})
+
+export const GetFootballTesterMatchesResponse = zod.object({
+  "matches": zod.array(zod.object({
+  "fixtureId": zod.number().int(),
+  "date": zod.coerce.date(),
+  "competition": zod.string(),
+  "leagueId": zod.number().int().nullable(),
+  "season": zod.number().int().nullable(),
+  "homeTeamName": zod.string(),
+  "awayTeamName": zod.string(),
+  "leagueAverageGoals": zod.number().nullable(),
+  "leagueAverageMatches": zod.number().int().nullable(),
+  "averageSource": zod.enum(['season-standings-at-processing-time', 'unavailable']),
+  "completeness": zod.enum(['complete', 'partial']),
+  "issueCount": zod.number().int(),
+  "processedAt": zod.coerce.date()
+}).describe('Pre-match features for a fixture. Target-match scores and outcomes are intentionally excluded.')),
+  "total": zod.number().int(),
+  "date": zod.coerce.date().nullable(),
+  "limit": zod.number().int(),
+  "offset": zod.number().int()
+})
+
+
+/**
+ * Deletes tester records but retains processing job history; refuses while a tester job is running
+ * @summary Delete all pre-match tester records
+ */
+export const deleteAllFootballTesterMatchesResponseDeletedCountMin = 0;
+
+
+
+export const DeleteAllFootballTesterMatchesResponse = zod.object({
+  "deletedCount": zod.number().int().min(deleteAllFootballTesterMatchesResponseDeletedCountMin)
+})
+
+
+/**
+ * @summary Get one pre-match tester summary without target outcome fields
+ */
+
+
+
+export const GetFootballTesterMatchParams = zod.object({
+  "fixtureId": zod.coerce.number().int().min(1)
+})
+
+export const GetFootballTesterMatchResponse = zod.object({
+  "fixtureId": zod.number().int(),
+  "date": zod.coerce.date(),
+  "competition": zod.string(),
+  "leagueId": zod.number().int().nullable(),
+  "season": zod.number().int().nullable(),
+  "homeTeamName": zod.string(),
+  "awayTeamName": zod.string(),
+  "leagueAverageGoals": zod.number().nullable(),
+  "leagueAverageMatches": zod.number().int().nullable(),
+  "averageSource": zod.enum(['season-standings-at-processing-time', 'unavailable']),
+  "completeness": zod.enum(['complete', 'partial']),
+  "issueCount": zod.number().int(),
+  "processedAt": zod.coerce.date()
+}).describe('Pre-match features for a fixture. Target-match scores and outcomes are intentionally excluded.')
+
+
+/**
+ * @summary Get one stored pre-match tester payload section
+ */
+
+
+
+export const GetFootballTesterMatchPayloadQueryParams = zod.object({
+  "fixtureId": zod.coerce.number().int().min(1),
+  "section": zod.enum(['details', 'lastFive', 'tmp'])
+})
+
+export const GetFootballTesterMatchPayloadResponse = zod.object({
   "fixtureId": zod.number().int(),
   "section": zod.enum(['details', 'lastFive', 'tmp']),
   "payload": zod.record(zod.string(), zod.unknown())

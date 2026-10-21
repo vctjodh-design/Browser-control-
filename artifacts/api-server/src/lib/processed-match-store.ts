@@ -8,15 +8,20 @@ import type {
   FootballMatchLastFive,
   FootballMatchTmpContext,
   FootballProcessedMatchSummary,
+  FootballTesterMatchSummary,
   FootballProcessingJob,
   FootballProcessingJobStatus,
 } from "@workspace/api-zod";
 
 type SqlRow = Record<string, SQLOutputValue>;
+type ProcessingDataset = "archive" | "tester";
 const SUMMARY_COLUMNS = `fixture_id, match_date, competition, league_id, season,
   home_team_name, away_team_name, home_score, away_score, actual_outcome,
   total_goals, league_average_goals, league_average_matches, average_source,
   completeness, issue_count, processed_at`;
+const TESTER_SUMMARY_COLUMNS = `fixture_id, match_date, competition, league_id, season,
+  home_team_name, away_team_name, league_average_goals, league_average_matches,
+  average_source, completeness, issue_count, processed_at`;
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const databasePath =
@@ -41,7 +46,9 @@ database.exec(`
     failed_fixtures INTEGER NOT NULL DEFAULT 0,
     error TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    target_dataset TEXT NOT NULL DEFAULT 'archive'
+      CHECK (target_dataset IN ('archive', 'tester'))
   );
 
   CREATE INDEX IF NOT EXISTS bulk_processing_jobs_date_created
@@ -75,6 +82,46 @@ database.exec(`
     ON processed_matches(calendar_date, match_date DESC);
   CREATE INDEX IF NOT EXISTS processed_matches_competition
     ON processed_matches(competition, match_date DESC);
+
+  CREATE TABLE IF NOT EXISTS tester_matches (
+    fixture_id INTEGER PRIMARY KEY,
+    calendar_date TEXT NOT NULL,
+    match_date TEXT NOT NULL,
+    competition TEXT NOT NULL,
+    league_id INTEGER,
+    season INTEGER,
+    home_team_name TEXT NOT NULL,
+    away_team_name TEXT NOT NULL,
+    league_average_goals REAL,
+    league_average_matches INTEGER,
+    average_source TEXT NOT NULL CHECK (average_source IN ('season-standings-at-processing-time', 'unavailable')),
+    completeness TEXT NOT NULL CHECK (completeness IN ('complete', 'partial')),
+    issue_count INTEGER NOT NULL DEFAULT 0,
+    processed_at TEXT NOT NULL,
+    prematch_json TEXT NOT NULL,
+    last_five_json TEXT NOT NULL,
+    tmp_json TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS tester_matches_calendar_date
+    ON tester_matches(calendar_date, match_date DESC);
+  CREATE INDEX IF NOT EXISTS tester_matches_competition
+    ON tester_matches(competition, match_date DESC);
+`);
+
+const jobColumns = database
+  .prepare("PRAGMA table_info(bulk_processing_jobs)")
+  .all() as SqlRow[];
+if (!jobColumns.some((column) => column.name === "target_dataset")) {
+  database.exec(`
+    ALTER TABLE bulk_processing_jobs
+    ADD COLUMN target_dataset TEXT NOT NULL DEFAULT 'archive'
+    CHECK (target_dataset IN ('archive', 'tester'));
+  `);
+}
+database.exec(`
+  CREATE INDEX IF NOT EXISTS bulk_processing_jobs_dataset_date_created
+    ON bulk_processing_jobs(target_dataset, match_date, created_at DESC);
 `);
 
 database
@@ -142,9 +189,28 @@ function summaryFromRow(row: SqlRow): FootballProcessedMatchSummary {
   };
 }
 
+function testerSummaryFromRow(row: SqlRow): FootballTesterMatchSummary {
+  return {
+    fixtureId: numberValue(row.fixture_id),
+    date: new Date(stringValue(row.match_date)),
+    competition: stringValue(row.competition),
+    leagueId: nullableNumber(row.league_id),
+    season: nullableNumber(row.season),
+    homeTeamName: stringValue(row.home_team_name),
+    awayTeamName: stringValue(row.away_team_name),
+    leagueAverageGoals: nullableNumber(row.league_average_goals),
+    leagueAverageMatches: nullableNumber(row.league_average_matches),
+    averageSource: stringValue(row.average_source) as FootballTesterMatchSummary["averageSource"],
+    completeness: stringValue(row.completeness) as FootballTesterMatchSummary["completeness"],
+    issueCount: numberValue(row.issue_count),
+    processedAt: new Date(stringValue(row.processed_at)),
+  };
+}
+
 export function createProcessingJob(
   date: string,
   totalFixtures: number,
+  targetDataset: ProcessingDataset = "archive",
 ): FootballProcessingJob {
   const now = new Date().toISOString();
   const job: FootballProcessingJob = {
@@ -165,8 +231,8 @@ export function createProcessingJob(
       `INSERT INTO bulk_processing_jobs (
         id, match_date, status, total_fixtures, processed_fixtures,
         saved_fixtures, skipped_fixtures, failed_fixtures, error,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        created_at, updated_at, target_dataset
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       job.id,
@@ -180,44 +246,58 @@ export function createProcessingJob(
       job.error,
       now,
       now,
+      targetDataset,
     );
   return job;
 }
 
 export function findActiveProcessingJob(
   date: string,
+  targetDataset: ProcessingDataset = "archive",
 ): FootballProcessingJob | null {
   const row = database
     .prepare(
       `SELECT * FROM bulk_processing_jobs
-       WHERE match_date = ? AND status IN ('queued', 'running')
+       WHERE match_date = ? AND target_dataset = ?
+         AND status IN ('queued', 'running')
        ORDER BY created_at DESC LIMIT 1`,
     )
-    .get(date) as SqlRow | undefined;
+    .get(date, targetDataset) as SqlRow | undefined;
   return toJob(row);
 }
 
 export function getLatestProcessingJob(
   date: string,
+  targetDataset: ProcessingDataset = "archive",
 ): FootballProcessingJob | null {
   const row = database
     .prepare(
       `SELECT * FROM bulk_processing_jobs
-       WHERE match_date = ?
+       WHERE match_date = ? AND target_dataset = ?
        ORDER BY created_at DESC LIMIT 1`,
     )
-    .get(date) as SqlRow | undefined;
+    .get(date, targetDataset) as SqlRow | undefined;
   return toJob(row);
 }
 
-export function findAnyActiveProcessingJob(): FootballProcessingJob | null {
-  const row = database
-    .prepare(
-      `SELECT * FROM bulk_processing_jobs
-       WHERE status IN ('queued', 'running')
-       ORDER BY updated_at DESC LIMIT 1`,
-    )
-    .get() as SqlRow | undefined;
+export function findAnyActiveProcessingJob(
+  targetDataset?: ProcessingDataset,
+): FootballProcessingJob | null {
+  const row = (targetDataset
+    ? database
+        .prepare(
+          `SELECT * FROM bulk_processing_jobs
+           WHERE target_dataset = ? AND status IN ('queued', 'running')
+           ORDER BY updated_at DESC LIMIT 1`,
+        )
+        .get(targetDataset)
+    : database
+        .prepare(
+          `SELECT * FROM bulk_processing_jobs
+           WHERE status IN ('queued', 'running')
+           ORDER BY updated_at DESC LIMIT 1`,
+        )
+        .get()) as SqlRow | undefined;
   return toJob(row);
 }
 
@@ -326,6 +406,62 @@ export function saveProcessedMatch(
     );
 }
 
+export function saveTesterMatch(
+  calendarDate: string,
+  summary: FootballTesterMatchSummary,
+  payloads: {
+    prematch: Record<string, unknown>;
+    lastFive: FootballMatchLastFive;
+    tmp: FootballMatchTmpContext;
+  },
+): void {
+  database
+    .prepare(
+      `INSERT INTO tester_matches (
+        fixture_id, calendar_date, match_date, competition, league_id, season,
+        home_team_name, away_team_name, league_average_goals,
+        league_average_matches, average_source, completeness, issue_count,
+        processed_at, prematch_json, last_five_json, tmp_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(fixture_id) DO UPDATE SET
+        calendar_date = excluded.calendar_date,
+        match_date = excluded.match_date,
+        competition = excluded.competition,
+        league_id = excluded.league_id,
+        season = excluded.season,
+        home_team_name = excluded.home_team_name,
+        away_team_name = excluded.away_team_name,
+        league_average_goals = excluded.league_average_goals,
+        league_average_matches = excluded.league_average_matches,
+        average_source = excluded.average_source,
+        completeness = excluded.completeness,
+        issue_count = excluded.issue_count,
+        processed_at = excluded.processed_at,
+        prematch_json = excluded.prematch_json,
+        last_five_json = excluded.last_five_json,
+        tmp_json = excluded.tmp_json`,
+    )
+    .run(
+      summary.fixtureId,
+      calendarDate,
+      summary.date.toISOString(),
+      summary.competition,
+      summary.leagueId,
+      summary.season,
+      summary.homeTeamName,
+      summary.awayTeamName,
+      summary.leagueAverageGoals,
+      summary.leagueAverageMatches,
+      summary.averageSource,
+      summary.completeness,
+      summary.issueCount,
+      summary.processedAt.toISOString(),
+      JSON.stringify(payloads.prematch),
+      JSON.stringify(payloads.lastFive),
+      JSON.stringify(payloads.tmp),
+    );
+}
+
 export function listProcessedMatches(input: {
   date?: string;
   limit: number;
@@ -393,5 +529,74 @@ export function getProcessedMatchPayload(
 
 export function deleteAllProcessedMatches(): number {
   const result = database.prepare("DELETE FROM processed_matches").run();
+  return Number(result.changes);
+}
+
+export function listTesterMatches(input: {
+  date?: string;
+  limit: number;
+  offset: number;
+}): { matches: FootballTesterMatchSummary[]; total: number } {
+  const countRow = (input.date
+    ? database
+        .prepare(
+          "SELECT COUNT(*) AS total FROM tester_matches WHERE calendar_date = ?",
+        )
+        .get(input.date)
+    : database.prepare("SELECT COUNT(*) AS total FROM tester_matches").get()) as
+    | SqlRow
+    | undefined;
+  const rows = (input.date
+    ? database
+        .prepare(
+          `SELECT ${TESTER_SUMMARY_COLUMNS} FROM tester_matches
+           WHERE calendar_date = ?
+           ORDER BY match_date DESC, fixture_id DESC LIMIT ? OFFSET ?`,
+        )
+        .all(input.date, input.limit, input.offset)
+    : database
+        .prepare(
+          `SELECT ${TESTER_SUMMARY_COLUMNS} FROM tester_matches
+           ORDER BY match_date DESC, fixture_id DESC LIMIT ? OFFSET ?`,
+        )
+        .all(input.limit, input.offset)) as SqlRow[];
+  return {
+    matches: rows.map(testerSummaryFromRow),
+    total: numberValue(countRow?.total ?? 0),
+  };
+}
+
+export function getTesterMatchSummary(
+  fixtureId: number,
+): FootballTesterMatchSummary | null {
+  const row = database
+    .prepare(
+      `SELECT ${TESTER_SUMMARY_COLUMNS} FROM tester_matches WHERE fixture_id = ?`,
+    )
+    .get(fixtureId) as SqlRow | undefined;
+  return row ? testerSummaryFromRow(row) : null;
+}
+
+export function getTesterMatchPayload(
+  fixtureId: number,
+  section: "details" | "lastFive" | "tmp",
+): unknown | null {
+  const row = database
+    .prepare(
+      `SELECT prematch_json, last_five_json, tmp_json
+       FROM tester_matches WHERE fixture_id = ?`,
+    )
+    .get(fixtureId) as SqlRow | undefined;
+  if (!row) return null;
+  const column = {
+    details: row.prematch_json,
+    lastFive: row.last_five_json,
+    tmp: row.tmp_json,
+  }[section];
+  return JSON.parse(stringValue(column));
+}
+
+export function deleteAllTesterMatches(): number {
+  const result = database.prepare("DELETE FROM tester_matches").run();
   return Number(result.changes);
 }

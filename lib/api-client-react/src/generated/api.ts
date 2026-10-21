@@ -26,6 +26,7 @@ import type {
   CreateBrowserSessionInput,
   CreateBrowserTabInput,
   DeleteFootballProcessedMatchesResponse,
+  DeleteFootballTesterMatchesResponse,
   FootballBulkProcessingInput,
   FootballFixtureError,
   FootballFixtures,
@@ -37,10 +38,16 @@ import type {
   FootballProcessedMatches,
   FootballProcessingJob,
   FootballProcessingJobLookup,
+  FootballTesterMatchPayload,
+  FootballTesterMatchSummary,
+  FootballTesterMatches,
   GetFootballFixturesParams,
   GetFootballProcessedMatchPayloadParams,
   GetFootballProcessedMatchesParams,
   GetFootballProcessingForDateParams,
+  GetFootballTesterMatchPayloadParams,
+  GetFootballTesterMatchesParams,
+  GetFootballTesterProcessingForDateParams,
   HealthStatus,
   MouseMoveResponse,
   MousePositionInput,
@@ -487,6 +494,179 @@ export function useGetFootballProcessingJob<TData = Awaited<ReturnType<typeof ge
 
 
 
+export const getGetFootballTesterProcessingForDateUrl = (params: GetFootballTesterProcessingForDateParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/football/tester-processings?${stringifiedParams}` : `/api/football/tester-processings`
+}
+
+/**
+ * @summary Get the latest pre-match tester job for a match date
+ */
+export const getFootballTesterProcessingForDate = async (params: GetFootballTesterProcessingForDateParams, options?: Parameters<typeof customFetch>[1]): Promise<FootballProcessingJobLookup> => {
+
+  return customFetch<FootballProcessingJobLookup>(getGetFootballTesterProcessingForDateUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballTesterProcessingForDateQueryKey = (params?: GetFootballTesterProcessingForDateParams,) => {
+    return [
+    `/api/football/tester-processings`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFootballTesterProcessingForDateQueryOptions = <TData = Awaited<ReturnType<typeof getFootballTesterProcessingForDate>>, TError = ErrorType<FootballFixtureError>>(params: GetFootballTesterProcessingForDateParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterProcessingForDate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballTesterProcessingForDateQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballTesterProcessingForDate>>> = ({ signal }) => getFootballTesterProcessingForDate(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterProcessingForDate>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballTesterProcessingForDateQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballTesterProcessingForDate>>>
+export type GetFootballTesterProcessingForDateQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary Get the latest pre-match tester job for a match date
+ */
+
+export function useGetFootballTesterProcessingForDate<TData = Awaited<ReturnType<typeof getFootballTesterProcessingForDate>>, TError = ErrorType<FootballFixtureError>>(
+ params: GetFootballTesterProcessingForDateParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterProcessingForDate>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballTesterProcessingForDateQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getStartFootballTesterProcessingUrl = () => {
+
+
+
+
+  return `/api/football/tester-processings`
+}
+
+/**
+ * Collects match context and historical features without storing the target match score or outcome
+ * @summary Build pre-match tester records for a date
+ */
+export const startFootballTesterProcessing = async (footballBulkProcessingInput: FootballBulkProcessingInput, options?: Parameters<typeof customFetch>[1]): Promise<FootballProcessingJob> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<FootballProcessingJob>(getStartFootballTesterProcessingUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(footballBulkProcessingInput)
+  }
+);}
+
+
+
+
+
+export const getStartFootballTesterProcessingMutationKey = () => ['startFootballTesterProcessing'] as const;
+
+export const getStartFootballTesterProcessingMutationOptions = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startFootballTesterProcessing>>, TError,StartFootballTesterProcessingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startFootballTesterProcessing>>, TError,StartFootballTesterProcessingMutationVariables, TContext> => {
+
+const mutationKey = getStartFootballTesterProcessingMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startFootballTesterProcessing>>, StartFootballTesterProcessingMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  startFootballTesterProcessing(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartFootballTesterProcessingMutationResult = NonNullable<Awaited<ReturnType<typeof startFootballTesterProcessing>>>
+    export type StartFootballTesterProcessingMutationBody = BodyType<FootballBulkProcessingInput>
+    export type StartFootballTesterProcessingMutationError = ErrorType<FootballFixtureError>
+    export type StartFootballTesterProcessingMutationVariables = {data: BodyType<FootballBulkProcessingInput>}
+
+    /**
+ * @summary Build pre-match tester records for a date
+ */
+export const useStartFootballTesterProcessing = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startFootballTesterProcessing>>, TError,StartFootballTesterProcessingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startFootballTesterProcessing>>,
+        TError,
+        StartFootballTesterProcessingMutationVariables,
+        TContext
+      > => {
+      return useMutation(getStartFootballTesterProcessingMutationOptions(options));
+    }
+
 export const getGetFootballProcessedMatchesUrl = (params?: GetFootballProcessedMatchesParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -795,6 +975,326 @@ export function useGetFootballProcessedMatchPayload<TData = Awaited<ReturnType<t
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetFootballProcessedMatchPayloadQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFootballTesterMatchesUrl = (params?: GetFootballTesterMatchesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/football/tester-matches?${stringifiedParams}` : `/api/football/tester-matches`
+}
+
+/**
+ * @summary List saved pre-match tester records
+ */
+export const getFootballTesterMatches = async (params?: GetFootballTesterMatchesParams, options?: Parameters<typeof customFetch>[1]): Promise<FootballTesterMatches> => {
+
+  return customFetch<FootballTesterMatches>(getGetFootballTesterMatchesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballTesterMatchesQueryKey = (params?: GetFootballTesterMatchesParams,) => {
+    return [
+    `/api/football/tester-matches`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFootballTesterMatchesQueryOptions = <TData = Awaited<ReturnType<typeof getFootballTesterMatches>>, TError = ErrorType<FootballFixtureError>>(params?: GetFootballTesterMatchesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterMatches>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballTesterMatchesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballTesterMatches>>> = ({ signal }) => getFootballTesterMatches(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterMatches>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballTesterMatchesQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballTesterMatches>>>
+export type GetFootballTesterMatchesQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary List saved pre-match tester records
+ */
+
+export function useGetFootballTesterMatches<TData = Awaited<ReturnType<typeof getFootballTesterMatches>>, TError = ErrorType<FootballFixtureError>>(
+ params?: GetFootballTesterMatchesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterMatches>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballTesterMatchesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getDeleteAllFootballTesterMatchesUrl = () => {
+
+
+
+
+  return `/api/football/tester-matches`
+}
+
+/**
+ * Deletes tester records but retains processing job history; refuses while a tester job is running
+ * @summary Delete all pre-match tester records
+ */
+export const deleteAllFootballTesterMatches = async ( options?: Parameters<typeof customFetch>[1]): Promise<DeleteFootballTesterMatchesResponse> => {
+
+  return customFetch<DeleteFootballTesterMatchesResponse>(getDeleteAllFootballTesterMatchesUrl(),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteAllFootballTesterMatchesMutationKey = () => ['deleteAllFootballTesterMatches'] as const;
+
+export const getDeleteAllFootballTesterMatchesMutationOptions = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAllFootballTesterMatches>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteAllFootballTesterMatches>>, TError,void, TContext> => {
+
+const mutationKey = getDeleteAllFootballTesterMatchesMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteAllFootballTesterMatches>>, void> = () => {
+
+
+          return  deleteAllFootballTesterMatches(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteAllFootballTesterMatchesMutationResult = NonNullable<Awaited<ReturnType<typeof deleteAllFootballTesterMatches>>>
+
+    export type DeleteAllFootballTesterMatchesMutationError = ErrorType<FootballFixtureError>
+
+
+    /**
+ * @summary Delete all pre-match tester records
+ */
+export const useDeleteAllFootballTesterMatches = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAllFootballTesterMatches>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteAllFootballTesterMatches>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getDeleteAllFootballTesterMatchesMutationOptions(options));
+    }
+
+export const getGetFootballTesterMatchUrl = (fixtureId: number,) => {
+
+
+
+
+  return `/api/football/tester-matches/${fixtureId}`
+}
+
+/**
+ * @summary Get one pre-match tester summary without target outcome fields
+ */
+export const getFootballTesterMatch = async (fixtureId: number, options?: Parameters<typeof customFetch>[1]): Promise<FootballTesterMatchSummary> => {
+
+  return customFetch<FootballTesterMatchSummary>(getGetFootballTesterMatchUrl(fixtureId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballTesterMatchQueryKey = (fixtureId: number,) => {
+    return [
+    `/api/football/tester-matches/${fixtureId}`
+    ] as const;
+    }
+
+
+export const getGetFootballTesterMatchQueryOptions = <TData = Awaited<ReturnType<typeof getFootballTesterMatch>>, TError = ErrorType<FootballFixtureError>>(fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterMatch>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballTesterMatchQueryKey(fixtureId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballTesterMatch>>> = ({ signal }) => getFootballTesterMatch(fixtureId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: fixtureId !== null && fixtureId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterMatch>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballTesterMatchQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballTesterMatch>>>
+export type GetFootballTesterMatchQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary Get one pre-match tester summary without target outcome fields
+ */
+
+export function useGetFootballTesterMatch<TData = Awaited<ReturnType<typeof getFootballTesterMatch>>, TError = ErrorType<FootballFixtureError>>(
+ fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterMatch>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballTesterMatchQueryOptions(fixtureId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFootballTesterMatchPayloadUrl = (params: GetFootballTesterMatchPayloadParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/football/tester-match-payload?${stringifiedParams}` : `/api/football/tester-match-payload`
+}
+
+/**
+ * @summary Get one stored pre-match tester payload section
+ */
+export const getFootballTesterMatchPayload = async (params: GetFootballTesterMatchPayloadParams, options?: Parameters<typeof customFetch>[1]): Promise<FootballTesterMatchPayload> => {
+
+  return customFetch<FootballTesterMatchPayload>(getGetFootballTesterMatchPayloadUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballTesterMatchPayloadQueryKey = (params?: GetFootballTesterMatchPayloadParams,) => {
+    return [
+    `/api/football/tester-match-payload`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFootballTesterMatchPayloadQueryOptions = <TData = Awaited<ReturnType<typeof getFootballTesterMatchPayload>>, TError = ErrorType<FootballFixtureError>>(params: GetFootballTesterMatchPayloadParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterMatchPayload>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballTesterMatchPayloadQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballTesterMatchPayload>>> = ({ signal }) => getFootballTesterMatchPayload(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterMatchPayload>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballTesterMatchPayloadQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballTesterMatchPayload>>>
+export type GetFootballTesterMatchPayloadQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary Get one stored pre-match tester payload section
+ */
+
+export function useGetFootballTesterMatchPayload<TData = Awaited<ReturnType<typeof getFootballTesterMatchPayload>>, TError = ErrorType<FootballFixtureError>>(
+ params: GetFootballTesterMatchPayloadParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterMatchPayload>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballTesterMatchPayloadQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

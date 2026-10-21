@@ -517,6 +517,76 @@ export interface FootballProcessedMatches {
   offset: number;
 }
 
+export type FootballTesterMatchSummaryAverageSource = typeof FootballTesterMatchSummaryAverageSource[keyof typeof FootballTesterMatchSummaryAverageSource];
+
+
+export const FootballTesterMatchSummaryAverageSource = {
+  'season-standings-at-processing-time': 'season-standings-at-processing-time',
+  unavailable: 'unavailable',
+} as const;
+
+export type FootballTesterMatchSummaryCompleteness = typeof FootballTesterMatchSummaryCompleteness[keyof typeof FootballTesterMatchSummaryCompleteness];
+
+
+export const FootballTesterMatchSummaryCompleteness = {
+  complete: 'complete',
+  partial: 'partial',
+} as const;
+
+/**
+ * Pre-match features for a fixture. Target-match scores and outcomes are intentionally excluded.
+ */
+export interface FootballTesterMatchSummary {
+  fixtureId: number;
+  date: string;
+  competition: string;
+  /** @nullable */
+  leagueId: number | null;
+  /** @nullable */
+  season: number | null;
+  homeTeamName: string;
+  awayTeamName: string;
+  /** @nullable */
+  leagueAverageGoals: number | null;
+  /** @nullable */
+  leagueAverageMatches: number | null;
+  averageSource: FootballTesterMatchSummaryAverageSource;
+  completeness: FootballTesterMatchSummaryCompleteness;
+  issueCount: number;
+  processedAt: string;
+}
+
+export type FootballTesterMatchPayloadSection = typeof FootballTesterMatchPayloadSection[keyof typeof FootballTesterMatchPayloadSection];
+
+
+export const FootballTesterMatchPayloadSection = {
+  details: 'details',
+  lastFive: 'lastFive',
+  tmp: 'tmp',
+} as const;
+
+export type FootballTesterMatchPayloadPayload = { [key: string]: unknown };
+
+export interface FootballTesterMatchPayload {
+  fixtureId: number;
+  section: FootballTesterMatchPayloadSection;
+  payload: FootballTesterMatchPayloadPayload;
+}
+
+export interface FootballTesterMatches {
+  matches: FootballTesterMatchSummary[];
+  total: number;
+  /** @nullable */
+  date: string | null;
+  limit: number;
+  offset: number;
+}
+
+export interface DeleteFootballTesterMatchesResponse {
+  /** @minimum 0 */
+  deletedCount: number;
+}
+
 export interface FootballFixtureError {
   error: string;
 }
@@ -668,6 +738,10 @@ export type GetFootballProcessingForDateParams = {
 date: string;
 };
 
+export type GetFootballTesterProcessingForDateParams = {
+date: string;
+};
+
 export type GetFootballProcessedMatchesParams = {
 date?: string;
 /**
@@ -693,6 +767,36 @@ export type GetFootballProcessedMatchPayloadSection = typeof GetFootballProcesse
 
 
 export const GetFootballProcessedMatchPayloadSection = {
+  details: 'details',
+  lastFive: 'lastFive',
+  tmp: 'tmp',
+} as const;
+
+export type GetFootballTesterMatchesParams = {
+date?: string;
+/**
+ * @minimum 1
+ * @maximum 500
+ */
+limit?: number;
+/**
+ * @minimum 0
+ */
+offset?: number;
+};
+
+export type GetFootballTesterMatchPayloadParams = {
+/**
+ * @minimum 1
+ */
+fixtureId: number;
+section: GetFootballTesterMatchPayloadSection;
+};
+
+export type GetFootballTesterMatchPayloadSection = typeof GetFootballTesterMatchPayloadSection[keyof typeof GetFootballTesterMatchPayloadSection];
+
+
+export const GetFootballTesterMatchPayloadSection = {
   details: 'details',
   lastFive: 'lastFive',
   tmp: 'tmp',

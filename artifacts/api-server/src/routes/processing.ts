@@ -1,20 +1,32 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { gzipSync } from "node:zlib";
 import {
   DeleteAllFootballProcessedMatchesResponse,
+  DeleteAllFootballTesterMatchesResponse,
   GetFootballProcessingForDateQueryParams,
   GetFootballProcessingForDateResponse,
+  GetFootballTesterProcessingForDateQueryParams,
+  GetFootballTesterProcessingForDateResponse,
   GetFootballProcessedMatchPayloadQueryParams,
   GetFootballProcessedMatchPayloadResponse,
   GetFootballProcessedMatchParams,
   GetFootballProcessedMatchResponse,
   GetFootballProcessedMatchesQueryParams,
   GetFootballProcessedMatchesResponse,
+  GetFootballTesterMatchParams,
+  GetFootballTesterMatchResponse,
+  GetFootballTesterMatchesQueryParams,
+  GetFootballTesterMatchesResponse,
+  GetFootballTesterMatchPayloadQueryParams,
+  GetFootballTesterMatchPayloadResponse,
   GetFootballProcessingJobParams,
   GetFootballProcessingJobResponse,
   StartFootballBulkProcessingBody,
   StartFootballBulkProcessingResponse,
+  StartFootballTesterProcessingBody,
+  StartFootballTesterProcessingResponse,
   type FootballProcessedMatchSummary,
+  type FootballTesterMatchSummary,
   type FootballProcessingJob,
   type FootballProcessingJobStatus,
 } from "@workspace/api-zod";
@@ -26,6 +38,7 @@ import { getKickoffScoreMatchLastFive } from "../lib/kickoffscore-last-five";
 import { getKickoffScoreMatchTmp } from "../lib/kickoffscore-match-tmp";
 import {
   deleteAllProcessedMatches,
+  deleteAllTesterMatches,
   findAnyActiveProcessingJob,
   createProcessingJob,
   findActiveProcessingJob,
@@ -33,8 +46,12 @@ import {
   getProcessedMatchPayload,
   getProcessedMatchSummary,
   getProcessingJob,
+  getTesterMatchPayload,
+  getTesterMatchSummary,
+  listTesterMatches,
   listProcessedMatches,
   saveProcessedMatch,
+  saveTesterMatch,
   updateProcessingJob,
 } from "../lib/processed-match-store";
 import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
@@ -101,7 +118,11 @@ function writeProgress(
   });
 }
 
-async function runProcessing(job: FootballProcessingJob, fixtures: Fixture[]) {
+async function runProcessing(
+  job: FootballProcessingJob,
+  fixtures: Fixture[],
+  targetDataset: "archive" | "tester" = "archive",
+) {
   const counts = { processed: 0, saved: 0, skipped: 0, failed: 0 };
   const failedMatches: string[] = [];
   let stopMessage: string | null = null;
@@ -109,7 +130,7 @@ async function runProcessing(job: FootballProcessingJob, fixtures: Fixture[]) {
 
   for (const fixture of fixtures) {
     const fixtureId = fixtureIdFromUrl(fixture.matchUrl);
-    if (!isFinal(fixture) || fixtureId === null) {
+    if (fixtureId === null || (targetDataset === "archive" && !isFinal(fixture))) {
       counts.processed += 1;
       counts.skipped += 1;
       writeProgress(job.id, "running", counts, `${counts.skipped} fixture(s) skipped: no final score was available.`);
@@ -122,9 +143,13 @@ async function runProcessing(job: FootballProcessingJob, fixtures: Fixture[]) {
         getKickoffScoreMatchLastFive(fixtureId),
         getKickoffScoreMatchTmp(fixtureId),
       ]);
-      const homeScore = details.match.home.score ?? fixture.homeScore;
-      const awayScore = details.match.away.score ?? fixture.awayScore;
-      if (homeScore === null || awayScore === null) {
+      const homeScore = targetDataset === "archive"
+        ? details.match.home.score ?? fixture.homeScore
+        : null;
+      const awayScore = targetDataset === "archive"
+        ? details.match.away.score ?? fixture.awayScore
+        : null;
+      if (targetDataset === "archive" && (homeScore === null || awayScore === null)) {
         counts.processed += 1;
         counts.skipped += 1;
         writeProgress(job.id, "running", counts, `${counts.skipped} fixture(s) skipped: no final score was available.`);
@@ -162,7 +187,7 @@ async function runProcessing(job: FootballProcessingJob, fixtures: Fixture[]) {
       const matchDate = details.match.date instanceof Date
         ? details.match.date
         : new Date(String(details.match.date));
-      const summary: FootballProcessedMatchSummary = {
+      const commonSummary = {
         fixtureId,
         date: matchDate,
         competition: details.match.competition || fixture.competition,
@@ -170,10 +195,6 @@ async function runProcessing(job: FootballProcessingJob, fixtures: Fixture[]) {
         season: details.match.season,
         homeTeamName: details.match.home.name || fixture.homeTeam,
         awayTeamName: details.match.away.name || fixture.awayTeam,
-        homeScore,
-        awayScore,
-        actualOutcome: outcome(homeScore, awayScore),
-        totalGoals: homeScore + awayScore,
         leagueAverageGoals,
         leagueAverageMatches,
         averageSource,
@@ -181,7 +202,49 @@ async function runProcessing(job: FootballProcessingJob, fixtures: Fixture[]) {
         issueCount,
         processedAt: new Date(),
       };
-      saveProcessedMatch(job.date.toISOString().slice(0, 10), summary, { details, lastFive, tmp });
+      if (targetDataset === "archive") {
+        const summary: FootballProcessedMatchSummary = {
+          ...commonSummary,
+          homeScore: homeScore as number,
+          awayScore: awayScore as number,
+          actualOutcome: outcome(homeScore as number, awayScore as number),
+          totalGoals: (homeScore as number) + (awayScore as number),
+        };
+        saveProcessedMatch(job.date.toISOString().slice(0, 10), summary, { details, lastFive, tmp });
+      } else {
+        const summary: FootballTesterMatchSummary = commonSummary;
+        const prematch = {
+          fixtureId,
+          match: {
+            date: matchDate.toISOString(),
+            competition: details.match.competition || fixture.competition,
+            leagueId: details.match.leagueId,
+            season: details.match.season,
+            home: {
+              id: details.match.home.id,
+              name: details.match.home.name || fixture.homeTeam,
+            },
+            away: {
+              id: details.match.away.id,
+              name: details.match.away.name || fixture.awayTeam,
+            },
+          },
+          latestAvailableStandings: details.standings,
+          leagueAverageGoals,
+          leagueAverageMatches,
+          averageSource,
+          issues: {
+            details: details.issues,
+            lastFive: lastFive.issues,
+            tmp: tmp.issues,
+          },
+        };
+        saveTesterMatch(job.date.toISOString().slice(0, 10), summary, {
+          prematch,
+          lastFive,
+          tmp,
+        });
+      }
       counts.saved += 1;
     } catch (error) {
       counts.failed += 1;
@@ -237,6 +300,23 @@ router.get("/football/processings", (req, res): void => {
   res.json(
     GetFootballProcessingForDateResponse.parse({
       job: getLatestProcessingJob(date),
+    }),
+  );
+});
+
+router.get("/football/tester-processings", (req, res): void => {
+  const rawDate = req.query.date;
+  const date = typeof rawDate === "string" ? validDate(rawDate) : null;
+  const parsed = GetFootballTesterProcessingForDateQueryParams.safeParse({
+    date: date ? new Date(`${date}T00:00:00.000Z`) : null,
+  });
+  if (!date || !parsed.success) {
+    res.status(400).json({ error: "Choose a valid match date." });
+    return;
+  }
+  res.json(
+    GetFootballTesterProcessingForDateResponse.parse({
+      job: getLatestProcessingJob(date, "tester"),
     }),
   );
 });
@@ -297,6 +377,62 @@ router.post("/football/processings", async (req, res): Promise<void> => {
   }
 });
 
+router.post("/football/tester-processings", async (req, res): Promise<void> => {
+  const input = StartFootballTesterProcessingBody.safeParse(req.body);
+  const date = validDate(req.body?.date);
+  if (!input.success || !date || date >= new Date().toISOString().slice(0, 10)) {
+    res.status(400).json({ error: "Choose a valid date earlier than today." });
+    return;
+  }
+
+  const active = findActiveProcessingJob(date, "tester");
+  if (active) {
+    res.status(202).json(StartFootballTesterProcessingResponse.parse(active));
+    return;
+  }
+
+  try {
+    const page = await getKickoffScoreFixtures(date);
+    const fixtures = uniqueFixtures(page.fixtures);
+    const activeAfterFetch = findActiveProcessingJob(date, "tester");
+    if (activeAfterFetch) {
+      res.status(202).json(StartFootballTesterProcessingResponse.parse(activeAfterFetch));
+      return;
+    }
+    const job = createProcessingJob(date, fixtures.length, "tester");
+    res.status(202).json(StartFootballTesterProcessingResponse.parse(job));
+    setImmediate(() => {
+      void runProcessing(job, fixtures, "tester").catch((error: unknown) => {
+        logger.error(
+          { jobId: job.id, errorName: error instanceof Error ? error.name : "UnknownError" },
+          "Pre-match tester processing job failed",
+        );
+        const current = getProcessingJob(job.id);
+        if (current) {
+          writeProgress(job.id, "failed", {
+            processed: current.processedFixtures,
+            saved: current.savedFixtures,
+            skipped: current.skippedFixtures,
+            failed: current.failedFixtures,
+          }, "Processing stopped unexpectedly. Previously saved tester records remain available.");
+        }
+      });
+    });
+  } catch (error) {
+    if (error instanceof UpstreamRateLimitError) {
+      res.set("Retry-After", String(error.retryAfterSeconds)).status(429).json({
+        error: `KickoffScore is rate limiting requests. Wait ${error.retryAfterSeconds} seconds and try again.`,
+      });
+      return;
+    }
+    req.log.error(
+      { errorName: error instanceof Error ? error.name : "UnknownError" },
+      "Could not load fixtures for tester processing",
+    );
+    res.status(502).json({ error: "KickoffScore fixtures could not be loaded right now. Please try again." });
+  }
+});
+
 router.get("/football/processings/:jobId", (req, res): void => {
   const params = GetFootballProcessingJobParams.safeParse(req.params);
   if (!params.success) {
@@ -340,8 +476,37 @@ router.get("/football/processed-matches", (req, res): void => {
   }));
 });
 
+router.get("/football/tester-matches", (req, res): void => {
+  const rawDate = req.query.date;
+  const date = rawDate === undefined
+    ? undefined
+    : typeof rawDate === "string"
+      ? validDate(rawDate)
+      : null;
+  const parsed = GetFootballTesterMatchesQueryParams.safeParse({
+    ...(date ? { date: new Date(`${date}T00:00:00.000Z`) } : {}),
+    limit: req.query.limit ?? 100,
+    offset: req.query.offset ?? 0,
+  });
+  if (!parsed.success || (rawDate !== undefined && date === null)) {
+    res.status(400).json({ error: "Use a valid date, a limit from 1 to 500, and a non-negative offset." });
+    return;
+  }
+  const result = listTesterMatches({
+    date: date ?? undefined,
+    limit: parsed.data.limit,
+    offset: parsed.data.offset,
+  });
+  res.json(GetFootballTesterMatchesResponse.parse({
+    ...result,
+    date: date ? new Date(`${date}T00:00:00.000Z`) : null,
+    limit: parsed.data.limit,
+    offset: parsed.data.offset,
+  }));
+});
+
 router.delete("/football/processed-matches", (_req, res): void => {
-  const activeJob = findAnyActiveProcessingJob();
+  const activeJob = findAnyActiveProcessingJob("archive");
   if (activeJob) {
     res.status(409).json({
       error: `Wait for the ${activeJob.date.toISOString().slice(0, 10)} import to finish before clearing the archive.`,
@@ -351,6 +516,21 @@ router.delete("/football/processed-matches", (_req, res): void => {
   res.json(
     DeleteAllFootballProcessedMatchesResponse.parse({
       deletedCount: deleteAllProcessedMatches(),
+    }),
+  );
+});
+
+router.delete("/football/tester-matches", (_req, res): void => {
+  const activeJob = findAnyActiveProcessingJob("tester");
+  if (activeJob) {
+    res.status(409).json({
+      error: `Wait for the ${activeJob.date.toISOString().slice(0, 10)} tester job to finish before clearing tester records.`,
+    });
+    return;
+  }
+  res.json(
+    DeleteAllFootballTesterMatchesResponse.parse({
+      deletedCount: deleteAllTesterMatches(),
     }),
   );
 });
@@ -389,6 +569,40 @@ router.get("/football/processed-match-payload", (req, res): void => {
   res.json(response);
 });
 
+router.get("/football/tester-match-payload", (req, res): void => {
+  const params = GetFootballTesterMatchPayloadQueryParams.safeParse(req.query);
+  if (!params.success) {
+    res.status(400).json({ error: "Choose a valid match ID and payload section." });
+    return;
+  }
+  const payload = getTesterMatchPayload(
+    params.data.fixtureId,
+    params.data.section,
+  );
+  if (payload === null) {
+    res.status(404).json({ error: "Tester record was not found." });
+    return;
+  }
+  const response = GetFootballTesterMatchPayloadResponse.parse({
+    fixtureId: params.data.fixtureId,
+    section: params.data.section,
+    payload,
+  });
+  const serialized = JSON.stringify(response);
+  if (req.acceptsEncodings("gzip")) {
+    const compressed = gzipSync(serialized);
+    res
+      .status(200)
+      .type("application/json")
+      .set("Content-Encoding", "gzip")
+      .vary("Accept-Encoding")
+      .set("Content-Length", String(compressed.byteLength))
+      .end(compressed);
+    return;
+  }
+  res.json(response);
+});
+
 router.get("/football/processed-matches/:fixtureId", (req, res): void => {
   const params = GetFootballProcessedMatchParams.safeParse(req.params);
   if (!params.success) {
@@ -401,6 +615,20 @@ router.get("/football/processed-matches/:fixtureId", (req, res): void => {
     return;
   }
   res.json(GetFootballProcessedMatchResponse.parse(match));
+});
+
+router.get("/football/tester-matches/:fixtureId", (req, res): void => {
+  const params = GetFootballTesterMatchParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: "Choose a valid match ID." });
+    return;
+  }
+  const match = getTesterMatchSummary(params.data.fixtureId);
+  if (!match) {
+    res.status(404).json({ error: "Tester record was not found." });
+    return;
+  }
+  res.json(GetFootballTesterMatchResponse.parse(match));
 });
 
 export default router;

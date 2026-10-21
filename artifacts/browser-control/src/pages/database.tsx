@@ -4,14 +4,24 @@ import {
   getGetFootballProcessedMatchPayloadQueryKey,
   getGetFootballProcessedMatchQueryKey,
   getGetFootballProcessedMatchesQueryKey,
+  getGetFootballTesterMatchPayloadQueryKey,
+  getGetFootballTesterMatchQueryKey,
+  getGetFootballTesterMatchesQueryKey,
   useDeleteAllFootballProcessedMatches,
+  useDeleteAllFootballTesterMatches,
   useGetFootballProcessedMatch,
   useGetFootballProcessedMatchPayload,
   useGetFootballProcessedMatches,
+  useGetFootballTesterMatch,
+  useGetFootballTesterMatchPayload,
+  useGetFootballTesterMatches,
 } from '@workspace/api-client-react';
-import type { FootballProcessedMatchSummary } from '@workspace/api-client-react';
+import type { FootballProcessedMatchSummary, FootballTesterMatchSummary } from '@workspace/api-client-react';
 import { Link, useLocation } from 'wouter';
-import { Archive, Braces, CalendarDays, Check, ChevronRight, CircleAlert, Database, FileJson2, RefreshCw, Search, Trash2, Trophy, X } from 'lucide-react';
+import { Archive, Braces, Check, ChevronRight, CircleAlert, Database, FileJson2, FlaskConical, RefreshCw, Search, Trash2, Trophy, X } from 'lucide-react';
+
+type ArchiveKind = 'database' | 'tester';
+type ArchiveRecord = FootballProcessedMatchSummary | FootballTesterMatchSummary;
 
 function errorText(error: unknown) {
   if (error && typeof error === 'object' && 'data' in error) {
@@ -28,12 +38,15 @@ function dateLabel(value: string) {
 function score(summary: FootballProcessedMatchSummary) {
   return summary.homeScore === null || summary.awayScore === null ? '— : —' : `${summary.homeScore} : ${summary.awayScore}`;
 }
-function Header() {
+function Header({ kind }: { kind: ArchiveKind }) {
+  const activeClass = 'inline-flex h-8 items-center gap-2 rounded-lg bg-[#253746] px-3 text-[10px] font-extrabold text-[#f8f2e7]';
+  const idleClass = 'inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]';
   return <header className="border-b border-[#d9d8cf] bg-[#f7f5ef]"><div className="mx-auto flex min-h-[68px] max-w-[1420px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-7">
     <Link href="/" className="flex items-center gap-3" data-testid="link-brand-home"><span className="grid size-10 place-items-center rounded-[13px] bg-[#253746] text-[#f8f2e7]"><Trophy size={19} /></span><span><strong className="block text-[14px] tracking-[-.04em] text-[#2b3e49]">Browser Control</strong><span className="text-[10px] text-[#858780]">Football research archive</span></span></Link>
     <nav aria-label="Main navigation" className="flex items-center gap-1 rounded-xl border border-[#deddd3] bg-[#efeee7] p-1">
       <Link href="/processing" className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]" data-testid="link-processing"><RefreshCw size={13} /> Processing</Link>
-      <Link href="/database" aria-current="page" className="inline-flex h-8 items-center gap-2 rounded-lg bg-[#253746] px-3 text-[10px] font-extrabold text-[#f8f2e7]" data-testid="link-database"><Database size={13} /> Database</Link>
+      <Link href="/database" aria-current={kind === 'database' ? 'page' : undefined} className={kind === 'database' ? activeClass : idleClass} data-testid="link-database"><Database size={13} /> Database</Link>
+      <Link href="/tester" aria-current={kind === 'tester' ? 'page' : undefined} className={kind === 'tester' ? activeClass : idleClass} data-testid="link-tester"><FlaskConical size={13} /> Tester</Link>
       <Link href="/fixtures" className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]" data-testid="link-fixtures"><CalendarDays size={13} /> Fixtures</Link>
     </nav>
   </div></header>;
@@ -42,20 +55,30 @@ function DataBlock({
   fixtureId,
   section,
   title,
+  kind,
 }: {
   fixtureId: number;
   section: 'details' | 'lastFive' | 'tmp';
   title: string;
+  kind: ArchiveKind;
 }) {
   const [open, setOpen] = useState(false);
   const params = { fixtureId, section };
-  const payloadQuery = useGetFootballProcessedMatchPayload(params, {
+  const archiveQuery = useGetFootballProcessedMatchPayload(params, {
     query: {
-      enabled: open,
+      enabled: open && kind === 'database',
       queryKey: getGetFootballProcessedMatchPayloadQueryKey(params),
       staleTime: Number.POSITIVE_INFINITY,
     },
   });
+  const testerQuery = useGetFootballTesterMatchPayload(params, {
+    query: {
+      enabled: open && kind === 'tester',
+      queryKey: getGetFootballTesterMatchPayloadQueryKey(params),
+      staleTime: Number.POSITIVE_INFINITY,
+    },
+  });
+  const payloadQuery = kind === 'database' ? archiveQuery : testerQuery;
   const text = payloadQuery.data ? JSON.stringify(payloadQuery.data.payload, null, 2) : '';
   return <details className="group overflow-hidden rounded-xl border border-[#deddd4] bg-[#fbfaf6]" onToggle={(event) => setOpen(event.currentTarget.open)}>
     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 border-b border-[#e8e6de] bg-[#f3f2eb] px-4 py-3 outline-none hover:bg-[#eeeee6]">
@@ -66,65 +89,72 @@ function DataBlock({
         : <pre className="max-h-[440px] overflow-auto whitespace-pre-wrap break-words p-4 text-[9px] leading-[1.7] text-[#52615e]">{text}</pre>)}
   </details>;
 }
-function DetailPanel({ fixtureId }: { fixtureId: number | null }) {
+function DetailPanel({ fixtureId, kind }: { fixtureId: number | null; kind: ArchiveKind }) {
   const valid = fixtureId !== null && Number.isSafeInteger(fixtureId) && fixtureId > 0;
-  const recordQuery = useGetFootballProcessedMatch(valid ? fixtureId : 0, {
-    query: { enabled: valid, queryKey: getGetFootballProcessedMatchQueryKey(valid ? fixtureId : 0) },
+  const archiveQuery = useGetFootballProcessedMatch(valid ? fixtureId : 0, {
+    query: { enabled: valid && kind === 'database', queryKey: getGetFootballProcessedMatchQueryKey(valid ? fixtureId : 0) },
   });
+  const testerQuery = useGetFootballTesterMatch(valid ? fixtureId : 0, {
+    query: { enabled: valid && kind === 'tester', queryKey: getGetFootballTesterMatchQueryKey(valid ? fixtureId : 0) },
+  });
+  const recordQuery = kind === 'database' ? archiveQuery : testerQuery;
   const record = recordQuery.data;
-  if (!valid) return <section className="flex min-h-[460px] flex-col items-center justify-center rounded-[16px] border border-dashed border-[#d9d9cf] bg-[#f7f6f0] px-6 py-12 text-center" data-testid="status-record-unselected"><span className="grid size-12 place-items-center rounded-2xl bg-[#e8eee8] text-[#6b8375]"><FileJson2 size={20} /></span><h2 className="mt-4 text-[15px] font-extrabold text-[#354750]">Select a saved match</h2><p className="mt-2 max-w-[300px] text-[10px] leading-5 text-[#858982]">Its stored source details, last-five payload and TMP context will be shown here without recomputation.</p></section>;
+  if (!valid) return <section className="flex min-h-[460px] flex-col items-center justify-center rounded-[16px] border border-dashed border-[#d9d9cf] bg-[#f7f6f0] px-6 py-12 text-center" data-testid="status-record-unselected"><span className="grid size-12 place-items-center rounded-2xl bg-[#e8eee8] text-[#6b8375]"><FileJson2 size={20} /></span><h2 className="mt-4 text-[15px] font-extrabold text-[#354750]">Select a saved {kind === 'tester' ? 'tester match' : 'match'}</h2><p className="mt-2 max-w-[300px] text-[10px] leading-5 text-[#858982]">Its stored pre-match features and context will be shown here without recomputation.</p></section>;
   if (recordQuery.isLoading) return <section className="space-y-3 rounded-[16px] border border-[#deddd4] bg-[#f9f8f3] p-5" role="status" aria-label="Loading stored record" data-testid="status-record-loading"><div className="h-3 w-40 animate-pulse rounded bg-[#e6e4dc]" /><div className="h-20 animate-pulse rounded-xl bg-[#eeede6]" />{[0,1,2].map((i)=><div key={i} className="h-16 animate-pulse rounded-xl bg-[#eeede6]" />)}</section>;
   if (recordQuery.isError) return <section className="flex min-h-[300px] flex-col items-center justify-center rounded-[16px] border border-[#e3c3b6] bg-[#fff6f0] p-6 text-center" role="alert" data-testid="status-record-error"><CircleAlert size={22} className="text-[#b85b46]" /><h2 className="mt-3 text-[14px] font-extrabold text-[#784b3e]">Record unavailable</h2><p className="mt-2 text-[10px] text-[#8c6b5e]">{errorText(recordQuery.error)}</p><button type="button" onClick={() => void recordQuery.refetch()} className="mt-4 inline-flex items-center gap-2 rounded-lg border border-[#e5c5b8] bg-[#fffaf6] px-3 py-2 text-[10px] font-extrabold text-[#855542]" data-testid="button-retry-record"><RefreshCw size={12} /> Retry</button></section>;
   if (!record) return <section className="rounded-xl border border-dashed border-[#d9d9cf] bg-[#f7f6f0] p-8 text-center text-[10px] text-[#858982]" data-testid="status-record-empty">No stored payload was returned for this fixture.</section>;
+  const displayRecord = record as ArchiveRecord;
   return <section className="animate-rise space-y-3" data-testid="panel-stored-record">
     <article className="overflow-hidden rounded-[16px] border border-[#d6d5cc] bg-[#f9f8f3] shadow-[0_10px_34px_rgba(47,59,64,.045)]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e1dfd7] bg-[#f4f3ed] px-4 py-4"><div className="min-w-0"><p className="mono text-[9px] uppercase tracking-[.14em] text-[#9b7160]">{record.competition} · {dateLabel(record.date)}</p><h2 className="mt-1 truncate text-[17px] font-extrabold tracking-[-.04em] text-[#344550]">{record.homeTeamName} <span className="font-medium text-[#9a9a90]">vs</span> {record.awayTeamName}</h2><p className="mono mt-1 text-[8px] text-[#92958c]">FIXTURE {record.fixtureId} · {record.season ?? 'Season unavailable'}</p></div><div className="text-right"><p className="mono text-[22px] font-medium tracking-[-.06em] text-[#2f4a42]">{score(record)}</p><span className={`mt-1 inline-flex rounded-full px-2 py-1 text-[8px] font-extrabold uppercase tracking-[.1em] ${record.completeness === 'complete' ? 'bg-[#e5eee7] text-[#4e755c]' : 'bg-[#fbf1df] text-[#986b32]'}`}>{record.completeness}</span></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e1dfd7] bg-[#f4f3ed] px-4 py-4"><div className="min-w-0"><p className="mono text-[9px] uppercase tracking-[.14em] text-[#9b7160]">{displayRecord.competition} · {dateLabel(displayRecord.date)}</p><h2 className="mt-1 truncate text-[17px] font-extrabold tracking-[-.04em] text-[#344550]">{displayRecord.homeTeamName} <span className="font-medium text-[#9a9a90]">vs</span> {displayRecord.awayTeamName}</h2><p className="mono mt-1 text-[8px] text-[#92958c]">FIXTURE {displayRecord.fixtureId} · {displayRecord.season ?? 'Season unavailable'}</p></div><div className="text-right"><p className="mono text-[17px] font-extrabold tracking-[-.04em] text-[#2f4a42]">{kind === 'database' ? score(record as FootballProcessedMatchSummary) : 'PRE-MATCH'}</p><span className={`mt-1 inline-flex rounded-full px-2 py-1 text-[8px] font-extrabold uppercase tracking-[.1em] ${displayRecord.completeness === 'complete' ? 'bg-[#e5eee7] text-[#4e755c]' : 'bg-[#fbf1df] text-[#986b32]'}`}>{displayRecord.completeness}</span></div></div>
       <div className="grid grid-cols-2 gap-px bg-[#e8e6de] sm:grid-cols-4">
-        {[['Outcome', record.actualOutcome ?? 'Unavailable'], ['Total goals', record.totalGoals ?? '—'], ['League avg. at import', record.leagueAverageGoals === null ? '—' : record.leagueAverageGoals.toFixed(2)], ['Issues', record.issueCount]].map(([label, value])=><div key={label} className="bg-[#fbfaf6] px-3 py-3"><p className="text-[8px] font-extrabold uppercase tracking-[.1em] text-[#92958c]">{label}</p><p className="mono mt-1 text-[11px] font-medium text-[#4b6256]">{value}</p></div>)}
+        {(kind === 'database'
+          ? [['Outcome', (record as FootballProcessedMatchSummary).actualOutcome ?? 'Unavailable'], ['Total goals', (record as FootballProcessedMatchSummary).totalGoals ?? '—'], ['League avg. at import', displayRecord.leagueAverageGoals === null ? '—' : displayRecord.leagueAverageGoals.toFixed(2)], ['Issues', displayRecord.issueCount]]
+          : [['League avg. at import', displayRecord.leagueAverageGoals === null ? '—' : displayRecord.leagueAverageGoals.toFixed(2)], ['Standings source', displayRecord.averageSource === 'unavailable' ? 'Unavailable' : 'Latest available'], ['Coverage', displayRecord.completeness], ['Issues', displayRecord.issueCount]]
+        ).map(([label, value])=><div key={label} className="bg-[#fbfaf6] px-3 py-3"><p className="text-[8px] font-extrabold uppercase tracking-[.1em] text-[#92958c]">{label}</p><p className="mono mt-1 text-[11px] font-medium text-[#4b6256]">{value}</p></div>)}
       </div>
-      <p className="border-t border-[#e8e6de] bg-[#fbfaf6] px-4 py-2.5 text-[9px] leading-4 text-[#858982]">League goal average uses the season standings available at import time; it is not a historical match-day snapshot.</p>
+      <p className="border-t border-[#e8e6de] bg-[#fbfaf6] px-4 py-2.5 text-[9px] leading-4 text-[#858982]">{kind === 'tester' ? 'The target match score and outcome are not stored. Recent form and H2H use only matches before kickoff; league standings are the latest available, not a historical match-day snapshot.' : 'League goal average uses the season standings available at import time; it is not a historical match-day snapshot.'}</p>
       {record.completeness === 'partial' && <p role="status" className="border-t border-[#ead9c4] bg-[#fbf3e9] px-4 py-2.5 text-[9px] text-[#84684f]">Partial analysis record · {record.issueCount} issue{record.issueCount === 1 ? '' : 's'} recorded. The stored payload may contain unavailable sections.</p>}
     </article>
-     <p className="px-1 text-[9px] leading-4 text-[#858982]">Large stored payloads load on demand. Open a section to fetch its compressed archive data.</p>
-     <DataBlock fixtureId={record.fixtureId} section="details" title="Match details payload" />
-     <DataBlock fixtureId={record.fixtureId} section="lastFive" title="Last five payload" />
-     <DataBlock fixtureId={record.fixtureId} section="tmp" title="TMP context payload" />
+      <p className="px-1 text-[9px] leading-4 text-[#858982]">Large stored payloads load on demand. Open a section to fetch its compressed archive data.</p>
+      <DataBlock fixtureId={displayRecord.fixtureId} section="details" kind={kind} title={kind === 'tester' ? 'Pre-match metadata and standings' : 'Match details payload'} />
+      <DataBlock fixtureId={displayRecord.fixtureId} section="lastFive" kind={kind} title={kind === 'tester' ? 'Last-five and H2H pre-match payload' : 'Last five payload'} />
+      <DataBlock fixtureId={displayRecord.fixtureId} section="tmp" kind={kind} title="TMP context payload" />
   </section>;
 }
 
-export default function DatabasePage() {
-  const [location, setLocation] = useLocation();
+function ArchivePage({ kind }: { kind: ArchiveKind }) {
+  const [, setLocation] = useLocation();
   const client = useQueryClient();
   const [routeSearch, setRouteSearch] = useState(() => new URLSearchParams(window.location.search));
-  const initialDate = routeSearch.get('date') ?? '';
-  const [date, setDate] = useState(initialDate);
   const [searchText, setSearchText] = useState('');
   const [offset, setOffset] = useState(0);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearError, setClearError] = useState('');
   const detailRef = useRef<HTMLDivElement>(null);
-  const deleteAll = useDeleteAllFootballProcessedMatches();
+  const deleteArchive = useDeleteAllFootballProcessedMatches();
+  const deleteTester = useDeleteAllFootballTesterMatches();
   const limit = 50;
-  const params = useMemo(() => ({ ...(date ? { date } : {}), limit, offset }), [date, offset]);
-  const allRecordsParams = { limit: 1, offset: 0 };
-  const listQuery = useGetFootballProcessedMatches(params, {
-    query: { queryKey: getGetFootballProcessedMatchesQueryKey(params) },
+  const params = useMemo(() => ({ limit, offset }), [offset]);
+  const archiveQuery = useGetFootballProcessedMatches(params, {
+    query: { enabled: kind === 'database', queryKey: getGetFootballProcessedMatchesQueryKey(params) },
   });
-  const allRecordsQuery = useGetFootballProcessedMatches(allRecordsParams, {
-    query: { queryKey: getGetFootballProcessedMatchesQueryKey(allRecordsParams) },
+  const testerQuery = useGetFootballTesterMatches(params, {
+    query: { enabled: kind === 'tester', queryKey: getGetFootballTesterMatchesQueryKey(params) },
   });
+  const listQuery = kind === 'database' ? archiveQuery : testerQuery;
   const data = listQuery.data;
   const normalized = searchText.trim().toLocaleLowerCase();
   const rows = (data?.matches ?? []).filter((match) => `${match.homeTeamName} ${match.awayTeamName} ${match.competition} ${match.fixtureId}`.toLocaleLowerCase().includes(normalized));
   const selectedFromUrl = Number(routeSearch.get('fixture'));
   const selectedId = Number.isSafeInteger(selectedFromUrl) && selectedFromUrl > 0 ? selectedFromUrl : null;
-  const totalSaved = allRecordsQuery.data?.total ?? 0;
+  const totalSaved = data?.total ?? 0;
+  const deletePending = deleteArchive.isPending || deleteTester.isPending;
 
   useEffect(() => {
     const syncRouteSearch = () => {
       const next = new URLSearchParams(window.location.search);
       setRouteSearch(next);
-      setDate(next.get('date') ?? '');
       setOffset(0);
     };
     window.addEventListener('popstate', syncRouteSearch);
@@ -141,31 +171,26 @@ export default function DatabasePage() {
 
   const selectRecord = (id: number | null) => {
     const query = new URLSearchParams();
-    if (date) query.set('date', date);
     if (id) query.set('fixture', String(id));
     setRouteSearch(query);
-    setLocation(`/database${query.size ? `?${query.toString()}` : ''}`);
-  };
-  const changeDate = (value: string) => {
-    setDate(value);
-    setOffset(0);
-    const query = new URLSearchParams();
-    if (value) query.set('date', value);
-    setRouteSearch(query);
-    setLocation(`/database${query.size ? `?${query.toString()}` : ''}`);
+    setLocation(`/${kind}${query.size ? `?${query.toString()}` : ''}`);
   };
   const clearArchive = () => {
-    deleteAll.mutate(undefined, {
-      onSuccess: () => {
-        setConfirmClear(false);
-        setClearError('');
-        setSearchText('');
-        setOffset(0);
-        selectRecord(null);
+    const onSuccess = () => {
+      setConfirmClear(false);
+      setClearError('');
+      setSearchText('');
+      setOffset(0);
+      selectRecord(null);
+      if (kind === 'database') {
         void client.invalidateQueries({ queryKey: getGetFootballProcessedMatchesQueryKey() });
-      },
-      onError: (error) => setClearError(errorText(error)),
-    });
+      } else {
+        void client.invalidateQueries({ queryKey: getGetFootballTesterMatchesQueryKey() });
+      }
+    };
+    const onError = (error: unknown) => setClearError(errorText(error));
+    if (kind === 'database') deleteArchive.mutate(undefined, { onSuccess, onError });
+    else deleteTester.mutate(undefined, { onSuccess, onError });
   };
 
   return <main className="screen-noise min-h-[100dvh] bg-[#f2f0e8] text-[#243443]">

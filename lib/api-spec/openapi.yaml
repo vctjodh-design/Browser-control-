@@ -165,6 +165,78 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballFixtureError"
+  /football/tester-processings:
+    get:
+      operationId: getFootballTesterProcessingForDate
+      tags: [processing]
+      summary: Get the latest pre-match tester job for a match date
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Latest tester job for the date, if one exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballProcessingJobLookup"
+        "400":
+          description: Invalid date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+    post:
+      operationId: startFootballTesterProcessing
+      tags: [processing]
+      summary: Build pre-match tester records for a date
+      description: Collects match context and historical features without storing the target match score or outcome
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FootballBulkProcessingInput"
+      responses:
+        "202":
+          description: Tester job started or the active tester job for the date was returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballProcessingJob"
+        "400":
+          description: Invalid date or date is not in the past
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "409":
+          description: Another match-processing job is running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "429":
+          description: KickoffScore is temporarily rate limiting requests
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait before trying again
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "502":
+          description: KickoffScore fixtures could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
   /football/processed-matches:
     get:
       operationId: getFootballProcessedMatches
@@ -287,6 +359,132 @@ paths:
                 $ref: "#/components/schemas/FootballFixtureError"
         "404":
           description: Saved match was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+  /football/tester-matches:
+    get:
+      operationId: getFootballTesterMatches
+      tags: [processing]
+      summary: List saved pre-match tester records
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Pre-match records and pagination metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballTesterMatches"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+    delete:
+      operationId: deleteAllFootballTesterMatches
+      tags: [processing]
+      summary: Delete all pre-match tester records
+      description: Deletes tester records but retains processing job history; refuses while a tester job is running
+      responses:
+        "200":
+          description: Number of tester records deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteFootballTesterMatchesResponse"
+        "409":
+          description: A tester processing job is still running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+  /football/tester-matches/{fixtureId}:
+    get:
+      operationId: getFootballTesterMatch
+      tags: [processing]
+      summary: Get one pre-match tester summary without target outcome fields
+      parameters:
+        - name: fixtureId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Pre-match tester summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballTesterMatchSummary"
+        "400":
+          description: Invalid match ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "404":
+          description: Tester record was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+  /football/tester-match-payload:
+    get:
+      operationId: getFootballTesterMatchPayload
+      tags: [processing]
+      summary: Get one stored pre-match tester payload section
+      parameters:
+        - name: fixtureId
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: section
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [details, lastFive, tmp]
+      responses:
+        "200":
+          description: Pre-match payload section; responses are gzip-compressed when supported
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballTesterMatchPayload"
+        "400":
+          description: Invalid match ID or section
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "404":
+          description: Tester record was not found
           content:
             application/json:
               schema:
@@ -916,6 +1114,90 @@ components:
         offset:
           type: integer
       required: [matches, total, date, limit, offset]
+    FootballTesterMatchSummary:
+      type: object
+      description: Pre-match features for a fixture. Target-match scores and outcomes are intentionally excluded.
+      properties:
+        fixtureId:
+          type: integer
+        date:
+          type: string
+          format: date-time
+        competition:
+          type: string
+        leagueId:
+          type: ["integer", "null"]
+        season:
+          type: ["integer", "null"]
+        homeTeamName:
+          type: string
+        awayTeamName:
+          type: string
+        leagueAverageGoals:
+          type: ["number", "null"]
+        leagueAverageMatches:
+          type: ["integer", "null"]
+        averageSource:
+          type: string
+          enum: [season-standings-at-processing-time, unavailable]
+        completeness:
+          type: string
+          enum: [complete, partial]
+        issueCount:
+          type: integer
+        processedAt:
+          type: string
+          format: date-time
+      required:
+        - fixtureId
+        - date
+        - competition
+        - leagueId
+        - season
+        - homeTeamName
+        - awayTeamName
+        - leagueAverageGoals
+        - leagueAverageMatches
+        - averageSource
+        - completeness
+        - issueCount
+        - processedAt
+    FootballTesterMatchPayload:
+      type: object
+      properties:
+        fixtureId:
+          type: integer
+        section:
+          type: string
+          enum: [details, lastFive, tmp]
+        payload:
+          type: object
+          additionalProperties: true
+      required: [fixtureId, section, payload]
+    FootballTesterMatches:
+      type: object
+      properties:
+        matches:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballTesterMatchSummary"
+        total:
+          type: integer
+        date:
+          type: ["string", "null"]
+          format: date
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [matches, total, date, limit, offset]
+    DeleteFootballTesterMatchesResponse:
+      type: object
+      properties:
+        deletedCount:
+          type: integer
+          minimum: 0
+      required: [deletedCount]
     FootballMatchParticipant:
       type: object
       properties:
