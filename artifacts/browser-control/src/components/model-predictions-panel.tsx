@@ -308,21 +308,18 @@ export function ModelPredictionGraphs({
   const trainedRuns = (dashboardQuery.data?.runs ?? []).filter(
     (run) => run.status === 'completed' && run.hasPredictionArtifact,
   );
-  const currentRunIds = new Set(trainedRuns.map((run) => run.id));
-  const hasCurrentPredictions =
-    currentRunIds.size > 0 &&
-    [...currentRunIds].every((runId) =>
-      predictions.some((prediction) => prediction.runId === runId),
-    );
   const contextInput = modelPredictionContext(details, lastFive, context);
 
   useEffect(() => {
     if (
       contextLoading ||
+      !context ||
+      !lastFive ||
+      query.isFetching ||
       dashboardQuery.isLoading ||
+      dashboardQuery.isFetching ||
       dashboardQuery.isError ||
       !trainedRuns.length ||
-      hasCurrentPredictions ||
       predict.isPending ||
       attemptedFixture.current === fixtureId
     ) {
@@ -339,14 +336,18 @@ export function ModelPredictionGraphs({
     dashboardQuery.isError,
     dashboardQuery.isLoading,
     fixtureId,
-    hasCurrentPredictions,
+    context,
+    dashboardQuery.isFetching,
+    lastFive,
     predict,
+    query.isFetching,
     queryClient,
     queryKey,
     trainedRuns.length,
   ]);
 
   const generate = () => {
+    if (!context || !lastFive || contextLoading) return;
     attemptedFixture.current = fixtureId;
     predict.mutate(
       { fixtureId, data: contextInput },
@@ -367,7 +368,7 @@ export function ModelPredictionGraphs({
         <button
           type="button"
           onClick={generate}
-          disabled={contextLoading || predict.isPending || trainedRuns.length === 0}
+          disabled={contextLoading || !context || !lastFive || predict.isPending || trainedRuns.length === 0}
           className="inline-flex min-h-8 items-center gap-2 rounded-lg bg-[#668574] px-3 text-[8px] font-extrabold text-white transition hover:bg-[#557460] disabled:cursor-not-allowed disabled:opacity-50"
           data-testid="button-generate-graph-predictions"
         >
@@ -381,7 +382,10 @@ export function ModelPredictionGraphs({
             : predict.isError ? <p className="flex items-center gap-2 rounded-lg border border-[#e3c3b6] bg-[#fff6f0] px-3 py-3 text-[9px] text-[#8c6b5e]" role="alert" data-testid="error-predict-model-graph"><CircleAlert size={13} />{errorMessage(predict.error)}</p>
               : predictions.length ? <PredictionCards predictions={predictions} compact />
                 : !trainedRuns.length ? <div className="rounded-lg border border-dashed border-[#d9d9cf] bg-[#f7f6f0] px-4 py-4 text-[9px] leading-5 text-[#858982]" role="status" data-testid="empty-model-prediction-graph">
-                  No compatible trained models are ready. <Link href="/model-training" className="font-extrabold text-[#557460] underline" data-testid="link-train-from-graph">Train a model</Link> to generate forecasts here.
+                  There are no prediction-ready models in the archive. <Link href="/model-training" className="font-extrabold text-[#557460] underline" data-testid="link-train-from-graph">Train a model</Link>; once it finishes, this graph will score the current match using its loaded context.
+                </div>
+                : !context || !lastFive ? <div className="rounded-lg border border-dashed border-[#d9d9cf] bg-[#f7f6f0] px-4 py-4 text-[9px] leading-5 text-[#858982]" role="status" data-testid="empty-model-prediction-graph">
+                  Current match context is incomplete. Load the match’s pre-match form and league context to generate forecasts.
                 </div>
                   : <div className="rounded-lg border border-dashed border-[#d9d9cf] bg-[#f7f6f0] px-4 py-4 text-[9px] leading-5 text-[#858982]" role="status" data-testid="empty-model-prediction-graph">
                     {predict.isPending ? 'Generating forecasts from the loaded match context…' : 'Predictions will appear here as soon as the trained models finish scoring this fixture.'}

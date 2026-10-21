@@ -187,10 +187,22 @@ function targetFromPredictionContext(
   const trainingContext: ModelTrainingContext = {
     homeTeamName: input.homeTeamName,
     awayTeamName: input.awayTeamName,
-    homeRecent: input.homeRecent,
-    awayRecent: input.awayRecent,
-    homeLastFive: input.homeLastFive,
-    awayLastFive: input.awayLastFive,
+    homeRecent: input.homeRecent.map((match) => ({
+      ...match,
+      date: match.date.toISOString(),
+    })),
+    awayRecent: input.awayRecent.map((match) => ({
+      ...match,
+      date: match.date.toISOString(),
+    })),
+    homeLastFive: input.homeLastFive.map((match) => ({
+      ...match,
+      date: match.date.toISOString(),
+    })),
+    awayLastFive: input.awayLastFive.map((match) => ({
+      ...match,
+      date: match.date.toISOString(),
+    })),
     homeStanding: input.homeStanding,
     awayStanding: input.awayStanding,
     standingTeamCount: input.standingTeamCount,
