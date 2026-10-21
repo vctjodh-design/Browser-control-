@@ -50,6 +50,7 @@ import {
   getTesterMatchSummary,
   listTesterMatches,
   listProcessedMatches,
+  listProcessedFixtureIds,
   saveProcessedMatch,
   saveTesterMatch,
   updateProcessingJob,
@@ -122,18 +123,39 @@ async function runProcessing(
   job: FootballProcessingJob,
   fixtures: Fixture[],
   targetDataset: "archive" | "tester" = "archive",
+  alreadySavedFixtureIds: ReadonlySet<number> = new Set(),
 ) {
   const counts = { processed: 0, saved: 0, skipped: 0, failed: 0 };
   const failedMatches: string[] = [];
   let stopMessage: string | null = null;
-  writeProgress(job.id, "running", counts, null);
+  for (const fixture of fixtures) {
+    const fixtureId = fixtureIdFromUrl(fixture.matchUrl);
+    if (fixtureId !== null && alreadySavedFixtureIds.has(fixtureId)) {
+      counts.processed += 1;
+      counts.saved += 1;
+    } else if (
+      fixtureId === null ||
+      (targetDataset === "archive" && !isFinal(fixture))
+    ) {
+      counts.processed += 1;
+      counts.skipped += 1;
+    }
+  }
+  writeProgress(
+    job.id,
+    "running",
+    counts,
+    counts.skipped
+      ? `${counts.skipped} fixture(s) skipped: no final score was available.`
+      : null,
+  );
 
   for (const fixture of fixtures) {
     const fixtureId = fixtureIdFromUrl(fixture.matchUrl);
+    if (fixtureId !== null && alreadySavedFixtureIds.has(fixtureId)) {
+      continue;
+    }
     if (fixtureId === null || (targetDataset === "archive" && !isFinal(fixture))) {
-      counts.processed += 1;
-      counts.skipped += 1;
-      writeProgress(job.id, "running", counts, `${counts.skipped} fixture(s) skipped: no final score was available.`);
       continue;
     }
 
@@ -174,7 +196,7 @@ async function runProcessing(
             "League goal average was unavailable while archiving a match",
           );
           if (error instanceof UpstreamRateLimitError) {
-            stopMessage = `KickoffScore asked us to pause requests. Wait ${error.retryAfterSeconds} seconds before restarting; processing stopped after ${counts.processed} of ${fixtures.length} fixtures.`;
+            stopMessage = `KickoffScore asked us to pause requests. Wait ${error.retryAfterSeconds} seconds before resuming; processing stopped after ${counts.processed} of ${job.totalFixtures} fixtures.`;
           }
         }
       }
@@ -255,7 +277,7 @@ async function runProcessing(
         "Could not process a KickoffScore match",
       );
       if (error instanceof UpstreamRateLimitError) {
-        stopMessage = `KickoffScore asked us to pause requests. Wait ${error.retryAfterSeconds} seconds before restarting; processing stopped after ${counts.processed} of ${fixtures.length} fixtures.`;
+        stopMessage = `KickoffScore asked us to pause requests. Wait ${error.retryAfterSeconds} seconds before resuming; processing stopped after ${counts.processed} of ${job.totalFixtures} fixtures.`;
       }
     }
 
@@ -270,7 +292,7 @@ async function runProcessing(
     if (stopMessage) break;
   }
 
-  const notAttempted = fixtures.length - counts.processed;
+  const notAttempted = job.totalFixtures - counts.processed;
   const status: FootballProcessingJobStatus =
     counts.failed === 0 && counts.skipped === 0 && notAttempted === 0
       ? "completed"
@@ -344,10 +366,15 @@ router.post("/football/processings", async (req, res): Promise<void> => {
       res.status(202).json(StartFootballBulkProcessingResponse.parse(activeAfterFetch));
       return;
     }
+    const previousJob = getLatestProcessingJob(date, "archive");
+    const shouldResume = previousJob?.status === "failed" || previousJob?.status === "partial";
+    const alreadySavedFixtureIds = shouldResume
+      ? new Set(listProcessedFixtureIds(date, "archive"))
+      : new Set<number>();
     const job = createProcessingJob(date, fixtures.length);
     res.status(202).json(StartFootballBulkProcessingResponse.parse(job));
     setImmediate(() => {
-      void runProcessing(job, fixtures).catch((error: unknown) => {
+      void runProcessing(job, fixtures, "archive", alreadySavedFixtureIds).catch((error: unknown) => {
         logger.error(
           { jobId: job.id, errorName: error instanceof Error ? error.name : "UnknownError" },
           "Bulk match processing job failed",
@@ -400,10 +427,15 @@ router.post("/football/tester-processings", async (req, res): Promise<void> => {
       res.status(202).json(StartFootballTesterProcessingResponse.parse(activeAfterFetch));
       return;
     }
+    const previousJob = getLatestProcessingJob(date, "tester");
+    const shouldResume = previousJob?.status === "failed" || previousJob?.status === "partial";
+    const alreadySavedFixtureIds = shouldResume
+      ? new Set(listProcessedFixtureIds(date, "tester"))
+      : new Set<number>();
     const job = createProcessingJob(date, fixtures.length, "tester");
     res.status(202).json(StartFootballTesterProcessingResponse.parse(job));
     setImmediate(() => {
-      void runProcessing(job, fixtures, "tester").catch((error: unknown) => {
+      void runProcessing(job, fixtures, "tester", alreadySavedFixtureIds).catch((error: unknown) => {
         logger.error(
           { jobId: job.id, errorName: error instanceof Error ? error.name : "UnknownError" },
           "Pre-match tester processing job failed",

@@ -120,6 +120,16 @@ export default function ProcessingPage() {
   const terminal = job?.status === 'completed' || job?.status === 'partial' || job?.status === 'failed';
   const testerJob = testerJobQuery.data;
   const testerTerminal = testerJob?.status === 'completed' || testerJob?.status === 'partial' || testerJob?.status === 'failed';
+  const archiveCanResume = Boolean(
+    job &&
+    job.date.slice(0, 10) === date &&
+    (job.status === 'partial' || job.status === 'failed'),
+  );
+  const testerCanResume = Boolean(
+    testerJob &&
+    testerJob.date.slice(0, 10) === testerDate &&
+    (testerJob.status === 'partial' || testerJob.status === 'failed'),
+  );
 
   useEffect(() => {
     if (terminal) void client.invalidateQueries({ queryKey: getGetFootballProcessedMatchesQueryKey() });
@@ -128,8 +138,7 @@ export default function ProcessingPage() {
     if (testerTerminal) void client.invalidateQueries({ queryKey: getGetFootballTesterMatchesQueryKey() });
   }, [client, testerDate, testerTerminal, testerJob?.updatedAt]);
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const startArchive = () => {
     if (!date || start.isPending) return;
     start.mutate({ data: { date } }, {
       onSuccess: (created) => {
@@ -144,8 +153,11 @@ export default function ProcessingPage() {
       },
     });
   };
-  const submitTester = (event: FormEvent<HTMLFormElement>) => {
+  const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    startArchive();
+  };
+  const startTesterBuild = () => {
     if (!testerDate || startTester.isPending) return;
     startTester.mutate({ data: { date: testerDate } }, {
       onSuccess: (created) => {
@@ -159,6 +171,10 @@ export default function ProcessingPage() {
         void client.invalidateQueries({ queryKey: getGetFootballTesterMatchesQueryKey(testerResultsParams) });
       },
     });
+  };
+  const submitTester = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    startTesterBuild();
   };
   const progress = job && job.totalFixtures > 0 ? Math.min(100, (job.processedFixtures / job.totalFixtures) * 100) : job?.status === 'completed' ? 100 : 0;
   const statusTone = job?.status === 'completed' ? 'bg-[#e5eee7] text-[#4e755c]' : job?.status === 'partial' ? 'bg-[#fbf1df] text-[#986b32]' : job?.status === 'failed' ? 'bg-[#f8e7de] text-[#ad5944]' : 'bg-[#e5eceb] text-[#527366]';
@@ -187,7 +203,7 @@ export default function ProcessingPage() {
                 }
               }} className="h-11 min-w-0 flex-1 rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[12px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none" data-testid="input-processing-date" />
               <button type="submit" disabled={!date || start.isPending} className="inline-flex h-11 shrink-0 items-center gap-2 rounded-lg bg-[#d96f51] px-4 text-[10px] font-extrabold text-white transition hover:bg-[#c95f43] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-start-import">
-                {start.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Activity size={14} />} {start.isPending ? 'Starting' : 'Import day'}
+                {start.isPending ? <RefreshCw size={14} className="animate-spin" /> : archiveCanResume ? <RefreshCw size={14} /> : <Activity size={14} />} {start.isPending ? (archiveCanResume ? 'Resuming' : 'Starting') : archiveCanResume ? 'Resume import' : 'Import day'}
               </button>
             </div>
             <p className="mt-2 text-[9px] leading-4 text-[#858982]">All competitions · completed scores and outcomes are saved to Database.</p>
@@ -205,7 +221,7 @@ export default function ProcessingPage() {
                 }
               }} className="h-11 min-w-0 flex-1 rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[12px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none" data-testid="input-tester-processing-date" />
               <button type="submit" disabled={!testerDate || startTester.isPending} className="inline-flex h-11 shrink-0 items-center gap-2 rounded-lg bg-[#567d69] px-4 text-[10px] font-extrabold text-white transition hover:bg-[#456b58] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-start-tester">
-                {startTester.isPending ? <RefreshCw size={14} className="animate-spin" /> : <FlaskConical size={14} />} {startTester.isPending ? 'Starting' : 'Build records'}
+                {startTester.isPending ? <RefreshCw size={14} className="animate-spin" /> : testerCanResume ? <RefreshCw size={14} /> : <FlaskConical size={14} />} {startTester.isPending ? (testerCanResume ? 'Resuming' : 'Starting') : testerCanResume ? 'Resume build' : 'Build records'}
               </button>
             </div>
             <p className="mt-2 text-[9px] leading-4 text-[#858982]">All fixtures · stores pre-match context only, never target scores or outcomes.</p>
@@ -232,8 +248,9 @@ export default function ProcessingPage() {
               {[['Saved', job.savedFixtures, 'text-[#4e755c]'], ['Skipped', job.skippedFixtures, 'text-[#8a7650]'], ['Failed', job.failedFixtures, 'text-[#ad5944]'], ['Total', job.totalFixtures, 'text-[#4a5c63]']].map(([label, value, tone]) => <div key={label} className="rounded-lg border border-[#e3e2d9] bg-[#f5f4ed] px-3 py-3"><p className="text-[8px] font-extrabold uppercase tracking-[.12em] text-[#90938a]">{label}</p><p className={`mono mt-1 text-[19px] font-medium ${tone}`}>{value}</p></div>)}
             </div>
             {job.error && <div role="status" className="mt-4 flex gap-2 rounded-lg border border-[#ead9c4] bg-[#fbf3e9] px-3 py-2.5 text-[10px] leading-5 text-[#84684f]"><CircleAlert size={13} className="mt-1 shrink-0" />{job.error}</div>}
-            {job.status === 'partial' && <p className="mt-3 rounded-lg bg-[#fbf3e9] px-3 py-2.5 text-[9px] leading-4 text-[#84684f]" role="status">Import finished with gaps. Review saved records and issue counts before relying on this date.</p>}
-            {job.status === 'failed' && <p className="mt-3 rounded-lg bg-[#fff2ed] px-3 py-2.5 text-[9px] leading-4 text-[#9c5949]" role="status">The job did not complete. Its reported counts are retained for inspection.</p>}
+            {job.status === 'partial' && <p className="mt-3 rounded-lg bg-[#fbf3e9] px-3 py-2.5 text-[9px] leading-4 text-[#84684f]" role="status">Some fixtures were skipped or failed. Resume to retry missing fixtures; saved records will be skipped.</p>}
+            {job.status === 'failed' && <p className="mt-3 rounded-lg bg-[#fff2ed] px-3 py-2.5 text-[9px] leading-4 text-[#9c5949]" role="status">Resume this date to continue. Fixtures already saved will not be fetched again.</p>}
+            {archiveCanResume && <button type="button" onClick={startArchive} disabled={start.isPending} className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg bg-[#d96f51] px-4 text-[10px] font-extrabold text-white transition hover:bg-[#c95f43] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-resume-import">{start.isPending ? <RefreshCw size={13} className="animate-spin" /> : <RefreshCw size={13} />}{start.isPending ? 'Resuming import' : 'Resume import'}</button>}
           </div> : null}
         </section>
 
@@ -263,8 +280,9 @@ export default function ProcessingPage() {
               {[['Saved', testerJob.savedFixtures, 'text-[#4e755c]'], ['Skipped', testerJob.skippedFixtures, 'text-[#8a7650]'], ['Failed', testerJob.failedFixtures, 'text-[#ad5944]'], ['Total', testerJob.totalFixtures, 'text-[#4a5c63]']].map(([label, value, tone]) => <div key={label} className="rounded-lg border border-[#e3e2d9] bg-[#f5f4ed] px-3 py-3"><p className="text-[8px] font-extrabold uppercase tracking-[.12em] text-[#90938a]">{label}</p><p className={`mono mt-1 text-[19px] font-medium ${tone}`}>{value}</p></div>)}
             </div>
             {testerJob.error && <div role="status" className="mt-4 flex gap-2 rounded-lg border border-[#ead9c4] bg-[#fbf3e9] px-3 py-2.5 text-[10px] leading-5 text-[#84684f]"><CircleAlert size={13} className="mt-1 shrink-0" />{testerJob.error}</div>}
-            {testerJob.status === 'partial' && <p className="mt-3 rounded-lg bg-[#fbf3e9] px-3 py-2.5 text-[9px] leading-4 text-[#84684f]" role="status">Tester build finished with gaps. Review saved records and issue counts before relying on this date.</p>}
-            {testerJob.status === 'failed' && <p className="mt-3 rounded-lg bg-[#fff2ed] px-3 py-2.5 text-[9px] leading-4 text-[#9c5949]" role="status">The tester build did not complete. Its reported counts are retained for inspection.</p>}
+            {testerJob.status === 'partial' && <p className="mt-3 rounded-lg bg-[#fbf3e9] px-3 py-2.5 text-[9px] leading-4 text-[#84684f]" role="status">Some fixtures were skipped or failed. Resume to retry missing pre-match records; saved records will be skipped.</p>}
+            {testerJob.status === 'failed' && <p className="mt-3 rounded-lg bg-[#fff2ed] px-3 py-2.5 text-[9px] leading-4 text-[#9c5949]" role="status">Resume this date to continue. Saved pre-match records will not be fetched again.</p>}
+            {testerCanResume && <button type="button" onClick={startTesterBuild} disabled={startTester.isPending} className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg bg-[#567d69] px-4 text-[10px] font-extrabold text-white transition hover:bg-[#456b58] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-resume-tester">{startTester.isPending ? <RefreshCw size={13} className="animate-spin" /> : <RefreshCw size={13} />}{startTester.isPending ? 'Resuming build' : 'Resume build'}</button>}
           </div> : null}
         </section>
 

@@ -128,11 +128,19 @@ database
   .prepare(
     `UPDATE bulk_processing_jobs
      SET status = 'failed',
-         error = 'Processing stopped when the API server restarted. Start the date again to retry.',
+         error = 'Processing stopped when the API server restarted. Resume this date to continue with fixtures not already saved.',
          updated_at = ?
      WHERE status IN ('queued', 'running')`,
   )
   .run(new Date().toISOString());
+database
+  .prepare(
+    `UPDATE bulk_processing_jobs
+     SET error = 'Processing stopped when the API server restarted. Resume this date to continue with fixtures not already saved.'
+     WHERE status = 'failed'
+       AND error = 'Processing stopped when the API server restarted. Start the date again to retry.'`,
+  )
+  .run();
 
 function numberValue(value: SQLOutputValue): number {
   return typeof value === "number" ? value : Number(value ?? 0);
@@ -339,6 +347,17 @@ export function updateProcessingJob(
       id,
     );
   return getProcessingJob(id);
+}
+
+export function listProcessedFixtureIds(
+  calendarDate: string,
+  targetDataset: ProcessingDataset,
+): number[] {
+  const table = targetDataset === "tester" ? "tester_matches" : "processed_matches";
+  const rows = database
+    .prepare(`SELECT fixture_id FROM ${table} WHERE calendar_date = ?`)
+    .all(calendarDate) as SqlRow[];
+  return rows.map((row) => numberValue(row.fixture_id));
 }
 
 export function saveProcessedMatch(
