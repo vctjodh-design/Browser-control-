@@ -229,6 +229,98 @@ export interface FootballTesterMatchPredictions {
   predictions: FootballModelPrediction[];
 }
 
+export interface FootballMatchModelPredictions {
+  /** @minimum 1 */
+  fixtureId: number;
+  predictions: FootballModelPrediction[];
+}
+
+export interface FootballModelFormMatchInput {
+  /** @minimum 1 */
+  fixtureId: number;
+  date: string;
+  homeTeamName: string;
+  awayTeamName: string;
+  /** @nullable */
+  homeScore: number | null;
+  /** @nullable */
+  awayScore: number | null;
+}
+
+export interface FootballModelStandingInput {
+  /** @minimum 1 */
+  rank: number;
+  /** @minimum 0 */
+  played: number;
+  /** @minimum 0 */
+  points: number;
+  goalDifference: number;
+}
+
+export type FootballModelOddsInputQuoteSource = typeof FootballModelOddsInputQuoteSource[keyof typeof FootballModelOddsInputQuoteSource];
+
+
+export const FootballModelOddsInputQuoteSource = {
+  verified: 'verified',
+  unverified: 'unverified',
+  mixed: 'mixed',
+  unavailable: 'unavailable',
+} as const;
+
+export interface FootballModelOddsInput {
+  /** @minimum 1 */
+  fixtureId: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     * @nullable
+     */
+  homeProbability: number | null;
+  /**
+     * @minimum 0
+     * @maximum 1
+     * @nullable
+     */
+  drawProbability: number | null;
+  /**
+     * @minimum 0
+     * @maximum 1
+     * @nullable
+     */
+  awayProbability: number | null;
+  /** @minimum 0 */
+  verifiedBookmakerCount: number;
+  quoteSource: FootballModelOddsInputQuoteSource;
+}
+
+export interface FootballModelPredictionContextInput {
+  matchDate: string;
+  competition: string;
+  /** @nullable */
+  season: number | null;
+  homeTeamName: string;
+  awayTeamName: string;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  leagueAverageGoals: number | null;
+  /** @maxItems 15 */
+  homeRecent: FootballModelFormMatchInput[];
+  /** @maxItems 15 */
+  awayRecent: FootballModelFormMatchInput[];
+  /** @maxItems 5 */
+  homeLastFive: FootballModelFormMatchInput[];
+  /** @maxItems 5 */
+  awayLastFive: FootballModelFormMatchInput[];
+  homeStanding: FootballModelStandingInput | null;
+  awayStanding: FootballModelStandingInput | null;
+  /** @minimum 0 */
+  standingTeamCount: number;
+  /** @maxItems 100 */
+  oddsHistory: FootballModelOddsInput[];
+}
+
 export interface DeleteFootballProcessedMatchesResponse {
   /** @minimum 0 */
   deletedCount: number;
@@ -662,6 +754,16 @@ export interface FootballMatchTmpIssue {
 
 export interface FootballMatchTmpContext {
   fixtureId: number;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  leagueAverageGoals: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  leagueAverageMatches: number | null;
   oddsHistory: FootballMatchOddsHistory[];
   seasonStandings: FootballSeasonStanding[];
   issues: FootballMatchTmpIssue[];

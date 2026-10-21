@@ -11,6 +11,16 @@ import type { FootballSeasonStanding } from './footballSeasonStanding';
 
 export interface FootballMatchTmpContext {
   fixtureId: number;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  leagueAverageGoals: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  leagueAverageMatches: number | null;
   oddsHistory: FootballMatchOddsHistory[];
   seasonStandings: FootballSeasonStanding[];
   issues: FootballMatchTmpIssue[];

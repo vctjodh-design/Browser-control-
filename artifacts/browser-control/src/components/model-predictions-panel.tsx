@@ -1,11 +1,19 @@
+import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'wouter';
 import {
+  getGetFootballMatchModelPredictionsQueryKey,
   getGetFootballModelTrainingDashboardQueryKey,
   getGetFootballTesterMatchModelPredictionsQueryKey,
+  useGetFootballMatchModelPredictions,
   useGetFootballModelTrainingDashboard,
   useGetFootballTesterMatchModelPredictions,
+  usePredictFootballMatch,
   usePredictFootballTesterMatch,
+  type FootballMatchDetails,
+  type FootballMatchLastFive,
+  type FootballMatchTmpContext,
+  type FootballModelPredictionContextInput,
   type FootballModelPrediction,
   type FootballModelType,
 } from '@workspace/api-client-react';
@@ -198,30 +206,186 @@ export function TesterModelPredictionsPanel({ fixtureId }: { fixtureId: number }
   );
 }
 
-export function ModelPredictionGraphs({ fixtureId }: { fixtureId: number }) {
-  const queryKey = getGetFootballTesterMatchModelPredictionsQueryKey(fixtureId);
-  const query = useGetFootballTesterMatchModelPredictions(fixtureId, {
+function modelPredictionContext(
+  details: FootballMatchDetails,
+  lastFive: FootballMatchLastFive | undefined,
+  context: FootballMatchTmpContext | undefined,
+): FootballModelPredictionContextInput {
+  const compactMatches = (matches: FootballMatchDetails['homeRecent']) =>
+    matches.map((match) => ({
+      fixtureId: match.fixtureId,
+      date: match.date,
+      homeTeamName: match.homeTeam.name,
+      awayTeamName: match.awayTeam.name,
+      homeScore: match.homeScore,
+      awayScore: match.awayScore,
+    }));
+  const compactLastFive = (matches: FootballMatchLastFive['home']['matches']) =>
+    compactMatches(matches.map((item) => item.match));
+  const homeStanding = context?.seasonStandings.find(
+    (standing) =>
+      standing.teamId === details.match.home.id &&
+      standing.leagueId === details.match.leagueId &&
+      standing.season === details.match.season,
+  );
+  const awayStanding = context?.seasonStandings.find(
+    (standing) =>
+      standing.teamId === details.match.away.id &&
+      standing.leagueId === details.match.leagueId &&
+      standing.season === details.match.season,
+  );
+  return {
+    matchDate: details.match.date,
+    competition: details.match.competition,
+    season: details.match.season,
+    homeTeamName: details.match.home.name,
+    awayTeamName: details.match.away.name,
+    leagueAverageGoals: context?.leagueAverageGoals ?? null,
+    homeRecent: compactMatches(details.homeRecent),
+    awayRecent: compactMatches(details.awayRecent),
+    homeLastFive: compactLastFive(lastFive?.home.matches ?? []),
+    awayLastFive: compactLastFive(lastFive?.away.matches ?? []),
+    homeStanding: homeStanding
+      ? {
+          rank: homeStanding.rank,
+          played: homeStanding.played,
+          points: homeStanding.points,
+          goalDifference: homeStanding.goalDifference,
+        }
+      : null,
+    awayStanding: awayStanding
+      ? {
+          rank: awayStanding.rank,
+          played: awayStanding.played,
+          points: awayStanding.points,
+          goalDifference: awayStanding.goalDifference,
+        }
+      : null,
+    standingTeamCount:
+      context?.seasonStandings.filter(
+        (standing) =>
+          standing.leagueId === details.match.leagueId &&
+          standing.season === details.match.season,
+      ).length ?? 0,
+    oddsHistory: (context?.oddsHistory ?? []).map((odds) => ({
+      fixtureId: odds.fixtureId,
+      homeProbability: odds.homeProbability,
+      drawProbability: odds.drawProbability,
+      awayProbability: odds.awayProbability,
+      verifiedBookmakerCount: odds.verifiedBookmakerCount,
+      quoteSource: odds.quoteSource,
+    })),
+  };
+}
+
+export function ModelPredictionGraphs({
+  fixtureId,
+  details,
+  lastFive,
+  context,
+  contextLoading,
+}: {
+  fixtureId: number;
+  details: FootballMatchDetails;
+  lastFive?: FootballMatchLastFive;
+  context?: FootballMatchTmpContext;
+  contextLoading: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const queryKey = getGetFootballMatchModelPredictionsQueryKey(fixtureId);
+  const query = useGetFootballMatchModelPredictions(fixtureId, {
     query: { enabled: Number.isSafeInteger(fixtureId) && fixtureId > 0, queryKey },
   });
+  const dashboardQuery = useGetFootballModelTrainingDashboard({
+    query: {
+      queryKey: getGetFootballModelTrainingDashboardQueryKey(),
+      refetchOnMount: 'always',
+    },
+  });
+  const predict = usePredictFootballMatch();
+  const attemptedFixture = useRef<number | null>(null);
   const predictions = query.data?.predictions ?? [];
+  const trainedRuns = (dashboardQuery.data?.runs ?? []).filter(
+    (run) => run.status === 'completed' && run.hasPredictionArtifact,
+  );
+  const currentRunIds = new Set(trainedRuns.map((run) => run.id));
+  const hasCurrentPredictions =
+    currentRunIds.size > 0 &&
+    [...currentRunIds].every((runId) =>
+      predictions.some((prediction) => prediction.runId === runId),
+    );
+  const contextInput = modelPredictionContext(details, lastFive, context);
+
+  useEffect(() => {
+    if (
+      contextLoading ||
+      dashboardQuery.isLoading ||
+      dashboardQuery.isError ||
+      !trainedRuns.length ||
+      hasCurrentPredictions ||
+      predict.isPending ||
+      attemptedFixture.current === fixtureId
+    ) {
+      return;
+    }
+    attemptedFixture.current = fixtureId;
+    predict.mutate(
+      { fixtureId, data: contextInput },
+      { onSuccess: (response) => queryClient.setQueryData(queryKey, response) },
+    );
+  }, [
+    contextLoading,
+    contextInput,
+    dashboardQuery.isError,
+    dashboardQuery.isLoading,
+    fixtureId,
+    hasCurrentPredictions,
+    predict,
+    queryClient,
+    queryKey,
+    trainedRuns.length,
+  ]);
+
+  const generate = () => {
+    attemptedFixture.current = fixtureId;
+    predict.mutate(
+      { fixtureId, data: contextInput },
+      { onSuccess: (response) => queryClient.setQueryData(queryKey, response) },
+    );
+  };
 
   return (
     <section className="overflow-hidden rounded-[16px] border border-[#d6d5cc] bg-[#f9f8f3] shadow-[0_10px_34px_rgba(47,59,64,.045)]" aria-labelledby="model-prediction-graph-title" data-testid="panel-model-prediction-graphs">
-      <div className="flex items-center gap-3 border-b border-[#e1dfd7] bg-[#f4f3ed] px-4 py-4">
-        <span className="grid size-9 place-items-center rounded-xl bg-[#e6eee8] text-[#537867]"><BarChart3 size={16} /></span>
-        <div>
-          <h2 id="model-prediction-graph-title" className="text-[12px] font-extrabold text-[#344550]">Model predictions</h2>
-          <p className="mt-0.5 text-[9px] text-[#858982]">Saved forecasts for this fixture, by trained architecture</p>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e1dfd7] bg-[#f4f3ed] px-4 py-4">
+        <div className="flex items-center gap-3">
+          <span className="grid size-9 place-items-center rounded-xl bg-[#e6eee8] text-[#537867]"><BarChart3 size={16} /></span>
+          <div>
+            <h2 id="model-prediction-graph-title" className="text-[12px] font-extrabold text-[#344550]">Model predictions</h2>
+            <p className="mt-0.5 text-[9px] text-[#858982]">Forecasts from loaded match details, recent form, standings, and TMP context</p>
+          </div>
         </div>
+        <button
+          type="button"
+          onClick={generate}
+          disabled={contextLoading || predict.isPending || trainedRuns.length === 0}
+          className="inline-flex min-h-8 items-center gap-2 rounded-lg bg-[#668574] px-3 text-[8px] font-extrabold text-white transition hover:bg-[#557460] disabled:cursor-not-allowed disabled:opacity-50"
+          data-testid="button-generate-graph-predictions"
+        >
+          {predict.isPending ? <RefreshCw size={11} className="animate-spin" /> : <BarChart3 size={11} />}
+          {predict.isPending ? 'Predicting…' : 'Refresh predictions'}
+        </button>
       </div>
       <div className="p-3 sm:p-4">
-        {query.isLoading ? <div className="h-24 animate-pulse rounded-xl bg-[#eeede6]" role="status" aria-label="Loading model prediction graph" />
+        {contextLoading || query.isLoading || dashboardQuery.isLoading ? <div className="h-24 animate-pulse rounded-xl bg-[#eeede6]" role="status" aria-label="Loading model prediction graph" />
           : query.isError ? <p className="flex items-center gap-2 rounded-lg border border-[#e3c3b6] bg-[#fff6f0] px-3 py-3 text-[9px] text-[#8c6b5e]" role="alert" data-testid="error-model-prediction-graph"><CircleAlert size={13} />{errorMessage(query.error)}</p>
-            : predictions.length ? <PredictionCards predictions={predictions} compact />
-              : <div className="rounded-lg border border-dashed border-[#d9d9cf] bg-[#f7f6f0] px-4 py-4 text-[9px] leading-5 text-[#858982]" role="status" data-testid="empty-model-prediction-graph">
-                No saved model predictions for this fixture. Generate them from the Tester tab.
-                <Link href={`/tester?fixture=${fixtureId}`} className="ml-1 font-extrabold text-[#557460] underline" data-testid="link-predict-from-graph">Open Tester</Link>
-              </div>}
+            : predict.isError ? <p className="flex items-center gap-2 rounded-lg border border-[#e3c3b6] bg-[#fff6f0] px-3 py-3 text-[9px] text-[#8c6b5e]" role="alert" data-testid="error-predict-model-graph"><CircleAlert size={13} />{errorMessage(predict.error)}</p>
+              : predictions.length ? <PredictionCards predictions={predictions} compact />
+                : !trainedRuns.length ? <div className="rounded-lg border border-dashed border-[#d9d9cf] bg-[#f7f6f0] px-4 py-4 text-[9px] leading-5 text-[#858982]" role="status" data-testid="empty-model-prediction-graph">
+                  No compatible trained models are ready. <Link href="/model-training" className="font-extrabold text-[#557460] underline" data-testid="link-train-from-graph">Train a model</Link> to generate forecasts here.
+                </div>
+                  : <div className="rounded-lg border border-dashed border-[#d9d9cf] bg-[#f7f6f0] px-4 py-4 text-[9px] leading-5 text-[#858982]" role="status" data-testid="empty-model-prediction-graph">
+                    {predict.isPending ? 'Generating forecasts from the loaded match context…' : 'Predictions will appear here as soon as the trained models finish scoring this fixture.'}
+                  </div>}
       </div>
     </section>
   );

@@ -5,11 +5,14 @@ import type {
 } from "@workspace/api-zod";
 import type {
   ModelTrainingMatch,
+  ModelTrainingContext,
   TesterPredictionTarget,
 } from "./processed-match-store";
 
 const OUTCOME_INDEX = { home: 0, draw: 1, away: 2 } as const;
-const TEAM_EVENT_FEATURES = 7;
+const BASE_TEAM_EVENT_FEATURES = 7;
+const MATCH_CONTEXT_FEATURES = 9;
+const TEAM_EVENT_FEATURES = BASE_TEAM_EVENT_FEATURES + MATCH_CONTEXT_FEATURES;
 const SEQUENCE_FEATURES = TEAM_EVENT_FEATURES * 2 + 1;
 const GRAPH_NODE_COUNT = 4;
 const SCORE_BUCKET_COUNT = 6;
@@ -53,7 +56,7 @@ type TrainingExample = {
 
 export type TrainingWeights = Array<{ shape: number[]; values: number[] }>;
 export type ModelPredictorArtifact = {
-  version: 1;
+  version: 2;
   weights: TrainingWeights;
   normalization: {
     means: number[];
@@ -181,7 +184,7 @@ function buildTeamGame(
 }
 
 function teamEventFeatures(game: TeamGame | null): number[] {
-  if (!game) return Array(TEAM_EVENT_FEATURES).fill(0);
+  if (!game) return Array(BASE_TEAM_EVENT_FEATURES).fill(0);
   return [
     game.points / 3,
     Math.min(game.goalsFor, 5) / 5,
@@ -193,10 +196,116 @@ function teamEventFeatures(game: TeamGame | null): number[] {
   ];
 }
 
+function modelContextMatches(
+  context: ModelTrainingContext,
+  side: "home" | "away",
+  targetDate: string,
+  limit: number,
+) {
+  const targetTeamName =
+    side === "home" ? context.homeTeamName : context.awayTeamName;
+  const recent = side === "home" ? context.homeRecent : context.awayRecent;
+  const cutoff = Date.parse(targetDate);
+  const seen = new Set<number>();
+  return recent
+    .filter((match) => {
+      const date = Date.parse(match.date);
+      if (
+        !Number.isFinite(date) ||
+        !Number.isFinite(cutoff) ||
+        date >= cutoff ||
+        match.fixtureId === 0 ||
+        seen.has(match.fixtureId)
+      ) {
+        return false;
+      }
+      seen.add(match.fixtureId);
+      return match.homeScore !== null && match.awayScore !== null;
+    })
+    .sort((first, second) => Date.parse(second.date) - Date.parse(first.date))
+    .slice(0, limit)
+    .map((match) => {
+      const isHome =
+        normalizeTeamName(match.homeTeamName) === normalizeTeamName(targetTeamName);
+      const goalsFor = isHome ? match.homeScore! : match.awayScore!;
+      const goalsAgainst = isHome ? match.awayScore! : match.homeScore!;
+      return {
+        goalsFor,
+        goalsAgainst,
+        points: goalsFor > goalsAgainst ? 3 : goalsFor === goalsAgainst ? 1 : 0,
+      };
+    });
+}
+
+function matchContextFeatures(
+  match: ModelTrainingMatch,
+  side: "home" | "away",
+): number[] {
+  const recent = modelContextMatches(match.trainingContext, side, match.matchDate, 15);
+  const lastFiveRaw = side === "home"
+    ? match.trainingContext.homeLastFive
+    : match.trainingContext.awayLastFive;
+  const targetName = side === "home"
+    ? match.trainingContext.homeTeamName
+    : match.trainingContext.awayTeamName;
+  const cutoff = Date.parse(match.matchDate);
+  const lastFive = lastFiveRaw
+    .filter((item) => {
+      const date = Date.parse(item.date);
+      return (
+        Number.isFinite(date) &&
+        Number.isFinite(cutoff) &&
+        date < cutoff &&
+        item.homeScore !== null &&
+        item.awayScore !== null
+      );
+    })
+    .slice(0, 5)
+    .map((item) => {
+      const isHome =
+        targetName === null ||
+        normalizeTeamName(item.homeTeamName) === normalizeTeamName(targetName);
+      return {
+        goalsFor: isHome ? item.homeScore! : item.awayScore!,
+        goalsAgainst: isHome ? item.awayScore! : item.homeScore!,
+      };
+    });
+  const totalGoalsFor = recent.reduce((sum, item) => sum + item.goalsFor, 0);
+  const totalGoalsAgainst = recent.reduce((sum, item) => sum + item.goalsAgainst, 0);
+  const wins = recent.filter((item) => item.points === 3).length;
+  const draws = recent.filter((item) => item.points === 1).length;
+  const losses = recent.filter((item) => item.points === 0).length;
+  const overallTmp =
+    100 + 18 * wins + 8 * draws - 6 * losses + 4 * (totalGoalsFor - totalGoalsAgainst);
+  const averageFor = recent.length ? totalGoalsFor / recent.length : 0;
+  const averageAgainst = recent.length ? totalGoalsAgainst / recent.length : 0;
+  const standing = side === "home"
+    ? match.trainingContext.homeStanding
+    : match.trainingContext.awayStanding;
+  const standingGames = standing?.played ?? 0;
+  const lastFiveGoalsFor = lastFive.reduce((sum, item) => sum + item.goalsFor, 0);
+  const lastFiveGoalsAgainst = lastFive.reduce((sum, item) => sum + item.goalsAgainst, 0);
+
+  return [
+    recent.length ? overallTmp / 100 : 0,
+    recent.length ? (100 + 4 * averageFor - 100) / 100 : 0,
+    recent.length ? (100 - 4 * averageAgainst - 100) / 100 : 0,
+    lastFive.length ? lastFiveGoalsFor / lastFive.length / 5 : 0,
+    lastFive.length ? lastFiveGoalsAgainst / lastFive.length / 5 : 0,
+    standing && match.trainingContext.standingTeamCount
+      ? standing.rank / match.trainingContext.standingTeamCount
+      : 0,
+    standingGames ? standing!.points / standingGames / 3 : 0,
+    standingGames ? standing!.goalDifference / standingGames / 5 : 0,
+    match.leagueAverageGoals === null ? 0 : match.leagueAverageGoals / 5,
+  ];
+}
+
 function sequenceFeatures(
   homeHistory: TeamGame[],
   awayHistory: TeamGame[],
   sequenceLength: number,
+  match: ModelTrainingMatch,
 ): number[] {
   const home = homeHistory.slice(-sequenceLength);
   const away = awayHistory.slice(-sequenceLength);
@@ -209,7 +318,13 @@ function sequenceFeatures(
     const awayGame = index < awayPadding ? null : away[index - awayPadding];
     features.push(
       ...teamEventFeatures(homeGame),
+      ...(index === sequenceLength - 1
+        ? matchContextFeatures(match, "home")
+        : Array(MATCH_CONTEXT_FEATURES).fill(0)),
       ...teamEventFeatures(awayGame),
+      ...(index === sequenceLength - 1
+        ? matchContextFeatures(match, "away")
+        : Array(MATCH_CONTEXT_FEATURES).fill(0)),
       (index + 1) / sequenceLength,
     );
   }
@@ -218,7 +333,7 @@ function sequenceFeatures(
 
 function teamSummary(history: TeamGame[], sequenceLength: number): number[] {
   const recent = history.slice(-sequenceLength);
-  if (!recent.length) return Array(TEAM_EVENT_FEATURES).fill(0);
+  if (!recent.length) return Array(BASE_TEAM_EVENT_FEATURES).fill(0);
   const oddsGames = recent.filter((game) => game.odds && game.expectedPoints !== null);
   return [
     recent.reduce((sum, game) => sum + game.points / 3, 0) / recent.length,
@@ -263,10 +378,10 @@ function neighborSummary(
     const weight = dynamic ? Math.exp(-ageDays / 180) : 1;
     samples.push({ values: teamSummary(history, sequenceLength), weight });
   }
-  if (!samples.length) return Array(TEAM_EVENT_FEATURES).fill(0);
+  if (!samples.length) return Array(BASE_TEAM_EVENT_FEATURES).fill(0);
 
   const totalWeight = samples.reduce((sum, sample) => sum + sample.weight, 0);
-  return Array.from({ length: TEAM_EVENT_FEATURES }, (_, index) =>
+  return Array.from({ length: BASE_TEAM_EVENT_FEATURES }, (_, index) =>
     samples.reduce((sum, sample) => sum + sample.values[index] * sample.weight, 0) / totalWeight,
   );
 }
@@ -304,8 +419,14 @@ function graphFeatures(
 ): { nodes: number[]; adjacency: number[] } {
   const homeNodeKey = `${match.competition.toLocaleLowerCase()}|${match.season ?? "unknown"}|${normalizeTeamName(match.homeTeamName)}`;
   const awayNodeKey = `${match.competition.toLocaleLowerCase()}|${match.season ?? "unknown"}|${normalizeTeamName(match.awayTeamName)}`;
-  const home = teamSummary(homeHistory, sequenceLength);
-  const away = teamSummary(awayHistory, sequenceLength);
+  const home = [
+    ...teamSummary(homeHistory, sequenceLength),
+    ...matchContextFeatures(match, "home"),
+  ];
+  const away = [
+    ...teamSummary(awayHistory, sequenceLength),
+    ...matchContextFeatures(match, "away"),
+  ];
   const homeNeighbors = neighborSummary(
     homeNodeKey,
     scopeEdges,
@@ -322,11 +443,14 @@ function graphFeatures(
     sequenceLength,
     dynamic,
   );
+  const emptyContext = Array(MATCH_CONTEXT_FEATURES).fill(0);
   const nodes = [
     ...home,
     ...away,
     ...homeNeighbors,
+    ...emptyContext,
     ...awayNeighbors,
+    ...emptyContext,
   ];
   const adjacency: number[][] = Array.from(
     { length: GRAPH_NODE_COUNT },
@@ -411,7 +535,7 @@ function buildTrainingExamples(
         modelType === "dynamic-graph",
       );
       examples.push({
-        sequence: sequenceFeatures(homeHistory, awayHistory, sequenceLength),
+        sequence: sequenceFeatures(homeHistory, awayHistory, sequenceLength, match),
         graph: graph.nodes,
         graphAdjacency: graph.adjacency,
         labels: labelsFor(match),
@@ -751,7 +875,7 @@ export async function trainArchivedModel(
       trainingLoss,
       validationLoss,
       predictorArtifact: {
-        version: 1,
+        version: 2,
         weights,
         normalization,
       },
@@ -773,7 +897,7 @@ export function isModelPredictorArtifact(
 ): value is ModelPredictorArtifact {
   if (!value || typeof value !== "object") return false;
   const artifact = value as Partial<ModelPredictorArtifact>;
-  return artifact.version === 1 &&
+  return artifact.version === 2 &&
     Array.isArray(artifact.weights) &&
     artifact.weights.every((weight) =>
       Array.isArray(weight.shape) &&
@@ -815,7 +939,19 @@ export async function predictArchivedFixture(input: {
     ...input.target,
     homeScore: 0,
     awayScore: 0,
-    tmpJson: '{"oddsHistory":[]}',
+    leagueAverageGoals: input.target.leagueAverageGoals ?? null,
+    trainingContext: input.target.trainingContext ?? {
+      homeTeamName: input.target.homeTeamName,
+      awayTeamName: input.target.awayTeamName,
+      homeRecent: [],
+      awayRecent: [],
+      homeLastFive: [],
+      awayLastFive: [],
+      homeStanding: null,
+      awayStanding: null,
+      standingTeamCount: 0,
+    },
+    tmpJson: input.target.tmpJson ?? '{"oddsHistory":[]}',
   };
   const examples = buildTrainingExamples(
     [...historyMatches, targetMatch],

@@ -10,6 +10,7 @@ import type {
 import {
   fetchKickoffScoreJson,
   getKickoffScoreMatchDetails,
+  getKickoffScoreLeagueGoalAverage,
   oddsCategory,
   parseStandings,
 } from "./kickoffscore-match-details";
@@ -563,6 +564,20 @@ async function loadTmpContext(
   fixtureId: number,
 ): Promise<FootballMatchTmpContext> {
   const details = await getKickoffScoreMatchDetails(fixtureId);
+  let leagueAverageGoals: number | null = null;
+  let leagueAverageMatches: number | null = null;
+  if (details.match.leagueId !== null && details.match.season !== null) {
+    try {
+      const average = await getKickoffScoreLeagueGoalAverage(
+        details.match.leagueId,
+        details.match.season,
+      );
+      leagueAverageGoals = average.goalsPerMatch;
+      leagueAverageMatches = average.matchesCount;
+    } catch (error) {
+      if (error instanceof UpstreamRateLimitError) throw error;
+    }
+  }
   const matches = uniqueMatches([
     ...details.homeRecent.slice(0, 15),
     ...details.awayRecent.slice(0, 15),
@@ -614,6 +629,8 @@ async function loadTmpContext(
 
   return {
     fixtureId,
+    leagueAverageGoals,
+    leagueAverageMatches,
     oddsHistory,
     seasonStandings: standingsResults.flatMap((result) => result.rows),
     issues,

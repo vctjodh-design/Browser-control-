@@ -151,7 +151,9 @@ database.exec(`
     away_team_name TEXT NOT NULL,
     home_score INTEGER NOT NULL,
     away_score INTEGER NOT NULL,
-    odds_history_json TEXT NOT NULL DEFAULT '[]'
+    odds_history_json TEXT NOT NULL DEFAULT '[]',
+    league_average_goals REAL,
+    training_context_json TEXT NOT NULL DEFAULT '{}'
   );
 
   CREATE INDEX IF NOT EXISTS model_training_match_index_date
@@ -263,14 +265,57 @@ const VERIFIED_ODDS_HISTORY_SQL = `COALESCE(
   '[]'
 )`;
 
+const TRAINING_CONTEXT_SQL = `json_object(
+  'homeTeamName', json_extract(details_json, '$.match.home.name'),
+  'awayTeamName', json_extract(details_json, '$.match.away.name'),
+  'homeRecent', json(COALESCE(json_extract(details_json, '$.homeRecent'), '[]')),
+  'awayRecent', json(COALESCE(json_extract(details_json, '$.awayRecent'), '[]')),
+  'homeLastFive', json(COALESCE((
+    SELECT json_group_array(json(json_extract(item.value, '$.match')))
+    FROM json_each(last_five_json, '$.home.matches') AS item
+    WHERE json_type(item.value, '$.match') = 'object'
+  ), '[]')),
+  'awayLastFive', json(COALESCE((
+    SELECT json_group_array(json(json_extract(item.value, '$.match')))
+    FROM json_each(last_five_json, '$.away.matches') AS item
+    WHERE json_type(item.value, '$.match') = 'object'
+  ), '[]')),
+  'homeStanding', json(COALESCE((
+    SELECT item.value
+    FROM json_each(tmp_json, '$.seasonStandings') AS item
+    WHERE json_extract(item.value, '$.teamId') = json_extract(details_json, '$.match.home.id')
+    LIMIT 1
+  ), 'null')),
+  'awayStanding', json(COALESCE((
+    SELECT item.value
+    FROM json_each(tmp_json, '$.seasonStandings') AS item
+    WHERE json_extract(item.value, '$.teamId') = json_extract(details_json, '$.match.away.id')
+    LIMIT 1
+  ), 'null')),
+  'standingTeamCount', COALESCE(json_array_length(tmp_json, '$.seasonStandings'), 0)
+)`;
+
 let modelTrainingIndexReady = false;
 
 function ensureModelTrainingMatchIndex(): void {
   if (modelTrainingIndexReady) return;
+  const indexColumns = database
+    .prepare("PRAGMA table_info(model_training_match_index)")
+    .all() as SqlRow[];
+  if (!indexColumns.some((column) => column.name === "league_average_goals")) {
+    database.exec(
+      "ALTER TABLE model_training_match_index ADD COLUMN league_average_goals REAL",
+    );
+  }
+  if (!indexColumns.some((column) => column.name === "training_context_json")) {
+    database.exec(
+      "ALTER TABLE model_training_match_index ADD COLUMN training_context_json TEXT NOT NULL DEFAULT '{}'",
+    );
+  }
   const state = database
     .prepare("SELECT version FROM model_training_index_state WHERE id = 1")
     .get() as SqlRow | undefined;
-  if (numberValue(state?.version ?? 0) < 1) {
+  if (numberValue(state?.version ?? 0) < 2) {
     database.exec("BEGIN IMMEDIATE");
     try {
       database.exec("DELETE FROM model_training_match_index");
@@ -278,17 +323,18 @@ function ensureModelTrainingMatchIndex(): void {
         `INSERT INTO model_training_match_index (
            fixture_id, calendar_date, match_date, competition, season,
            home_team_name, away_team_name, home_score, away_score,
-           odds_history_json
+           odds_history_json, league_average_goals, training_context_json
          )
          SELECT fixture_id, calendar_date, match_date, competition, season,
                 home_team_name, away_team_name, home_score, away_score,
-                ${VERIFIED_ODDS_HISTORY_SQL}
+                ${VERIFIED_ODDS_HISTORY_SQL}, league_average_goals,
+                ${TRAINING_CONTEXT_SQL}
          FROM processed_matches
          WHERE home_score IS NOT NULL AND away_score IS NOT NULL
            AND actual_outcome IS NOT NULL`,
       ).run();
       database.prepare(
-        `INSERT INTO model_training_index_state (id, version) VALUES (1, 1)
+        `INSERT INTO model_training_index_state (id, version) VALUES (1, 2)
          ON CONFLICT(id) DO UPDATE SET version = excluded.version`,
       ).run();
       database.exec("COMMIT");
@@ -554,7 +600,37 @@ export type ModelTrainingMatch = {
   awayTeamName: string;
   homeScore: number;
   awayScore: number;
+  leagueAverageGoals: number | null;
+  trainingContext: ModelTrainingContext;
   tmpJson: string;
+};
+
+export type ModelFormMatch = {
+  fixtureId: number;
+  date: string;
+  homeTeamName: string;
+  awayTeamName: string;
+  homeScore: number | null;
+  awayScore: number | null;
+};
+
+export type ModelTeamStanding = {
+  rank: number;
+  played: number;
+  points: number;
+  goalDifference: number;
+};
+
+export type ModelTrainingContext = {
+  homeTeamName: string;
+  awayTeamName: string;
+  homeRecent: ModelFormMatch[];
+  awayRecent: ModelFormMatch[];
+  homeLastFive: ModelFormMatch[];
+  awayLastFive: ModelFormMatch[];
+  homeStanding: ModelTeamStanding | null;
+  awayStanding: ModelTeamStanding | null;
+  standingTeamCount: number;
 };
 
 function storedJson<T>(value: SQLOutputValue, fallback: T): T {
@@ -563,6 +639,155 @@ function storedJson<T>(value: SQLOutputValue, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function modelFormMatches(value: unknown): ModelFormMatch[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const row = recordOf(item);
+    const home = recordOf(row?.homeTeam);
+    const away = recordOf(row?.awayTeam);
+    const fixtureId = finiteNumber(row?.fixtureId);
+    const date = typeof row?.date === "string" ? row.date : null;
+    const homeTeamName =
+      typeof row?.homeTeamName === "string"
+        ? row.homeTeamName
+        : typeof home?.name === "string"
+          ? home.name
+          : null;
+    const awayTeamName =
+      typeof row?.awayTeamName === "string"
+        ? row.awayTeamName
+        : typeof away?.name === "string"
+          ? away.name
+          : null;
+    if (
+      fixtureId === null ||
+      date === null ||
+      !homeTeamName ||
+      !awayTeamName
+    ) {
+      return [];
+    }
+    return [{
+      fixtureId,
+      date,
+      homeTeamName,
+      awayTeamName,
+      homeScore: finiteNumber(row?.homeScore),
+      awayScore: finiteNumber(row?.awayScore),
+    }];
+  });
+}
+
+function modelStanding(value: unknown): ModelTeamStanding | null {
+  const row = recordOf(value);
+  const rank = finiteNumber(row?.rank);
+  const played = finiteNumber(row?.played);
+  const points = finiteNumber(row?.points);
+  const goalDifference = finiteNumber(row?.goalDifference);
+  if (
+    rank === null ||
+    played === null ||
+    points === null ||
+    goalDifference === null
+  ) {
+    return null;
+  }
+  return { rank, played, points, goalDifference };
+}
+
+function modelTrainingContextFromJson(value: SQLOutputValue): ModelTrainingContext {
+  const parsed = storedJson<Record<string, unknown>>(value, {});
+  return {
+    homeTeamName:
+      typeof parsed.homeTeamName === "string" ? parsed.homeTeamName : "",
+    awayTeamName:
+      typeof parsed.awayTeamName === "string" ? parsed.awayTeamName : "",
+    homeRecent: modelFormMatches(parsed.homeRecent),
+    awayRecent: modelFormMatches(parsed.awayRecent),
+    homeLastFive: modelFormMatches(parsed.homeLastFive),
+    awayLastFive: modelFormMatches(parsed.awayLastFive),
+    homeStanding: modelStanding(parsed.homeStanding),
+    awayStanding: modelStanding(parsed.awayStanding),
+    standingTeamCount: finiteNumber(parsed.standingTeamCount) ?? 0,
+  };
+}
+
+function modelTrainingContextFromPayloads(
+  summary: FootballProcessedMatchSummary,
+  payloads: {
+    details: FootballMatchDetails;
+    lastFive: FootballMatchLastFive;
+    tmp: FootballMatchTmpContext;
+  },
+): ModelTrainingContext {
+  const cutoff = summary.date.getTime();
+  const compact = (matches: FootballMatchDetails["homeRecent"]) =>
+    matches
+      .filter((match) => {
+        const timestamp = match.date.getTime();
+        return (
+          match.fixtureId !== summary.fixtureId &&
+          Number.isFinite(timestamp) &&
+          timestamp < cutoff &&
+          match.homeScore !== null &&
+          match.awayScore !== null
+        );
+      })
+      .map((match) => ({
+        fixtureId: match.fixtureId,
+        date: match.date.toISOString(),
+        homeTeamName: match.homeTeam.name,
+        awayTeamName: match.awayTeam.name,
+        homeScore: match.homeScore,
+        awayScore: match.awayScore,
+      }));
+  const compactFive = (matches: FootballMatchLastFive["home"]["matches"]) =>
+    compact(matches.map((item) => item.match));
+  const homeTeamId = payloads.details.match.home.id;
+  const awayTeamId = payloads.details.match.away.id;
+  const homeStanding = payloads.tmp.seasonStandings.find(
+    (standing) => standing.teamId === homeTeamId,
+  );
+  const awayStanding = payloads.tmp.seasonStandings.find(
+    (standing) => standing.teamId === awayTeamId,
+  );
+  return {
+    homeTeamName: payloads.details.match.home.name,
+    awayTeamName: payloads.details.match.away.name,
+    homeRecent: compact(payloads.details.homeRecent),
+    awayRecent: compact(payloads.details.awayRecent),
+    homeLastFive: compactFive(payloads.lastFive.home.matches),
+    awayLastFive: compactFive(payloads.lastFive.away.matches),
+    homeStanding: homeStanding
+      ? {
+          rank: homeStanding.rank,
+          played: homeStanding.played,
+          points: homeStanding.points,
+          goalDifference: homeStanding.goalDifference,
+        }
+      : null,
+    awayStanding: awayStanding
+      ? {
+          rank: awayStanding.rank,
+          played: awayStanding.played,
+          points: awayStanding.points,
+          goalDifference: awayStanding.goalDifference,
+        }
+      : null,
+    standingTeamCount: payloads.tmp.seasonStandings.length,
+  };
 }
 
 function correctedLegacyBaselineAccuracy(
@@ -643,7 +868,7 @@ function hasPredictionArtifact(value: SQLOutputValue): boolean {
       weights?: unknown;
       normalization?: { means?: unknown; scales?: unknown; positionsPerSample?: unknown };
     };
-    return artifact.version === 1 &&
+    return artifact.version === 2 &&
       Array.isArray(artifact.weights) &&
       Array.isArray(artifact.normalization?.means) &&
       Array.isArray(artifact.normalization?.scales) &&
@@ -661,6 +886,9 @@ export type TesterPredictionTarget = {
   season: number | null;
   homeTeamName: string;
   awayTeamName: string;
+  leagueAverageGoals?: number | null;
+  trainingContext?: ModelTrainingContext;
+  tmpJson?: string;
 };
 
 export function getTesterPredictionTarget(
@@ -771,11 +999,11 @@ export function listModelTrainingMatches(limit = 10_000): ModelTrainingMatch[] {
     .prepare(
       `SELECT fixture_id, calendar_date, match_date, competition, season,
               home_team_name, away_team_name, home_score, away_score,
-              odds_history_json
+               odds_history_json, league_average_goals, training_context_json
        FROM (
          SELECT fixture_id, calendar_date, match_date, competition, season,
                 home_team_name, away_team_name, home_score, away_score,
-                odds_history_json
+                 odds_history_json, league_average_goals, training_context_json
          FROM model_training_match_index
          ORDER BY calendar_date DESC, match_date DESC, fixture_id DESC
          LIMIT ?
@@ -793,6 +1021,8 @@ export function listModelTrainingMatches(limit = 10_000): ModelTrainingMatch[] {
     awayTeamName: stringValue(row.away_team_name),
     homeScore: numberValue(row.home_score),
     awayScore: numberValue(row.away_score),
+    leagueAverageGoals: nullableNumber(row.league_average_goals),
+    trainingContext: modelTrainingContextFromJson(row.training_context_json),
     tmpJson: `{"oddsHistory":${stringValue(row.odds_history_json)}}`,
   }));
 }
@@ -1022,8 +1252,8 @@ export function saveProcessedMatch(
         `INSERT INTO model_training_match_index (
            fixture_id, calendar_date, match_date, competition, season,
            home_team_name, away_team_name, home_score, away_score,
-           odds_history_json
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           odds_history_json, league_average_goals, training_context_json
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(fixture_id) DO UPDATE SET
            calendar_date = excluded.calendar_date,
            match_date = excluded.match_date,
@@ -1033,7 +1263,9 @@ export function saveProcessedMatch(
            away_team_name = excluded.away_team_name,
            home_score = excluded.home_score,
            away_score = excluded.away_score,
-           odds_history_json = excluded.odds_history_json`,
+           odds_history_json = excluded.odds_history_json,
+           league_average_goals = excluded.league_average_goals,
+           training_context_json = excluded.training_context_json`,
       )
       .run(
         summary.fixtureId,
@@ -1046,6 +1278,8 @@ export function saveProcessedMatch(
         summary.homeScore,
         summary.awayScore,
         compactVerifiedOddsHistory(payloads.tmp.oddsHistory),
+        summary.leagueAverageGoals,
+        JSON.stringify(modelTrainingContextFromPayloads(summary, payloads)),
       );
   } else {
     database

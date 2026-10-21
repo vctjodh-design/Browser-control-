@@ -32,7 +32,9 @@ import type {
   FootballFixtures,
   FootballMatchDetails,
   FootballMatchLastFive,
+  FootballMatchModelPredictions,
   FootballMatchTmpContext,
+  FootballModelPredictionContextInput,
   FootballModelTrainingDashboard,
   FootballModelTrainingInput,
   FootballModelTrainingRun,
@@ -1469,6 +1471,173 @@ export function useGetFootballTesterMatch<TData = Awaited<ReturnType<typeof getF
 
 
 
+
+export const getGetFootballMatchModelPredictionsUrl = (fixtureId: number,) => {
+
+
+
+
+  return `/api/football/matches/${fixtureId}/model-predictions`
+}
+
+/**
+ * @summary Get saved model predictions for a match fixture
+ */
+export const getFootballMatchModelPredictions = async (fixtureId: number, options?: Parameters<typeof customFetch>[1]): Promise<FootballMatchModelPredictions> => {
+
+  return customFetch<FootballMatchModelPredictions>(getGetFootballMatchModelPredictionsUrl(fixtureId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballMatchModelPredictionsQueryKey = (fixtureId: number,) => {
+    return [
+    `/api/football/matches/${fixtureId}/model-predictions`
+    ] as const;
+    }
+
+
+export const getGetFootballMatchModelPredictionsQueryOptions = <TData = Awaited<ReturnType<typeof getFootballMatchModelPredictions>>, TError = ErrorType<FootballFixtureError>>(fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchModelPredictions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballMatchModelPredictionsQueryKey(fixtureId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballMatchModelPredictions>>> = ({ signal }) => getFootballMatchModelPredictions(fixtureId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: fixtureId !== null && fixtureId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchModelPredictions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballMatchModelPredictionsQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballMatchModelPredictions>>>
+export type GetFootballMatchModelPredictionsQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary Get saved model predictions for a match fixture
+ */
+
+export function useGetFootballMatchModelPredictions<TData = Awaited<ReturnType<typeof getFootballMatchModelPredictions>>, TError = ErrorType<FootballFixtureError>>(
+ fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchModelPredictions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballMatchModelPredictionsQueryOptions(fixtureId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getPredictFootballMatchUrl = (fixtureId: number,) => {
+
+
+
+
+  return `/api/football/matches/${fixtureId}/model-predictions`
+}
+
+/**
+ * Uses earlier results and the fixture's supplied pre-match form, standings, league average, and TMP odds context.
+ * @summary Generate model predictions from the match graph's loaded context
+ */
+export const predictFootballMatch = async (fixtureId: number,
+    footballModelPredictionContextInput: FootballModelPredictionContextInput, options?: Parameters<typeof customFetch>[1]): Promise<FootballMatchModelPredictions> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<FootballMatchModelPredictions>(getPredictFootballMatchUrl(fixtureId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(footballModelPredictionContextInput)
+  }
+);}
+
+
+
+
+
+export const getPredictFootballMatchMutationKey = () => ['predictFootballMatch'] as const;
+
+export const getPredictFootballMatchMutationOptions = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof predictFootballMatch>>, TError,PredictFootballMatchMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof predictFootballMatch>>, TError,PredictFootballMatchMutationVariables, TContext> => {
+
+const mutationKey = getPredictFootballMatchMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof predictFootballMatch>>, PredictFootballMatchMutationVariables> = (props) => {
+          const {fixtureId,data} = props ?? {};
+
+          return  predictFootballMatch(fixtureId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PredictFootballMatchMutationResult = NonNullable<Awaited<ReturnType<typeof predictFootballMatch>>>
+    export type PredictFootballMatchMutationBody = BodyType<FootballModelPredictionContextInput>
+    export type PredictFootballMatchMutationError = ErrorType<FootballFixtureError>
+    export type PredictFootballMatchMutationVariables = {fixtureId: number;data: BodyType<FootballModelPredictionContextInput>}
+
+    /**
+ * @summary Generate model predictions from the match graph's loaded context
+ */
+export const usePredictFootballMatch = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof predictFootballMatch>>, TError,PredictFootballMatchMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof predictFootballMatch>>,
+        TError,
+        PredictFootballMatchMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPredictFootballMatchMutationOptions(options));
+    }
 
 export const getGetFootballTesterMatchModelPredictionsUrl = (fixtureId: number,) => {
 

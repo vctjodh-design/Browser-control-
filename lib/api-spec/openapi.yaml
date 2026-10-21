@@ -526,6 +526,68 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballFixtureError"
+  /football/matches/{fixtureId}/model-predictions:
+    get:
+      operationId: getFootballMatchModelPredictions
+      tags: [model-training]
+      summary: Get saved model predictions for a match fixture
+      parameters:
+        - name: fixtureId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Saved predictions from the available trained models
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballMatchModelPredictions"
+        "400":
+          description: Invalid match ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+    post:
+      operationId: predictFootballMatch
+      tags: [model-training]
+      summary: Generate model predictions from the match graph's loaded context
+      description: Uses earlier results and the fixture's supplied pre-match form, standings, league average, and TMP odds context.
+      parameters:
+        - name: fixtureId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FootballModelPredictionContextInput"
+      responses:
+        "200":
+          description: Predictions from every available trained architecture
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballMatchModelPredictions"
+        "400":
+          description: Invalid match ID or prediction context
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "422":
+          description: No compatible trained model is ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
   /football/tester-matches/{fixtureId}/model-predictions:
     get:
       operationId: getFootballTesterMatchModelPredictions
@@ -1396,6 +1458,143 @@ components:
           items:
             $ref: "#/components/schemas/FootballModelPrediction"
       required: [fixtureId, predictions]
+    FootballMatchModelPredictions:
+      type: object
+      properties:
+        fixtureId:
+          type: integer
+          minimum: 1
+        predictions:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballModelPrediction"
+      required: [fixtureId, predictions]
+    FootballModelFormMatchInput:
+      type: object
+      properties:
+        fixtureId:
+          type: integer
+          minimum: 1
+        date:
+          type: string
+          format: date-time
+        homeTeamName:
+          type: string
+        awayTeamName:
+          type: string
+        homeScore:
+          type: ["integer", "null"]
+        awayScore:
+          type: ["integer", "null"]
+      required: [fixtureId, date, homeTeamName, awayTeamName, homeScore, awayScore]
+    FootballModelStandingInput:
+      type: object
+      properties:
+        rank:
+          type: integer
+          minimum: 1
+        played:
+          type: integer
+          minimum: 0
+        points:
+          type: integer
+          minimum: 0
+        goalDifference:
+          type: integer
+      required: [rank, played, points, goalDifference]
+    FootballModelOddsInput:
+      type: object
+      properties:
+        fixtureId:
+          type: integer
+          minimum: 1
+        homeProbability:
+          type: ["number", "null"]
+          minimum: 0
+          maximum: 1
+        drawProbability:
+          type: ["number", "null"]
+          minimum: 0
+          maximum: 1
+        awayProbability:
+          type: ["number", "null"]
+          minimum: 0
+          maximum: 1
+        verifiedBookmakerCount:
+          type: integer
+          minimum: 0
+        quoteSource:
+          type: string
+          enum: [verified, unverified, mixed, unavailable]
+      required: [fixtureId, homeProbability, drawProbability, awayProbability, verifiedBookmakerCount, quoteSource]
+    FootballModelPredictionContextInput:
+      type: object
+      properties:
+        matchDate:
+          type: string
+          format: date-time
+        competition:
+          type: string
+        season:
+          type: ["integer", "null"]
+        homeTeamName:
+          type: string
+        awayTeamName:
+          type: string
+        leagueAverageGoals:
+          type: ["number", "null"]
+          minimum: 0
+        homeRecent:
+          type: array
+          maxItems: 15
+          items:
+            $ref: "#/components/schemas/FootballModelFormMatchInput"
+        awayRecent:
+          type: array
+          maxItems: 15
+          items:
+            $ref: "#/components/schemas/FootballModelFormMatchInput"
+        homeLastFive:
+          type: array
+          maxItems: 5
+          items:
+            $ref: "#/components/schemas/FootballModelFormMatchInput"
+        awayLastFive:
+          type: array
+          maxItems: 5
+          items:
+            $ref: "#/components/schemas/FootballModelFormMatchInput"
+        homeStanding:
+          oneOf:
+            - $ref: "#/components/schemas/FootballModelStandingInput"
+            - type: "null"
+        awayStanding:
+          oneOf:
+            - $ref: "#/components/schemas/FootballModelStandingInput"
+            - type: "null"
+        standingTeamCount:
+          type: integer
+          minimum: 0
+        oddsHistory:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/FootballModelOddsInput"
+      required:
+        - matchDate
+        - competition
+        - season
+        - homeTeamName
+        - awayTeamName
+        - leagueAverageGoals
+        - homeRecent
+        - awayRecent
+        - homeLastFive
+        - awayLastFive
+        - homeStanding
+        - awayStanding
+        - standingTeamCount
+        - oddsHistory
     DeleteFootballProcessedMatchesResponse:
       type: object
       properties:
@@ -1878,6 +2077,12 @@ components:
       properties:
         fixtureId:
           type: integer
+        leagueAverageGoals:
+          type: ["number", "null"]
+          minimum: 0
+        leagueAverageMatches:
+          type: ["integer", "null"]
+          minimum: 0
         oddsHistory:
           type: array
           items:
@@ -1890,7 +2095,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FootballMatchTmpIssue"
-      required: [fixtureId, oddsHistory, seasonStandings, issues]
+      required: [fixtureId, leagueAverageGoals, leagueAverageMatches, oddsHistory, seasonStandings, issues]
     FootballMatchDetailsIssue:
       type: object
       properties:
