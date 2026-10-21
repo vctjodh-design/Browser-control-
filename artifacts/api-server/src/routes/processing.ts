@@ -518,15 +518,17 @@ router.get("/football/tester-matches", (req, res): void => {
       : null;
   const parsed = GetFootballTesterMatchesQueryParams.safeParse({
     ...(date ? { date: new Date(`${date}T00:00:00.000Z`) } : {}),
+    ...(req.query.search !== undefined ? { search: req.query.search } : {}),
     limit: req.query.limit ?? 100,
     offset: req.query.offset ?? 0,
   });
   if (!parsed.success || (rawDate !== undefined && date === null)) {
-    res.status(400).json({ error: "Use a valid date, a limit from 1 to 500, and a non-negative offset." });
+    res.status(400).json({ error: "Use a valid date, a search up to 100 characters, a limit from 1 to 500, and a non-negative offset." });
     return;
   }
   const result = listTesterMatches({
     date: date ?? undefined,
+    search: parsed.data.search,
     limit: parsed.data.limit,
     offset: parsed.data.offset,
   });

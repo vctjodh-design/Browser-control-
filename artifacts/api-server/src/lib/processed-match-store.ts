@@ -1417,32 +1417,35 @@ export function deleteAllProcessedMatches(): number {
 
 export function listTesterMatches(input: {
   date?: string;
+  search?: string;
   limit: number;
   offset: number;
 }): { matches: FootballTesterMatchSummary[]; total: number } {
-  const countRow = (input.date
-    ? database
-        .prepare(
-          "SELECT COUNT(*) AS total FROM tester_matches WHERE calendar_date = ?",
-        )
-        .get(input.date)
-    : database.prepare("SELECT COUNT(*) AS total FROM tester_matches").get()) as
-    | SqlRow
-    | undefined;
-  const rows = (input.date
-    ? database
-        .prepare(
-          `SELECT ${TESTER_SUMMARY_COLUMNS} FROM tester_matches
-           WHERE calendar_date = ?
-           ORDER BY match_date DESC, fixture_id DESC LIMIT ? OFFSET ?`,
-        )
-        .all(input.date, input.limit, input.offset)
-    : database
-        .prepare(
-          `SELECT ${TESTER_SUMMARY_COLUMNS} FROM tester_matches
-           ORDER BY match_date DESC, fixture_id DESC LIMIT ? OFFSET ?`,
-        )
-        .all(input.limit, input.offset)) as SqlRow[];
+  const conditions: string[] = [];
+  const queryParams: Array<string | number> = [];
+  if (input.date) {
+    conditions.push("calendar_date = ?");
+    queryParams.push(input.date);
+  }
+  const search = input.search?.trim();
+  if (search) {
+    const pattern = `%${search.replace(/[\\%_]/g, "\\$&")}%`;
+    conditions.push(
+      `(home_team_name LIKE ? ESCAPE '\\' OR away_team_name LIKE ? ESCAPE '\\' OR competition LIKE ? ESCAPE '\\' OR CAST(fixture_id AS TEXT) LIKE ? ESCAPE '\\')`,
+    );
+    queryParams.push(pattern, pattern, pattern, pattern);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const countRow = database
+    .prepare(`SELECT COUNT(*) AS total FROM tester_matches ${where}`)
+    .get(...queryParams) as SqlRow | undefined;
+  const rows = database
+    .prepare(
+      `SELECT ${TESTER_SUMMARY_COLUMNS} FROM tester_matches
+       ${where}
+       ORDER BY match_date DESC, fixture_id DESC LIMIT ? OFFSET ?`,
+    )
+    .all(...queryParams, input.limit, input.offset) as SqlRow[];
   return {
     matches: rows.map(testerSummaryFromRow),
     total: numberValue(countRow?.total ?? 0),

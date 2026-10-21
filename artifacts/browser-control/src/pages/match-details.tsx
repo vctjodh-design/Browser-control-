@@ -50,6 +50,18 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(date);
 }
 
+function fixturesReturnHref() {
+  const current = new URLSearchParams(window.location.search);
+  const params = new URLSearchParams();
+  const date = current.get('date');
+  if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) params.set('date', date);
+  const competition = current.get('competition')?.trim();
+  if (competition) params.set('competition', competition);
+  const search = current.get('search')?.trim();
+  if (search) params.set('search', search);
+  return `/fixtures${params.size ? `?${params.toString()}` : ''}`;
+}
+
 function TeamCrest({ name, logo, large = false }: { name: string; logo: string | null; large?: boolean }) {
   return (
     <span className={`grid shrink-0 place-items-center overflow-hidden rounded-[14px] border border-[#e0dfd6] bg-[#f7f6ef] font-extrabold text-[#65766d] ${large ? 'size-[62px] text-[15px] sm:size-[74px]' : 'size-9 text-[10px]'}`}>
@@ -225,6 +237,7 @@ export default function MatchDetailsPage() {
   const params = useParams<{ fixtureId: string }>();
   const fixtureId = Number(params.fixtureId);
   const validId = Number.isSafeInteger(fixtureId) && fixtureId > 0;
+  const fixturesHref = fixturesReturnHref();
   const detailsQuery = useGetFootballMatchDetails(validId ? fixtureId : 0, {
     query: { enabled: validId, queryKey: ['/api/football/matches', fixtureId, 'details'] },
   });
@@ -252,13 +265,13 @@ export default function MatchDetailsPage() {
             <Link href="/processing" className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f1f0e9] px-3 text-[10px] font-extrabold text-[#60716a] transition hover:bg-white" data-testid="link-processing">Processing</Link>
             <Link href="/database" className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f1f0e9] px-3 text-[10px] font-extrabold text-[#60716a] transition hover:bg-white" data-testid="link-database">Database</Link>
             <Link href="/model-training" className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f1f0e9] px-3 text-[10px] font-extrabold text-[#60716a] transition hover:bg-white" data-testid="link-model-training">Model training</Link>
-            <Link href="/fixtures" className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f1f0e9] px-3 text-[10px] font-extrabold text-[#60716a] transition hover:bg-white" data-testid="link-back-fixtures"><ArrowLeft size={14} /> All fixtures</Link>
+            <Link href={fixturesHref} className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f1f0e9] px-3 text-[10px] font-extrabold text-[#60716a] transition hover:bg-white" data-testid="link-back-fixtures"><ArrowLeft size={14} /> All fixtures</Link>
           </div>
         </div>
       </header>
 
       <div className="mx-auto max-w-[1260px] px-4 pb-12 pt-6 sm:px-7 sm:pt-9 lg:px-10">
-        <div className="mb-5 flex items-center gap-2 text-[9px] font-bold uppercase tracking-[.13em] text-[#93958b]"><Link href="/fixtures" className="hover:text-[#d06c4f]" data-testid="link-breadcrumb-fixtures">Fixtures</Link><span>/</span><span className="text-[#9b7160]">Match detail</span></div>
+        <div className="mb-5 flex items-center gap-2 text-[9px] font-bold uppercase tracking-[.13em] text-[#93958b]"><Link href={fixturesHref} className="hover:text-[#d06c4f]" data-testid="link-breadcrumb-fixtures">Fixtures</Link><span>/</span><span className="text-[#9b7160]">Match detail</span></div>
 
         {detailsQuery.isLoading ? (
           <section className="overflow-hidden rounded-[17px] border border-[#d6d5cc] bg-[#f9f8f3]" role="status" aria-label="Loading match details" data-testid="status-match-loading">
@@ -272,7 +285,7 @@ export default function MatchDetailsPage() {
             <h1 className="mt-4 text-[19px] font-extrabold tracking-[-.04em] text-[#784b3e]">{validId ? 'Match details unavailable' : 'Invalid fixture reference'}</h1>
             <p className="mt-2 max-w-md text-[11px] leading-5 text-[#8c6b5e]">{validId ? readableError(detailsQuery.error) : 'This fixture link does not contain a valid match identifier.'}</p>
             {validId && <button type="button" onClick={() => detailsQuery.refetch()} className="mt-5 inline-flex h-9 items-center gap-2 rounded-lg border border-[#e5c5b8] bg-[#fffaf6] px-3 text-[10px] font-extrabold text-[#855542] hover:bg-white" data-testid="button-retry-match"><RefreshCw size={13} /> Try again</button>}
-            <Link href="/fixtures" className="mt-4 inline-flex items-center gap-2 text-[10px] font-extrabold text-[#668074] hover:text-[#d06c4f]" data-testid="link-error-back"><ArrowLeft size={13} /> Return to fixtures</Link>
+            <Link href={fixturesHref} className="mt-4 inline-flex items-center gap-2 text-[10px] font-extrabold text-[#668074] hover:text-[#d06c4f]" data-testid="link-error-back"><ArrowLeft size={13} /> Return to fixtures</Link>
           </section>
         ) : match ? (
           <div className="animate-rise">

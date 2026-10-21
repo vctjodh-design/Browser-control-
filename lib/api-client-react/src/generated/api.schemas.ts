@@ -1042,6 +1042,11 @@ export const GetFootballProcessedMatchPayloadSection = {
 export type GetFootballTesterMatchesParams = {
 date?: string;
 /**
+ * Search saved tester matches by team, competition, or fixture ID
+ * @maxLength 100
+ */
+search?: string;
+/**
  * @minimum 1
  * @maximum 500
  */

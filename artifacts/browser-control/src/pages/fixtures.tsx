@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useGetFootballFixtures } from '@workspace/api-client-react';
 import { Link } from 'wouter';
 import {
@@ -20,6 +20,22 @@ function getLocalDateString(date = new Date()) {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function validCalendarDate(value: string | null): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  return getLocalDateString(new Date(year, month - 1, day, 12)) === value;
+}
+
+function fixtureListContext() {
+  const params = new URLSearchParams(window.location.search);
+  const date = params.get('date');
+  return {
+    date: validCalendarDate(date) ? date : getLocalDateString(),
+    search: params.get('search') ?? '',
+    competition: params.get('competition') ?? '',
+  };
 }
 
 function shiftDate(dateString: string, amount: number) {
@@ -106,9 +122,25 @@ function TeamMark({ name, logo }: { name: string; logo: string | null }) {
   );
 }
 
-function FixtureRow({ fixture }: { fixture: Fixture }) {
+function FixtureRow({
+  fixture,
+  selectedDate,
+  searchTerm,
+}: {
+  fixture: Fixture;
+  selectedDate: string;
+  searchTerm: string;
+}) {
   const matchId = fixture.matchUrl.split('/').pop() ?? fixture.matchUrl;
   const fixtureId = Number(matchId.match(/\d+/)?.[0]);
+  const returnParams = new URLSearchParams({
+    date: selectedDate,
+    competition: fixture.competition,
+  });
+  if (searchTerm.trim()) returnParams.set('search', searchTerm.trim());
+  const detailsHref = Number.isFinite(fixtureId)
+    ? `/matches/${fixtureId}?${returnParams.toString()}`
+    : '/fixtures';
   const hasScore = fixture.homeScore !== null && fixture.awayScore !== null;
   const status = fixture.status.trim() || 'Scheduled';
   const statusLower = status.toLowerCase();
@@ -116,7 +148,7 @@ function FixtureRow({ fixture }: { fixture: Fixture }) {
   const isComplete = statusLower.includes('full') || statusLower.includes('finished') || statusLower.includes('ft');
 
   return (
-    <Link href={Number.isFinite(fixtureId) ? `/matches/${fixtureId}` : '/fixtures'} className="group grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-4 border-b border-[#e7e5dc] px-4 py-4 transition-colors last:border-b-0 hover:bg-[#fbfaf5] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d96f51] sm:grid-cols-[minmax(86px,.45fr)_minmax(250px,1.35fr)_minmax(130px,.7fr)_auto] sm:gap-5 sm:px-5" data-testid={`fixture-row-${matchId}`} aria-label={`View ${fixture.homeTeam} versus ${fixture.awayTeam} match details`}>
+    <Link href={detailsHref} className="group grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-4 border-b border-[#e7e5dc] px-4 py-4 transition-colors last:border-b-0 hover:bg-[#fbfaf5] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d96f51] sm:grid-cols-[minmax(86px,.45fr)_minmax(250px,1.35fr)_minmax(130px,.7fr)_auto] sm:gap-5 sm:px-5" data-testid={`fixture-row-${matchId}`} aria-label={`View ${fixture.homeTeam} versus ${fixture.awayTeam} match details`}>
       <div className="min-w-0">
         <p className="mono text-[10px] text-[#8b928a]" data-testid={`text-kickoff-${matchId}`}>{fixture.kickoff}</p>
       </div>
@@ -152,19 +184,31 @@ function FixtureRow({ fixture }: { fixture: Fixture }) {
 }
 
 export default function FixturesPage() {
-  const [selectedDate, setSelectedDate] = useState(() => getLocalDateString());
-  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedDate, setSelectedDate] = useState(() => fixtureListContext().date);
+  const [searchTerm, setSearchTerm] = useState(() => fixtureListContext().search);
+  const [selectedCompetition, setSelectedCompetition] = useState(() => fixtureListContext().competition);
   const fixturesQuery = useGetFootballFixtures({ date: selectedDate });
   const data = fixturesQuery.data;
   const normalizedSearch = normalizeSearchTerm(searchTerm);
   const allFixtures = data?.fixtures ?? [];
-  const filteredFixtures = normalizedSearch
-    ? allFixtures.filter((fixture) =>
-        normalizeSearchTerm(
-          `${fixture.homeTeam} vs ${fixture.awayTeam} ${fixture.competition}`,
-        ).includes(normalizedSearch),
-      )
-    : allFixtures;
+  const competitions = Array.from(new Set(allFixtures.map((fixture) => fixture.competition))).sort((a, b) => a.localeCompare(b));
+  const filteredFixtures = allFixtures.filter((fixture) => {
+    const matchesSearch = !normalizedSearch || normalizeSearchTerm(
+      `${fixture.homeTeam} vs ${fixture.awayTeam} ${fixture.competition}`,
+    ).includes(normalizedSearch);
+    return matchesSearch && (!selectedCompetition || fixture.competition === selectedCompetition);
+  });
+
+  useEffect(() => {
+    const params = new URLSearchParams({ date: selectedDate });
+    if (selectedCompetition) params.set('competition', selectedCompetition);
+    if (searchTerm.trim()) params.set('search', searchTerm.trim());
+    const nextUrl = `/fixtures?${params.toString()}`;
+    if (`${window.location.pathname}${window.location.search}` !== nextUrl) {
+      window.history.replaceState(window.history.state, '', nextUrl);
+    }
+  }, [selectedDate, selectedCompetition, searchTerm]);
+
   const countryGroups = groupFixturesByCountry(filteredFixtures);
 
   return (
@@ -212,7 +256,10 @@ export default function FixturesPage() {
           <section className="rounded-[15px] border border-[#d8d7ce] bg-[#f9f8f3] p-3 shadow-[0_10px_30px_rgba(47,59,64,.045)] sm:p-4" aria-label="Choose fixture date">
             <label htmlFor="fixtures-date" className="mb-2 block text-[10px] font-extrabold uppercase tracking-[.13em] text-[#687570]">Match date</label>
             <div className="flex items-center gap-1.5">
-              <button type="button" onClick={() => setSelectedDate((date) => shiftDate(date, -1))} className="grid size-10 shrink-0 place-items-center rounded-lg border border-[#deddd4] bg-[#f4f3ed] text-[#64736d] transition hover:bg-[#e9eee8]" aria-label="Previous day" data-testid="button-previous-day">
+              <button type="button" onClick={() => {
+                setSelectedDate((date) => shiftDate(date, -1));
+                setSelectedCompetition('');
+              }} className="grid size-10 shrink-0 place-items-center rounded-lg border border-[#deddd4] bg-[#f4f3ed] text-[#64736d] transition hover:bg-[#e9eee8]" aria-label="Previous day" data-testid="button-previous-day">
                 <ChevronLeft size={17} />
               </button>
               <div className="relative min-w-0 flex-1">
@@ -222,20 +269,29 @@ export default function FixturesPage() {
                   type="date"
                   value={selectedDate}
                   onChange={(event) => {
-                    if (event.target.value) setSelectedDate(event.target.value);
+                    if (event.target.value) {
+                      setSelectedDate(event.target.value);
+                      setSelectedCompetition('');
+                    }
                   }}
                   className="h-10 w-full min-w-0 appearance-none rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] pl-9 pr-2 text-[12px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none focus:ring-2 focus:ring-[#d96f51]/15"
                   aria-label="Select a fixture date"
                   data-testid="input-fixtures-date"
                 />
               </div>
-              <button type="button" onClick={() => setSelectedDate((date) => shiftDate(date, 1))} className="grid size-10 shrink-0 place-items-center rounded-lg border border-[#deddd4] bg-[#f4f3ed] text-[#64736d] transition hover:bg-[#e9eee8]" aria-label="Next day" data-testid="button-next-day">
+              <button type="button" onClick={() => {
+                setSelectedDate((date) => shiftDate(date, 1));
+                setSelectedCompetition('');
+              }} className="grid size-10 shrink-0 place-items-center rounded-lg border border-[#deddd4] bg-[#f4f3ed] text-[#64736d] transition hover:bg-[#e9eee8]" aria-label="Next day" data-testid="button-next-day">
                 <ChevronRight size={17} />
               </button>
             </div>
             <div className="mt-2 flex items-center justify-between gap-3">
               <p className="truncate text-[10px] text-[#858982]" data-testid="text-selected-date">{formatSelectedDate(selectedDate)}</p>
-              <button type="button" onClick={() => setSelectedDate(getLocalDateString())} className="shrink-0 text-[10px] font-extrabold text-[#a36550] hover:text-[#d96f51]" data-testid="button-select-today">Today</button>
+              <button type="button" onClick={() => {
+                setSelectedDate(getLocalDateString());
+                setSelectedCompetition('');
+              }} className="shrink-0 text-[10px] font-extrabold text-[#a36550] hover:text-[#d96f51]" data-testid="button-select-today">Today</button>
             </div>
           </section>
         </div>
@@ -290,8 +346,22 @@ export default function FixturesPage() {
                   </button>
                 )}
               </label>
+              <label className="flex min-h-10 w-full items-center gap-2 text-[10px] font-bold text-[#737d76] sm:w-auto">
+                <span className="shrink-0">Competition</span>
+                <select
+                  value={selectedCompetition}
+                  onChange={(event) => setSelectedCompetition(event.target.value)}
+                  className="h-10 min-w-0 flex-1 rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[11px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none sm:w-[220px]"
+                  aria-label="Filter by competition"
+                  data-testid="select-fixture-competition"
+                >
+                  <option value="">All competitions</option>
+                  {competitions.map((competition) => <option key={competition} value={competition}>{competition}</option>)}
+                </select>
+              </label>
               <p className="text-[10px] text-[#858982]" aria-live="polite">
                 {normalizedSearch
+                  || selectedCompetition
                   ? `${filteredFixtures.length} ${filteredFixtures.length === 1 ? 'match' : 'matches'} found`
                   : 'Search by team or competition'}
               </p>
@@ -336,7 +406,7 @@ export default function FixturesPage() {
                           <span className="text-[10px] font-semibold text-[#858982]">{league.fixtures.length} {league.fixtures.length === 1 ? 'match' : 'matches'}</span>
                         </div>
                         {league.fixtures.map((fixture) => (
-                          <FixtureRow key={fixture.matchUrl} fixture={fixture} />
+                          <FixtureRow key={fixture.matchUrl} fixture={fixture} selectedDate={selectedDate} searchTerm={searchTerm} />
                         ))}
                       </section>
                     ))}

@@ -396,6 +396,8 @@ export const GetFootballProcessedMatchPayloadResponse = zod.object({
 /**
  * @summary List saved pre-match tester records
  */
+export const getFootballTesterMatchesQuerySearchMax = 100;
+
 export const getFootballTesterMatchesQueryLimitDefault = 100;
 export const getFootballTesterMatchesQueryLimitMax = 500;
 
@@ -406,6 +408,7 @@ export const getFootballTesterMatchesQueryOffsetMin = 0;
 
 export const GetFootballTesterMatchesQueryParams = zod.object({
   "date": zod.date().optional(),
+  "search": zod.coerce.string().max(getFootballTesterMatchesQuerySearchMax).optional().describe('Search saved tester matches by team, competition, or fixture ID'),
   "limit": zod.coerce.number().int().min(1).max(getFootballTesterMatchesQueryLimitMax).default(getFootballTesterMatchesQueryLimitDefault),
   "offset": zod.coerce.number().int().min(getFootballTesterMatchesQueryOffsetMin).default(getFootballTesterMatchesQueryOffsetDefault)
 })

@@ -449,6 +449,13 @@ paths:
           schema:
             type: string
             format: date
+        - name: search
+          in: query
+          required: false
+          description: Search saved tester matches by team, competition, or fixture ID
+          schema:
+            type: string
+            maxLength: 100
         - name: limit
           in: query
           required: false

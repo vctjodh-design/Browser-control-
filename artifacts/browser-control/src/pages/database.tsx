@@ -131,6 +131,7 @@ function ArchivePage({ kind }: { kind: ArchiveKind }) {
   const client = useQueryClient();
   const [routeSearch, setRouteSearch] = useState(() => new URLSearchParams(window.location.search));
   const [searchText, setSearchText] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [offset, setOffset] = useState(0);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearError, setClearError] = useState('');
@@ -138,21 +139,37 @@ function ArchivePage({ kind }: { kind: ArchiveKind }) {
   const deleteArchive = useDeleteAllFootballProcessedMatches();
   const deleteTester = useDeleteAllFootballTesterMatches();
   const limit = 50;
-  const params = useMemo(() => ({ limit, offset }), [offset]);
-  const archiveQuery = useGetFootballProcessedMatches(params, {
-    query: { enabled: kind === 'database', queryKey: getGetFootballProcessedMatchesQueryKey(params) },
+  const archiveParams = useMemo(() => ({ limit, offset }), [offset]);
+  const testerParams = useMemo(() => ({
+    limit,
+    offset,
+    ...(debouncedSearch ? { search: debouncedSearch } : {}),
+  }), [debouncedSearch, offset]);
+  const archiveQuery = useGetFootballProcessedMatches(archiveParams, {
+    query: { enabled: kind === 'database', queryKey: getGetFootballProcessedMatchesQueryKey(archiveParams) },
   });
-  const testerQuery = useGetFootballTesterMatches(params, {
-    query: { enabled: kind === 'tester', queryKey: getGetFootballTesterMatchesQueryKey(params) },
+  const testerQuery = useGetFootballTesterMatches(testerParams, {
+    query: { enabled: kind === 'tester', queryKey: getGetFootballTesterMatchesQueryKey(testerParams) },
   });
   const listQuery = kind === 'database' ? archiveQuery : testerQuery;
   const data = listQuery.data;
-  const normalized = searchText.trim().toLocaleLowerCase();
-  const rows = (data?.matches ?? []).filter((match) => `${match.homeTeamName} ${match.awayTeamName} ${match.competition} ${match.fixtureId}`.toLocaleLowerCase().includes(normalized));
+  const normalized = (kind === 'tester' ? debouncedSearch : searchText).trim().toLocaleLowerCase();
+  const rows = (data?.matches ?? []).filter((match) =>
+    kind === 'tester' || `${match.homeTeamName} ${match.awayTeamName} ${match.competition} ${match.fixtureId}`.toLocaleLowerCase().includes(normalized),
+  );
   const selectedFromUrl = Number(routeSearch.get('fixture'));
   const selectedId = Number.isSafeInteger(selectedFromUrl) && selectedFromUrl > 0 ? selectedFromUrl : null;
   const totalSaved = data?.total ?? 0;
   const deletePending = deleteArchive.isPending || deleteTester.isPending;
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedSearch(searchText.trim()), 250);
+    return () => window.clearTimeout(timeout);
+  }, [searchText]);
+
+  useEffect(() => {
+    setOffset(0);
+  }, [debouncedSearch]);
 
   useEffect(() => {
     const syncRouteSearch = () => {
@@ -208,9 +225,28 @@ function ArchivePage({ kind }: { kind: ArchiveKind }) {
       </div>
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(430px,.88fr)]">
         <section className={`overflow-hidden rounded-[17px] border border-[#d6d5cc] bg-[#f9f8f3] shadow-[0_16px_50px_rgba(47,59,64,.055)] ${selectedId ? 'order-2 xl:order-1' : 'order-1'}`} aria-labelledby="archive-heading" data-testid="section-archive-list">
-          <div className="border-b border-[#e1dfd7] bg-[#f4f3ed] px-4 py-4 sm:px-5"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl bg-[#e6eee8] text-[#537867]"><Archive size={16} /></span><div><h2 id="archive-heading" className="text-[14px] font-extrabold text-[#344550]">{kind === 'tester' ? 'Saved pre-match records' : 'Saved match summaries'}</h2><p className="mt-0.5 text-[10px] text-[#858982]" aria-live="polite" data-testid="text-archive-count">{data ? `${data.total} total ${kind === 'tester' ? 'tester records' : 'matches'}` : 'Loading saved records'}</p></div></div></div>
+          <div className="border-b border-[#e1dfd7] bg-[#f4f3ed] px-4 py-4 sm:px-5"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl bg-[#e6eee8] text-[#537867]"><Archive size={16} /></span><div><h2 id="archive-heading" className="text-[14px] font-extrabold text-[#344550]">{kind === 'tester' ? 'Saved pre-match records' : 'Saved match summaries'}</h2><p className="mt-0.5 text-[10px] text-[#858982]" aria-live="polite" data-testid="text-archive-count">{data ? normalized && kind === 'tester' ? `${data.total} matching records` : `${data.total} total ${kind === 'tester' ? 'tester records' : 'matches'}` : 'Loading saved records'}</p></div></div></div>
           <div className="border-b border-[#e8e6de] p-3">
-            <label className="relative"><span className="sr-only">Search teams, competitions or fixture ID</span><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8b928a]" /><input value={searchText} onChange={(e)=>setSearchText(e.target.value)} placeholder="Search teams, competitions, fixture ID" className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] pl-9 pr-9 text-[10px] text-[#47595b] placeholder:text-[#9a9b93]" data-testid="input-database-search" />{searchText && <button type="button" onClick={()=>setSearchText('')} aria-label="Clear search" className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-[#78817b] hover:bg-[#efeee8]" data-testid="button-clear-search"><X size={13} /></button>}</label>
+            <label className="relative block">
+              <span className="sr-only">{kind === 'tester' ? 'Search saved tester matches' : 'Search teams, competitions or fixture ID'}</span>
+              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8b928a]" />
+              <input
+                value={searchText}
+                onChange={(event) => {
+                  setSearchText(event.target.value);
+                  setOffset(0);
+                }}
+                placeholder={kind === 'tester' ? 'Search saved matches by team, competition, or ID' : 'Search teams, competitions, fixture ID'}
+                className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] pl-9 pr-9 text-[10px] text-[#47595b] placeholder:text-[#9a9b93]"
+                data-testid={kind === 'tester' ? 'input-tester-search' : 'input-database-search'}
+                aria-label={kind === 'tester' ? 'Search saved tester matches' : 'Search saved matches'}
+                autoComplete="off"
+              />
+              {searchText && <button type="button" onClick={() => {
+                setSearchText('');
+                setOffset(0);
+              }} aria-label="Clear search" className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-[#78817b] hover:bg-[#efeee8]" data-testid={kind === 'tester' ? 'button-clear-tester-search' : 'button-clear-search'}><X size={13} /></button>}
+            </label>
           </div>
           {listQuery.isLoading ? <div className="space-y-2 p-3" role="status" aria-label="Loading archive" data-testid="status-archive-loading">{[0,1,2,3,4,5].map(i=><div key={i} className="h-[66px] animate-pulse rounded-lg bg-[#eeede6]" />)}</div>
           : listQuery.isError ? <div className="m-4 rounded-xl border border-[#e3c3b6] bg-[#fff6f0] p-5" role="alert" data-testid="status-archive-error"><div className="flex gap-2 text-[11px] font-bold text-[#784b3e]"><CircleAlert size={15} /> Archive unavailable</div><p className="mt-2 text-[10px] text-[#8c6b5e]">{errorText(listQuery.error)}</p><button onClick={()=>void listQuery.refetch()} className="mt-3 inline-flex items-center gap-2 text-[10px] font-extrabold text-[#855542]" data-testid="button-retry-archive"><RefreshCw size={12} /> Retry</button></div>
@@ -218,7 +254,7 @@ function ArchivePage({ kind }: { kind: ArchiveKind }) {
             <span className="min-w-0"><span className="flex flex-wrap items-center gap-1.5"><span className="truncate text-[10px] font-extrabold text-[#455951]">{match.homeTeamName} <span className="font-medium text-[#9a9a90]">vs</span> {match.awayTeamName}</span><span className={`rounded-full px-1.5 py-0.5 text-[7px] font-extrabold uppercase ${match.completeness === 'complete' ? 'bg-[#e5eee7] text-[#4e755c]' : 'bg-[#fbf1df] text-[#986b32]'}`}>{match.completeness}</span></span><span className="mt-1 block truncate text-[8px] text-[#92958c]">{dateLabel(match.date)} · {match.competition} · #{match.fixtureId}</span><span className="mt-1 block text-[8px] text-[#899087]">{match.issueCount} issues · league avg {match.leagueAverageGoals === null ? 'unavailable' : match.leagueAverageGoals.toFixed(2)}</span></span>
             <span className="flex items-center gap-2"><span className="mono text-[13px] font-medium text-[#344c43]">{kind === 'database' ? score(match as FootballProcessedMatchSummary) : 'PRE-MATCH'}</span><ChevronRight size={14} className="text-[#9a9c92]" /></span>
           </button>)}</div>
-          <div className="flex items-center justify-between gap-3 border-t border-[#e8e6de] bg-[#f5f4ed] px-4 py-3"><span className="text-[9px] text-[#858982]">Showing {offset + 1}–{Math.min(offset + limit, data?.total ?? 0)} of {data?.total ?? 0}{normalized ? ' on this page' : ''}</span><div className="flex gap-1"><button type="button" onClick={()=>setOffset((value)=>Math.max(0,value-limit))} disabled={offset===0} className="rounded-md border border-[#d8d7ce] bg-[#fbfaf6] px-2.5 py-1.5 text-[9px] font-bold disabled:opacity-40" data-testid="button-previous-page">Previous</button><button type="button" onClick={()=>setOffset((value)=>value+limit)} disabled={offset+limit >= (data?.total ?? 0)} className="rounded-md border border-[#d8d7ce] bg-[#fbfaf6] px-2.5 py-1.5 text-[9px] font-bold disabled:opacity-40" data-testid="button-next-page">Next</button></div></div></>
+          <div className="flex items-center justify-between gap-3 border-t border-[#e8e6de] bg-[#f5f4ed] px-4 py-3"><span className="text-[9px] text-[#858982]">Showing {offset + 1}–{Math.min(offset + rows.length, data?.total ?? 0)} of {data?.total ?? 0}{normalized && kind === 'tester' ? ' matching records' : normalized ? ' on this page' : ''}</span><div className="flex gap-1"><button type="button" onClick={()=>setOffset((value)=>Math.max(0,value-limit))} disabled={offset===0} className="rounded-md border border-[#d8d7ce] bg-[#fbfaf6] px-2.5 py-1.5 text-[9px] font-bold disabled:opacity-40" data-testid="button-previous-page">Previous</button><button type="button" onClick={()=>setOffset((value)=>value+limit)} disabled={offset+limit >= (data?.total ?? 0)} className="rounded-md border border-[#d8d7ce] bg-[#fbfaf6] px-2.5 py-1.5 text-[9px] font-bold disabled:opacity-40" data-testid="button-next-page">Next</button></div></div></>
           : <div className="flex min-h-[290px] flex-col items-center justify-center px-6 py-12 text-center" data-testid="status-archive-empty"><span className="grid size-12 place-items-center rounded-2xl border border-[#dfe4dc] bg-[#edf2ec] text-[#718879]"><Database size={20} /></span><h3 className="mt-4 text-[15px] font-extrabold text-[#354750]">{normalized ? 'No matching records' : kind === 'tester' ? 'No pre-match records yet' : 'Archive is empty'}</h3><p className="mt-2 max-w-[320px] text-[10px] leading-5 text-[#858982]">{normalized ? 'Try a different team, competition or fixture ID.' : kind === 'tester' ? 'Choose a past match day in Processing to build pre-match records for every fixture.' : 'Completed match days imported through Processing will appear here. No records are fabricated or inferred.'}</p>{normalized && <button type="button" onClick={()=>setSearchText('')} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#253746] px-3 py-2 text-[9px] font-extrabold text-[#f8f2e7]" data-testid="button-reset-search"><X size={12} /> Clear search</button>}</div>}
         </section>
         <div ref={detailRef} className={`min-w-0 scroll-mt-4 ${selectedId ? 'order-1 xl:order-2' : 'order-2'}`}><DetailPanel fixtureId={selectedId} kind={kind} /></div>
