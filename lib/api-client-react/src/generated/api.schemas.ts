@@ -64,6 +64,94 @@ export interface FootballProcessingJobLookup {
   job: FootballProcessingJob | null;
 }
 
+export type FootballModelType = typeof FootballModelType[keyof typeof FootballModelType];
+
+
+export const FootballModelType = {
+  lstm: 'lstm',
+  gru: 'gru',
+  transformer: 'transformer',
+  gnn: 'gnn',
+  'dynamic-graph': 'dynamic-graph',
+} as const;
+
+export interface FootballModelTrainingInput {
+  modelType: FootballModelType;
+  /**
+     * @minimum 5
+     * @maximum 100
+     */
+  epochs?: number;
+  /**
+     * @minimum 3
+     * @maximum 15
+     */
+  sequenceLength?: number;
+  /**
+     * @minimum 4
+     * @maximum 64
+     */
+  hiddenUnits?: number;
+}
+
+export type FootballModelTrainingStatus = typeof FootballModelTrainingStatus[keyof typeof FootballModelTrainingStatus];
+
+
+export const FootballModelTrainingStatus = {
+  queued: 'queued',
+  training: 'training',
+  completed: 'completed',
+  failed: 'failed',
+} as const;
+
+export interface FootballModelTrainingRun {
+  id: string;
+  modelType: FootballModelType;
+  status: FootballModelTrainingStatus;
+  epochs: number;
+  completedEpochs: number;
+  sequenceLength: number;
+  hiddenUnits: number;
+  sampleCount: number;
+  trainingSampleCount: number;
+  validationSampleCount: number;
+  verifiedOddsFixtureCount: number;
+  /** @nullable */
+  accuracy: number | null;
+  /** @nullable */
+  baselineAccuracy: number | null;
+  /** @nullable */
+  logLoss: number | null;
+  /** @nullable */
+  brierScore: number | null;
+  confusionMatrix: number[][];
+  trainingLoss: number[];
+  validationLoss: number[];
+  hasSavedWeights: boolean;
+  /** @nullable */
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FootballModelTrainingOutcomeCounts {
+  home: number;
+  draw: number;
+  away: number;
+}
+
+export interface FootballModelTrainingDashboard {
+  matchCount: number;
+  teamCount: number;
+  /** @nullable */
+  firstMatchDate: string | null;
+  /** @nullable */
+  lastMatchDate: string | null;
+  outcomeCounts: FootballModelTrainingOutcomeCounts;
+  verifiedOddsFixtureCount: number;
+  runs: FootballModelTrainingRun[];
+}
+
 export interface DeleteFootballProcessedMatchesResponse {
   /** @minimum 0 */
   deletedCount: number;

@@ -237,6 +237,80 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballFixtureError"
+  /football/model-training:
+    get:
+      operationId: getFootballModelTrainingDashboard
+      tags: [model-training]
+      summary: Get the archived match dataset summary and recent training runs
+      responses:
+        "200":
+          description: Dataset coverage and recent model training runs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballModelTrainingDashboard"
+  /football/model-training/runs:
+    post:
+      operationId: startFootballModelTraining
+      tags: [model-training]
+      summary: Train a football outcome model from archived matches
+      description: Starts chronological holdout training using only information available before each archived match
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FootballModelTrainingInput"
+      responses:
+        "202":
+          description: Training run queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballModelTrainingRun"
+        "400":
+          description: Invalid training configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "409":
+          description: Another model is currently training
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "422":
+          description: The archive does not contain enough eligible matches
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+  /football/model-training/runs/{runId}:
+    get:
+      operationId: getFootballModelTrainingRun
+      tags: [model-training]
+      summary: Get a model training run and its evaluation
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Training run details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballModelTrainingRun"
+        "404":
+          description: Training run was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
   /football/processed-matches:
     get:
       operationId: getFootballProcessedMatches
@@ -1005,6 +1079,153 @@ components:
             - $ref: "#/components/schemas/FootballProcessingJob"
             - type: "null"
       required: [job]
+    FootballModelType:
+      type: string
+      enum: [lstm, gru, transformer, gnn, dynamic-graph]
+    FootballModelTrainingInput:
+      type: object
+      properties:
+        modelType:
+          $ref: "#/components/schemas/FootballModelType"
+        epochs:
+          type: integer
+          minimum: 5
+          maximum: 100
+          default: 24
+        sequenceLength:
+          type: integer
+          minimum: 3
+          maximum: 15
+          default: 10
+        hiddenUnits:
+          type: integer
+          minimum: 4
+          maximum: 64
+          default: 16
+      required: [modelType]
+    FootballModelTrainingStatus:
+      type: string
+      enum: [queued, training, completed, failed]
+    FootballModelTrainingRun:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        modelType:
+          $ref: "#/components/schemas/FootballModelType"
+        status:
+          $ref: "#/components/schemas/FootballModelTrainingStatus"
+        epochs:
+          type: integer
+        completedEpochs:
+          type: integer
+        sequenceLength:
+          type: integer
+        hiddenUnits:
+          type: integer
+        sampleCount:
+          type: integer
+        trainingSampleCount:
+          type: integer
+        validationSampleCount:
+          type: integer
+        verifiedOddsFixtureCount:
+          type: integer
+        accuracy:
+          type: ["number", "null"]
+        baselineAccuracy:
+          type: ["number", "null"]
+        logLoss:
+          type: ["number", "null"]
+        brierScore:
+          type: ["number", "null"]
+        confusionMatrix:
+          type: array
+          items:
+            type: array
+            items:
+              type: integer
+        trainingLoss:
+          type: array
+          items:
+            type: number
+        validationLoss:
+          type: array
+          items:
+            type: number
+        hasSavedWeights:
+          type: boolean
+        error:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - modelType
+        - status
+        - epochs
+        - completedEpochs
+        - sequenceLength
+        - hiddenUnits
+        - sampleCount
+        - trainingSampleCount
+        - validationSampleCount
+        - verifiedOddsFixtureCount
+        - accuracy
+        - baselineAccuracy
+        - logLoss
+        - brierScore
+        - confusionMatrix
+        - trainingLoss
+        - validationLoss
+        - hasSavedWeights
+        - error
+        - createdAt
+        - updatedAt
+    FootballModelTrainingOutcomeCounts:
+      type: object
+      properties:
+        home:
+          type: integer
+        draw:
+          type: integer
+        away:
+          type: integer
+      required: [home, draw, away]
+    FootballModelTrainingDashboard:
+      type: object
+      properties:
+        matchCount:
+          type: integer
+        teamCount:
+          type: integer
+        firstMatchDate:
+          type: ["string", "null"]
+          format: date
+        lastMatchDate:
+          type: ["string", "null"]
+          format: date
+        outcomeCounts:
+          $ref: "#/components/schemas/FootballModelTrainingOutcomeCounts"
+        verifiedOddsFixtureCount:
+          type: integer
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballModelTrainingRun"
+      required:
+        - matchCount
+        - teamCount
+        - firstMatchDate
+        - lastMatchDate
+        - outcomeCounts
+        - verifiedOddsFixtureCount
+        - runs
     DeleteFootballProcessedMatchesResponse:
       type: object
       properties:

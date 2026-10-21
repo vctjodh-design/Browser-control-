@@ -160,6 +160,131 @@ export const StartFootballTesterProcessingResponse = zod.object({
 
 
 /**
+ * @summary Get the archived match dataset summary and recent training runs
+ */
+export const GetFootballModelTrainingDashboardResponse = zod.object({
+  "matchCount": zod.number().int(),
+  "teamCount": zod.number().int(),
+  "firstMatchDate": zod.coerce.date().nullable(),
+  "lastMatchDate": zod.coerce.date().nullable(),
+  "outcomeCounts": zod.object({
+  "home": zod.number().int(),
+  "draw": zod.number().int(),
+  "away": zod.number().int()
+}),
+  "verifiedOddsFixtureCount": zod.number().int(),
+  "runs": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph']),
+  "status": zod.enum(['queued', 'training', 'completed', 'failed']),
+  "epochs": zod.number().int(),
+  "completedEpochs": zod.number().int(),
+  "sequenceLength": zod.number().int(),
+  "hiddenUnits": zod.number().int(),
+  "sampleCount": zod.number().int(),
+  "trainingSampleCount": zod.number().int(),
+  "validationSampleCount": zod.number().int(),
+  "verifiedOddsFixtureCount": zod.number().int(),
+  "accuracy": zod.number().nullable(),
+  "baselineAccuracy": zod.number().nullable(),
+  "logLoss": zod.number().nullable(),
+  "brierScore": zod.number().nullable(),
+  "confusionMatrix": zod.array(zod.array(zod.number().int())),
+  "trainingLoss": zod.array(zod.number()),
+  "validationLoss": zod.array(zod.number()),
+  "hasSavedWeights": zod.boolean(),
+  "error": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * Starts chronological holdout training using only information available before each archived match
+ * @summary Train a football outcome model from archived matches
+ */
+export const startFootballModelTrainingBodyEpochsDefault = 24;
+export const startFootballModelTrainingBodyEpochsMin = 5;
+export const startFootballModelTrainingBodyEpochsMax = 100;
+
+export const startFootballModelTrainingBodySequenceLengthDefault = 10;
+export const startFootballModelTrainingBodySequenceLengthMin = 3;
+export const startFootballModelTrainingBodySequenceLengthMax = 15;
+
+export const startFootballModelTrainingBodyHiddenUnitsDefault = 16;
+export const startFootballModelTrainingBodyHiddenUnitsMin = 4;
+export const startFootballModelTrainingBodyHiddenUnitsMax = 64;
+
+
+
+export const StartFootballModelTrainingBody = zod.object({
+  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph']),
+  "epochs": zod.number().int().min(startFootballModelTrainingBodyEpochsMin).max(startFootballModelTrainingBodyEpochsMax).default(startFootballModelTrainingBodyEpochsDefault),
+  "sequenceLength": zod.number().int().min(startFootballModelTrainingBodySequenceLengthMin).max(startFootballModelTrainingBodySequenceLengthMax).default(startFootballModelTrainingBodySequenceLengthDefault),
+  "hiddenUnits": zod.number().int().min(startFootballModelTrainingBodyHiddenUnitsMin).max(startFootballModelTrainingBodyHiddenUnitsMax).default(startFootballModelTrainingBodyHiddenUnitsDefault)
+})
+
+export const StartFootballModelTrainingResponse = zod.object({
+  "id": zod.string().uuid(),
+  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph']),
+  "status": zod.enum(['queued', 'training', 'completed', 'failed']),
+  "epochs": zod.number().int(),
+  "completedEpochs": zod.number().int(),
+  "sequenceLength": zod.number().int(),
+  "hiddenUnits": zod.number().int(),
+  "sampleCount": zod.number().int(),
+  "trainingSampleCount": zod.number().int(),
+  "validationSampleCount": zod.number().int(),
+  "verifiedOddsFixtureCount": zod.number().int(),
+  "accuracy": zod.number().nullable(),
+  "baselineAccuracy": zod.number().nullable(),
+  "logLoss": zod.number().nullable(),
+  "brierScore": zod.number().nullable(),
+  "confusionMatrix": zod.array(zod.array(zod.number().int())),
+  "trainingLoss": zod.array(zod.number()),
+  "validationLoss": zod.array(zod.number()),
+  "hasSavedWeights": zod.boolean(),
+  "error": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Get a model training run and its evaluation
+ */
+export const GetFootballModelTrainingRunParams = zod.object({
+  "runId": zod.coerce.string().uuid()
+})
+
+export const GetFootballModelTrainingRunResponse = zod.object({
+  "id": zod.string().uuid(),
+  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph']),
+  "status": zod.enum(['queued', 'training', 'completed', 'failed']),
+  "epochs": zod.number().int(),
+  "completedEpochs": zod.number().int(),
+  "sequenceLength": zod.number().int(),
+  "hiddenUnits": zod.number().int(),
+  "sampleCount": zod.number().int(),
+  "trainingSampleCount": zod.number().int(),
+  "validationSampleCount": zod.number().int(),
+  "verifiedOddsFixtureCount": zod.number().int(),
+  "accuracy": zod.number().nullable(),
+  "baselineAccuracy": zod.number().nullable(),
+  "logLoss": zod.number().nullable(),
+  "brierScore": zod.number().nullable(),
+  "confusionMatrix": zod.array(zod.array(zod.number().int())),
+  "trainingLoss": zod.array(zod.number()),
+  "validationLoss": zod.array(zod.number()),
+  "hasSavedWeights": zod.boolean(),
+  "error": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
  * @summary List saved match records
  */
 export const getFootballProcessedMatchesQueryLimitDefault = 100;

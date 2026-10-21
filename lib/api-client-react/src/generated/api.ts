@@ -33,6 +33,9 @@ import type {
   FootballMatchDetails,
   FootballMatchLastFive,
   FootballMatchTmpContext,
+  FootballModelTrainingDashboard,
+  FootballModelTrainingInput,
+  FootballModelTrainingRun,
   FootballProcessedMatchPayload,
   FootballProcessedMatchSummary,
   FootballProcessedMatches,
@@ -666,6 +669,249 @@ export const useStartFootballTesterProcessing = <TError = ErrorType<FootballFixt
       > => {
       return useMutation(getStartFootballTesterProcessingMutationOptions(options));
     }
+
+export const getGetFootballModelTrainingDashboardUrl = () => {
+
+
+
+
+  return `/api/football/model-training`
+}
+
+/**
+ * @summary Get the archived match dataset summary and recent training runs
+ */
+export const getFootballModelTrainingDashboard = async ( options?: Parameters<typeof customFetch>[1]): Promise<FootballModelTrainingDashboard> => {
+
+  return customFetch<FootballModelTrainingDashboard>(getGetFootballModelTrainingDashboardUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballModelTrainingDashboardQueryKey = () => {
+    return [
+    `/api/football/model-training`
+    ] as const;
+    }
+
+
+export const getGetFootballModelTrainingDashboardQueryOptions = <TData = Awaited<ReturnType<typeof getFootballModelTrainingDashboard>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballModelTrainingDashboard>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballModelTrainingDashboardQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballModelTrainingDashboard>>> = ({ signal }) => getFootballModelTrainingDashboard({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballModelTrainingDashboard>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballModelTrainingDashboardQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballModelTrainingDashboard>>>
+export type GetFootballModelTrainingDashboardQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the archived match dataset summary and recent training runs
+ */
+
+export function useGetFootballModelTrainingDashboard<TData = Awaited<ReturnType<typeof getFootballModelTrainingDashboard>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballModelTrainingDashboard>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballModelTrainingDashboardQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getStartFootballModelTrainingUrl = () => {
+
+
+
+
+  return `/api/football/model-training/runs`
+}
+
+/**
+ * Starts chronological holdout training using only information available before each archived match
+ * @summary Train a football outcome model from archived matches
+ */
+export const startFootballModelTraining = async (footballModelTrainingInput: FootballModelTrainingInput, options?: Parameters<typeof customFetch>[1]): Promise<FootballModelTrainingRun> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<FootballModelTrainingRun>(getStartFootballModelTrainingUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(footballModelTrainingInput)
+  }
+);}
+
+
+
+
+
+export const getStartFootballModelTrainingMutationKey = () => ['startFootballModelTraining'] as const;
+
+export const getStartFootballModelTrainingMutationOptions = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startFootballModelTraining>>, TError,StartFootballModelTrainingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startFootballModelTraining>>, TError,StartFootballModelTrainingMutationVariables, TContext> => {
+
+const mutationKey = getStartFootballModelTrainingMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startFootballModelTraining>>, StartFootballModelTrainingMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  startFootballModelTraining(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartFootballModelTrainingMutationResult = NonNullable<Awaited<ReturnType<typeof startFootballModelTraining>>>
+    export type StartFootballModelTrainingMutationBody = BodyType<FootballModelTrainingInput>
+    export type StartFootballModelTrainingMutationError = ErrorType<FootballFixtureError>
+    export type StartFootballModelTrainingMutationVariables = {data: BodyType<FootballModelTrainingInput>}
+
+    /**
+ * @summary Train a football outcome model from archived matches
+ */
+export const useStartFootballModelTraining = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startFootballModelTraining>>, TError,StartFootballModelTrainingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startFootballModelTraining>>,
+        TError,
+        StartFootballModelTrainingMutationVariables,
+        TContext
+      > => {
+      return useMutation(getStartFootballModelTrainingMutationOptions(options));
+    }
+
+export const getGetFootballModelTrainingRunUrl = (runId: string,) => {
+
+
+
+
+  return `/api/football/model-training/runs/${runId}`
+}
+
+/**
+ * @summary Get a model training run and its evaluation
+ */
+export const getFootballModelTrainingRun = async (runId: string, options?: Parameters<typeof customFetch>[1]): Promise<FootballModelTrainingRun> => {
+
+  return customFetch<FootballModelTrainingRun>(getGetFootballModelTrainingRunUrl(runId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballModelTrainingRunQueryKey = (runId: string,) => {
+    return [
+    `/api/football/model-training/runs/${runId}`
+    ] as const;
+    }
+
+
+export const getGetFootballModelTrainingRunQueryOptions = <TData = Awaited<ReturnType<typeof getFootballModelTrainingRun>>, TError = ErrorType<FootballFixtureError>>(runId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballModelTrainingRun>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballModelTrainingRunQueryKey(runId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballModelTrainingRun>>> = ({ signal }) => getFootballModelTrainingRun(runId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: runId !== null && runId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballModelTrainingRun>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballModelTrainingRunQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballModelTrainingRun>>>
+export type GetFootballModelTrainingRunQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary Get a model training run and its evaluation
+ */
+
+export function useGetFootballModelTrainingRun<TData = Awaited<ReturnType<typeof getFootballModelTrainingRun>>, TError = ErrorType<FootballFixtureError>>(
+ runId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballModelTrainingRun>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballModelTrainingRunQueryOptions(runId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetFootballProcessedMatchesUrl = (params?: GetFootballProcessedMatchesParams,) => {
   const normalizedParams = new URLSearchParams();

@@ -11,6 +11,10 @@ import type {
   FootballTesterMatchSummary,
   FootballProcessingJob,
   FootballProcessingJobStatus,
+  FootballModelTrainingInput,
+  FootballModelTrainingRun,
+  FootballModelTrainingStatus,
+  FootballModelType,
 } from "@workspace/api-zod";
 
 type SqlRow = Record<string, SQLOutputValue>;
@@ -107,6 +111,34 @@ database.exec(`
     ON tester_matches(calendar_date, match_date DESC);
   CREATE INDEX IF NOT EXISTS tester_matches_competition
     ON tester_matches(competition, match_date DESC);
+
+  CREATE TABLE IF NOT EXISTS model_training_runs (
+    id TEXT PRIMARY KEY,
+    model_type TEXT NOT NULL CHECK (model_type IN ('lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph')),
+    status TEXT NOT NULL CHECK (status IN ('queued', 'training', 'completed', 'failed')),
+    epochs INTEGER NOT NULL,
+    completed_epochs INTEGER NOT NULL DEFAULT 0,
+    sequence_length INTEGER NOT NULL,
+    hidden_units INTEGER NOT NULL,
+    sample_count INTEGER NOT NULL DEFAULT 0,
+    training_sample_count INTEGER NOT NULL DEFAULT 0,
+    validation_sample_count INTEGER NOT NULL DEFAULT 0,
+    verified_odds_fixture_count INTEGER NOT NULL DEFAULT 0,
+    accuracy REAL,
+    baseline_accuracy REAL,
+    log_loss REAL,
+    brier_score REAL,
+    confusion_json TEXT NOT NULL DEFAULT '[[0,0,0],[0,0,0],[0,0,0]]',
+    training_loss_json TEXT NOT NULL DEFAULT '[]',
+    validation_loss_json TEXT NOT NULL DEFAULT '[]',
+    weights_json TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS model_training_runs_created
+    ON model_training_runs(created_at DESC);
 `);
 
 const jobColumns = database
@@ -141,6 +173,15 @@ database
        AND error = 'Processing stopped when the API server restarted. Start the date again to retry.'`,
   )
   .run();
+database
+  .prepare(
+    `UPDATE model_training_runs
+     SET status = 'failed',
+         error = 'Training was interrupted when the API server restarted. Start a new run to continue.',
+         updated_at = ?
+     WHERE status IN ('queued', 'training')`,
+  )
+  .run(new Date().toISOString());
 
 function numberValue(value: SQLOutputValue): number {
   return typeof value === "number" ? value : Number(value ?? 0);
@@ -358,6 +399,237 @@ export function listProcessedFixtureIds(
     .prepare(`SELECT fixture_id FROM ${table} WHERE calendar_date = ?`)
     .all(calendarDate) as SqlRow[];
   return rows.map((row) => numberValue(row.fixture_id));
+}
+
+export type ModelTrainingMatch = {
+  fixtureId: number;
+  calendarDate: string;
+  matchDate: string;
+  competition: string;
+  season: number | null;
+  homeTeamName: string;
+  awayTeamName: string;
+  homeScore: number;
+  awayScore: number;
+  tmpJson: string;
+};
+
+function storedJson<T>(value: SQLOutputValue, fallback: T): T {
+  try {
+    return JSON.parse(stringValue(value)) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function modelTrainingRunFromRow(row: SqlRow): FootballModelTrainingRun {
+  return {
+    id: stringValue(row.id),
+    modelType: stringValue(row.model_type) as FootballModelType,
+    status: stringValue(row.status) as FootballModelTrainingStatus,
+    epochs: numberValue(row.epochs),
+    completedEpochs: numberValue(row.completed_epochs),
+    sequenceLength: numberValue(row.sequence_length),
+    hiddenUnits: numberValue(row.hidden_units),
+    sampleCount: numberValue(row.sample_count),
+    trainingSampleCount: numberValue(row.training_sample_count),
+    validationSampleCount: numberValue(row.validation_sample_count),
+    verifiedOddsFixtureCount: numberValue(row.verified_odds_fixture_count),
+    accuracy: nullableNumber(row.accuracy),
+    baselineAccuracy: nullableNumber(row.baseline_accuracy),
+    logLoss: nullableNumber(row.log_loss),
+    brierScore: nullableNumber(row.brier_score),
+    confusionMatrix: storedJson<number[][]>(row.confusion_json, [[0, 0, 0], [0, 0, 0], [0, 0, 0]]),
+    trainingLoss: storedJson<number[]>(row.training_loss_json, []),
+    validationLoss: storedJson<number[]>(row.validation_loss_json, []),
+    hasSavedWeights: nullableString(row.weights_json) !== null,
+    error: nullableString(row.error),
+    createdAt: new Date(stringValue(row.created_at)),
+    updatedAt: new Date(stringValue(row.updated_at)),
+  };
+}
+
+export function listModelTrainingMatches(limit = 10_000): ModelTrainingMatch[] {
+  const safeLimit = Math.min(10_000, Math.max(1, Math.trunc(limit)));
+  const rows = database
+    .prepare(
+      `SELECT fixture_id, calendar_date, match_date, competition, season,
+              home_team_name, away_team_name, home_score, away_score, tmp_json
+       FROM (
+         SELECT fixture_id, calendar_date, match_date, competition, season,
+                home_team_name, away_team_name, home_score, away_score, tmp_json
+         FROM processed_matches
+         WHERE home_score IS NOT NULL AND away_score IS NOT NULL
+           AND actual_outcome IS NOT NULL
+         ORDER BY calendar_date DESC, match_date DESC, fixture_id DESC
+         LIMIT ?
+       )
+       ORDER BY calendar_date ASC, match_date ASC, fixture_id ASC`,
+    )
+    .all(safeLimit) as SqlRow[];
+  return rows.map((row) => ({
+    fixtureId: numberValue(row.fixture_id),
+    calendarDate: stringValue(row.calendar_date),
+    matchDate: stringValue(row.match_date),
+    competition: stringValue(row.competition),
+    season: nullableNumber(row.season),
+    homeTeamName: stringValue(row.home_team_name),
+    awayTeamName: stringValue(row.away_team_name),
+    homeScore: numberValue(row.home_score),
+    awayScore: numberValue(row.away_score),
+    tmpJson: stringValue(row.tmp_json),
+  }));
+}
+
+export function listModelTrainingRuns(limit = 10): FootballModelTrainingRun[] {
+  const safeLimit = Math.min(50, Math.max(1, Math.trunc(limit)));
+  const rows = database
+    .prepare(
+      "SELECT * FROM model_training_runs ORDER BY created_at DESC LIMIT ?",
+    )
+    .all(safeLimit) as SqlRow[];
+  return rows.map(modelTrainingRunFromRow);
+}
+
+export function getModelTrainingRun(id: string): FootballModelTrainingRun | null {
+  const row = database
+    .prepare("SELECT * FROM model_training_runs WHERE id = ?")
+    .get(id) as SqlRow | undefined;
+  return row ? modelTrainingRunFromRow(row) : null;
+}
+
+export function findActiveModelTrainingRun(): FootballModelTrainingRun | null {
+  const row = database
+    .prepare(
+      `SELECT * FROM model_training_runs
+       WHERE status IN ('queued', 'training')
+       ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get() as SqlRow | undefined;
+  return row ? modelTrainingRunFromRow(row) : null;
+}
+
+export function createModelTrainingRun(
+  input: FootballModelTrainingInput,
+  sampleCount: number,
+): FootballModelTrainingRun {
+  const now = new Date().toISOString();
+  const run: FootballModelTrainingRun = {
+    id: randomUUID(),
+    modelType: input.modelType,
+    status: "queued",
+    epochs: input.epochs ?? 24,
+    completedEpochs: 0,
+    sequenceLength: input.sequenceLength ?? 10,
+    hiddenUnits: input.hiddenUnits ?? 16,
+    sampleCount,
+    trainingSampleCount: 0,
+    validationSampleCount: 0,
+    verifiedOddsFixtureCount: 0,
+    accuracy: null,
+    baselineAccuracy: null,
+    logLoss: null,
+    brierScore: null,
+    confusionMatrix: [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+    trainingLoss: [],
+    validationLoss: [],
+    hasSavedWeights: false,
+    error: null,
+    createdAt: new Date(now),
+    updatedAt: new Date(now),
+  };
+  database
+    .prepare(
+      `INSERT INTO model_training_runs (
+        id, model_type, status, epochs, completed_epochs, sequence_length,
+        hidden_units, sample_count, training_sample_count, validation_sample_count,
+        verified_odds_fixture_count, accuracy, baseline_accuracy, log_loss,
+        brier_score, confusion_json, training_loss_json, validation_loss_json,
+        weights_json, error, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      run.id,
+      run.modelType,
+      run.status,
+      run.epochs,
+      run.completedEpochs,
+      run.sequenceLength,
+      run.hiddenUnits,
+      run.sampleCount,
+      run.trainingSampleCount,
+      run.validationSampleCount,
+      run.verifiedOddsFixtureCount,
+      run.accuracy,
+      run.baselineAccuracy,
+      run.logLoss,
+      run.brierScore,
+      JSON.stringify(run.confusionMatrix),
+      JSON.stringify(run.trainingLoss),
+      JSON.stringify(run.validationLoss),
+      null,
+      run.error,
+      now,
+      now,
+    );
+  return run;
+}
+
+type ModelTrainingRunUpdate = Pick<
+  FootballModelTrainingRun,
+  | "status"
+  | "completedEpochs"
+  | "sampleCount"
+  | "trainingSampleCount"
+  | "validationSampleCount"
+  | "verifiedOddsFixtureCount"
+  | "accuracy"
+  | "baselineAccuracy"
+  | "logLoss"
+  | "brierScore"
+  | "confusionMatrix"
+  | "trainingLoss"
+  | "validationLoss"
+  | "error"
+>;
+
+export function updateModelTrainingRun(
+  id: string,
+  update: ModelTrainingRunUpdate,
+  weightsJson?: string | null,
+): FootballModelTrainingRun | null {
+  const updatedAt = new Date().toISOString();
+  database
+    .prepare(
+      `UPDATE model_training_runs
+       SET status = ?, completed_epochs = ?, sample_count = ?,
+           training_sample_count = ?, validation_sample_count = ?,
+           verified_odds_fixture_count = ?, accuracy = ?, baseline_accuracy = ?,
+           log_loss = ?, brier_score = ?, confusion_json = ?,
+           training_loss_json = ?, validation_loss_json = ?, error = ?,
+           weights_json = COALESCE(?, weights_json), updated_at = ?
+       WHERE id = ?`,
+    )
+    .run(
+      update.status,
+      update.completedEpochs,
+      update.sampleCount,
+      update.trainingSampleCount,
+      update.validationSampleCount,
+      update.verifiedOddsFixtureCount,
+      update.accuracy,
+      update.baselineAccuracy,
+      update.logLoss,
+      update.brierScore,
+      JSON.stringify(update.confusionMatrix),
+      JSON.stringify(update.trainingLoss),
+      JSON.stringify(update.validationLoss),
+      update.error,
+      weightsJson === undefined ? null : weightsJson,
+      updatedAt,
+      id,
+    );
+  return getModelTrainingRun(id);
 }
 
 export function saveProcessedMatch(
