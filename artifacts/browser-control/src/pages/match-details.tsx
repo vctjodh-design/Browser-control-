@@ -251,6 +251,7 @@ export default function MatchDetailsPage() {
           <div className="flex flex-wrap items-center gap-2">
             <Link href="/processing" className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f1f0e9] px-3 text-[10px] font-extrabold text-[#60716a] transition hover:bg-white" data-testid="link-processing">Processing</Link>
             <Link href="/database" className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f1f0e9] px-3 text-[10px] font-extrabold text-[#60716a] transition hover:bg-white" data-testid="link-database">Database</Link>
+            <Link href="/model-training" className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f1f0e9] px-3 text-[10px] font-extrabold text-[#60716a] transition hover:bg-white" data-testid="link-model-training">Model training</Link>
             <Link href="/fixtures" className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f1f0e9] px-3 text-[10px] font-extrabold text-[#60716a] transition hover:bg-white" data-testid="link-back-fixtures"><ArrowLeft size={14} /> All fixtures</Link>
           </div>
         </div>

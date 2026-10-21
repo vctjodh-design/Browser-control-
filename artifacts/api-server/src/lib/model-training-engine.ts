@@ -8,7 +8,7 @@ import type { ModelTrainingMatch } from "./processed-match-store";
 const OUTCOME_INDEX = { home: 0, draw: 1, away: 2 } as const;
 const TEAM_EVENT_FEATURES = 7;
 const SEQUENCE_FEATURES = TEAM_EVENT_FEATURES * 2 + 1;
-const GRAPH_FEATURES = TEAM_EVENT_FEATURES * 5;
+const GRAPH_NODE_COUNT = 4;
 
 type VerifiedOdds = {
   home: number;
@@ -32,6 +32,7 @@ type NeighborEdge = { opponent: string; calendarDate: string };
 type TrainingExample = {
   sequence: number[];
   graph: number[];
+  graphAdjacency: number[];
   label: number;
   hasPriorVerifiedOdds: boolean;
 };
@@ -237,6 +238,28 @@ function neighborSummary(
   );
 }
 
+function neighborEdgeWeight(
+  nodeKey: string,
+  scopeEdges: Map<string, NeighborEdge[]>,
+  targetDate: string,
+  dynamic: boolean,
+): number {
+  let latestDate: string | null = null;
+  for (const edge of scopeEdges.get(nodeKey) ?? []) {
+    if (edge.calendarDate >= targetDate) continue;
+    if (!latestDate || edge.calendarDate > latestDate) latestDate = edge.calendarDate;
+  }
+  if (!latestDate) return 0;
+  if (!dynamic) return 1;
+  const ageDays = Math.max(
+    0,
+    (Date.parse(`${targetDate}T00:00:00.000Z`) -
+      Date.parse(`${latestDate}T00:00:00.000Z`)) /
+      86_400_000,
+  );
+  return Math.exp(-ageDays / 180);
+}
+
 function graphFeatures(
   match: ModelTrainingMatch,
   homeHistory: TeamGame[],
@@ -245,7 +268,7 @@ function graphFeatures(
   scopeEdges: Map<string, NeighborEdge[]>,
   sequenceLength: number,
   dynamic: boolean,
-): number[] {
+): { nodes: number[]; adjacency: number[] } {
   const homeNodeKey = `${match.competition.toLocaleLowerCase()}|${match.season ?? "unknown"}|${normalizeTeamName(match.homeTeamName)}`;
   const awayNodeKey = `${match.competition.toLocaleLowerCase()}|${match.season ?? "unknown"}|${normalizeTeamName(match.awayTeamName)}`;
   const home = teamSummary(homeHistory, sequenceLength);
@@ -266,13 +289,43 @@ function graphFeatures(
     sequenceLength,
     dynamic,
   );
-  return [
+  const nodes = [
     ...home,
     ...away,
     ...homeNeighbors,
     ...awayNeighbors,
-    ...home.map((value, index) => value - away[index]),
   ];
+  const adjacency: number[][] = Array.from(
+    { length: GRAPH_NODE_COUNT },
+    (_, row) => Array.from({ length: GRAPH_NODE_COUNT }, (_, column) =>
+      row === column ? 1 : 0,
+    ),
+  );
+  adjacency[0][1] = 1;
+  adjacency[1][0] = 1;
+  const homeNeighborWeight = neighborEdgeWeight(
+    homeNodeKey,
+    scopeEdges,
+    match.calendarDate,
+    dynamic,
+  );
+  const awayNeighborWeight = neighborEdgeWeight(
+    awayNodeKey,
+    scopeEdges,
+    match.calendarDate,
+    dynamic,
+  );
+  adjacency[0][2] = homeNeighborWeight;
+  adjacency[2][0] = homeNeighborWeight;
+  adjacency[1][3] = awayNeighborWeight;
+  adjacency[3][1] = awayNeighborWeight;
+  for (const row of adjacency) {
+    const degree = row.reduce((sum, weight) => sum + weight, 0);
+    for (let index = 0; index < row.length; index += 1) {
+      row[index] /= degree;
+    }
+  }
+  return { nodes, adjacency: adjacency.flat() };
 }
 
 function labelFor(match: ModelTrainingMatch): number {
@@ -304,17 +357,19 @@ function buildTrainingExamples(
       const awayHistory = histories.get(awayKey) ?? [];
       const oddsInPriorForm = [...homeHistory, ...awayHistory]
         .some((game) => game.odds !== null);
+      const graph = graphFeatures(
+        match,
+        homeHistory,
+        awayHistory,
+        histories,
+        scopeEdges,
+        sequenceLength,
+        modelType === "dynamic-graph",
+      );
       examples.push({
         sequence: sequenceFeatures(homeHistory, awayHistory, sequenceLength),
-        graph: graphFeatures(
-          match,
-          homeHistory,
-          awayHistory,
-          histories,
-          scopeEdges,
-          sequenceLength,
-          modelType === "dynamic-graph",
-        ),
+        graph: graph.nodes,
+        graphAdjacency: graph.adjacency,
         label: labelFor(match),
         hasPriorVerifiedOdds: oddsInPriorForm,
       });
@@ -383,17 +438,52 @@ function normalizeRows(
   });
 }
 
-function denseModel(inputShape: number[], hiddenUnits: number): tf.Sequential {
-  const model = tf.sequential();
-  model.add(tf.layers.dense({
-    units: hiddenUnits,
-    activation: "relu",
-    inputShape,
-  }));
-  model.add(tf.layers.dropout({ rate: 0.12 }));
-  model.add(tf.layers.dense({ units: Math.max(8, Math.floor(hiddenUnits / 2)), activation: "relu" }));
-  model.add(tf.layers.dense({ units: 3, activation: "softmax" }));
-  return model;
+function graphConvolutionModel(hiddenUnits: number): tf.LayersModel {
+  const nodes = tf.input({
+    shape: [GRAPH_NODE_COUNT, TEAM_EVENT_FEATURES],
+    name: "team_nodes",
+  });
+  const adjacency = tf.input({
+    shape: [GRAPH_NODE_COUNT, GRAPH_NODE_COUNT],
+    name: "match_graph_adjacency",
+  });
+  const firstMessages = tf.layers.dot({ axes: [2, 1] }).apply([
+    adjacency,
+    nodes,
+  ]) as tf.SymbolicTensor;
+  const firstSelf = tf.layers
+    .dense({ units: hiddenUnits, activation: "relu" })
+    .apply(nodes) as tf.SymbolicTensor;
+  const firstNeighbor = tf.layers
+    .dense({ units: hiddenUnits, activation: "relu", useBias: false })
+    .apply(firstMessages) as tf.SymbolicTensor;
+  const firstUpdate = tf.layers
+    .add()
+    .apply([firstSelf, firstNeighbor]) as tf.SymbolicTensor;
+
+  const secondMessages = tf.layers.dot({ axes: [2, 1] }).apply([
+    adjacency,
+    firstUpdate,
+  ]) as tf.SymbolicTensor;
+  const secondSelf = tf.layers
+    .dense({ units: hiddenUnits, activation: "relu" })
+    .apply(firstUpdate) as tf.SymbolicTensor;
+  const secondNeighbor = tf.layers
+    .dense({ units: hiddenUnits, activation: "relu", useBias: false })
+    .apply(secondMessages) as tf.SymbolicTensor;
+  const secondUpdate = tf.layers
+    .add()
+    .apply([secondSelf, secondNeighbor]) as tf.SymbolicTensor;
+  const pooled = tf.layers
+    .globalAveragePooling1d()
+    .apply(secondUpdate) as tf.SymbolicTensor;
+  const hidden = tf.layers
+    .dense({ units: hiddenUnits, activation: "relu" })
+    .apply(pooled) as tf.SymbolicTensor;
+  const output = tf.layers
+    .dense({ units: 3, activation: "softmax" })
+    .apply(hidden) as tf.SymbolicTensor;
+  return tf.model({ inputs: [nodes, adjacency], outputs: output });
 }
 
 function attentionModel(sequenceLength: number, hiddenUnits: number): tf.LayersModel {
@@ -427,7 +517,10 @@ function createModel(
   if (modelType === "transformer") {
     return attentionModel(sequenceLength, hiddenUnits);
   }
-  return denseModel([GRAPH_FEATURES], hiddenUnits);
+  if (modelType === "gnn" || modelType === "dynamic-graph") {
+    return graphConvolutionModel(hiddenUnits);
+  }
+  throw new Error(`Unsupported model type: ${modelType}`);
 }
 
 function oneHot(label: number): number[] {
@@ -456,9 +549,12 @@ function metricsFor(
   }
   const trainClassCounts = [0, 0, 0];
   for (const label of trainingLabels) trainClassCounts[label] += 1;
+  const majorityLabel = trainClassCounts.indexOf(Math.max(...trainClassCounts));
   return {
     accuracy: correct / actualLabels.length,
-    baselineAccuracy: Math.max(...trainClassCounts) / actualLabels.length,
+    baselineAccuracy:
+      actualLabels.filter((label) => label === majorityLabel).length /
+      actualLabels.length,
     logLoss: logLoss / actualLabels.length,
     brierScore: brierScore / actualLabels.length,
     confusionMatrix,
@@ -484,13 +580,14 @@ export async function trainArchivedModel(
   const trainingSampleCount = Math.floor(examples.length * 0.8);
   const validationSampleCount = examples.length - trainingSampleCount;
   const sequenceModel = modelType === "lstm" || modelType === "gru" || modelType === "transformer";
-  const featureCount = sequenceModel ? SEQUENCE_FEATURES : GRAPH_FEATURES;
+  const graphModel = modelType === "gnn" || modelType === "dynamic-graph";
+  const featureCount = sequenceModel ? SEQUENCE_FEATURES : TEAM_EVENT_FEATURES;
   const rawRows = examples.map((example) => sequenceModel ? example.sequence : example.graph);
   const normalizedRows = normalizeRows(
     rawRows,
     trainingSampleCount,
     featureCount,
-    sequenceModel ? sequenceLength : undefined,
+    sequenceModel ? sequenceLength : graphModel ? GRAPH_NODE_COUNT : undefined,
   );
   const trainRows = normalizedRows.slice(0, trainingSampleCount);
   const validationRows = normalizedRows.slice(trainingSampleCount);
@@ -498,12 +595,38 @@ export async function trainArchivedModel(
   const validationLabels = examples.slice(trainingSampleCount).map((example) => example.label);
   const trainTargets = tf.tensor2d(trainLabels.map(oneHot), [trainingSampleCount, 3]);
   const validationTargets = tf.tensor2d(validationLabels.map(oneHot), [validationSampleCount, 3]);
-  const trainInputs = sequenceModel
-    ? tf.tensor3d(trainRows.flat(), [trainingSampleCount, sequenceLength, SEQUENCE_FEATURES])
-    : tf.tensor2d(trainRows, [trainingSampleCount, GRAPH_FEATURES]);
-  const validationInputs = sequenceModel
-    ? tf.tensor3d(validationRows.flat(), [validationSampleCount, sequenceLength, SEQUENCE_FEATURES])
-    : tf.tensor2d(validationRows, [validationSampleCount, GRAPH_FEATURES]);
+  const inputSteps = sequenceModel ? sequenceLength : GRAPH_NODE_COUNT;
+  const inputFeatures = sequenceModel ? SEQUENCE_FEATURES : TEAM_EVENT_FEATURES;
+  const trainInputs = tf.tensor3d(
+    trainRows.flat(),
+    [trainingSampleCount, inputSteps, inputFeatures],
+  );
+  const validationInputs = tf.tensor3d(
+    validationRows.flat(),
+    [validationSampleCount, inputSteps, inputFeatures],
+  );
+  const trainAdjacency = graphModel
+    ? tf.tensor3d(
+      examples
+        .slice(0, trainingSampleCount)
+        .flatMap((example) => example.graphAdjacency),
+      [trainingSampleCount, GRAPH_NODE_COUNT, GRAPH_NODE_COUNT],
+    )
+    : undefined;
+  const validationAdjacency = graphModel
+    ? tf.tensor3d(
+      examples
+        .slice(trainingSampleCount)
+        .flatMap((example) => example.graphAdjacency),
+      [validationSampleCount, GRAPH_NODE_COUNT, GRAPH_NODE_COUNT],
+    )
+    : undefined;
+  const modelTrainInputs = graphModel
+    ? [trainInputs, trainAdjacency as tf.Tensor3D]
+    : trainInputs;
+  const modelValidationInputs = graphModel
+    ? [validationInputs, validationAdjacency as tf.Tensor3D]
+    : validationInputs;
   const model = createModel(modelType, sequenceLength, hiddenUnits);
   const trainingLoss: number[] = [];
   const validationLoss: number[] = [];
@@ -513,11 +636,11 @@ export async function trainArchivedModel(
       optimizer: tf.train.adam(0.008),
       loss: "categoricalCrossentropy",
     });
-    await model.fit(trainInputs, trainTargets, {
+    await model.fit(modelTrainInputs, trainTargets, {
       epochs,
       batchSize: Math.min(32, trainingSampleCount),
       shuffle: false,
-      validationData: [validationInputs, validationTargets],
+      validationData: [modelValidationInputs, validationTargets],
       verbose: 0,
       callbacks: [{
         onEpochEnd: async (epoch: number, logs?: { [key: string]: number }) => {
@@ -528,7 +651,7 @@ export async function trainArchivedModel(
       }],
     });
 
-    const prediction = model.predict(validationInputs) as tf.Tensor;
+    const prediction = model.predict(modelValidationInputs) as tf.Tensor;
     const predictionValues = Array.from(await prediction.data());
     prediction.dispose();
     const probabilityRows = Array.from({ length: validationSampleCount }, (_, index) =>
@@ -555,6 +678,8 @@ export async function trainArchivedModel(
     trainTargets.dispose();
     validationInputs.dispose();
     validationTargets.dispose();
+    trainAdjacency?.dispose();
+    validationAdjacency?.dispose();
     model.dispose();
   }
 }

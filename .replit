@@ -22,3 +22,15 @@ timeoutMs = 20000
 [nix]
 channel = "stable-25_05"
 packages = ["glib", "nss", "nspr", "atk", "at-spi2-atk", "cups", "libdrm", "libxkbcommon", "pango", "cairo", "mesa", "alsa-lib", "expat", "xorg.libX11", "xorg.libxcb", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "xorg.libXrender", "xorg.libxshmfence", "fontconfig", "freetype", "gtk3", "libgbm"]
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 80
+
+[[ports]]
+localPort = 24888
+externalPort = 3000

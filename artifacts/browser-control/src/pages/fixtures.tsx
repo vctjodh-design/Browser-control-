@@ -183,7 +183,7 @@ export default function FixturesPage() {
               <p className="mt-0.5 hidden text-[11px] text-[#858780] sm:block">One clear view of football, any day.</p>
             </div>
           </div>
-          <nav aria-label="Main navigation" className="flex items-center gap-1 rounded-xl border border-[#deddd3] bg-[#efeee7] p-1" data-testid="navigation-main">
+          <nav aria-label="Main navigation" className="flex flex-wrap items-center gap-1 rounded-xl border border-[#deddd3] bg-[#efeee7] p-1" data-testid="navigation-main">
             <Link href="/" className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6] hover:text-[#344550]" data-testid="link-browser-home">
               <ArrowLeft size={13} /> <span>Browser</span>
             </Link>
@@ -192,6 +192,7 @@ export default function FixturesPage() {
             </Link>
             <Link href="/processing" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6]" data-testid="link-processing">Processing</Link>
             <Link href="/database" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6]" data-testid="link-database">Database</Link>
+            <Link href="/model-training" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6]" data-testid="link-model-training">Model training</Link>
           </nav>
         </div>
       </header>

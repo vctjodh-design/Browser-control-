@@ -139,6 +139,27 @@ database.exec(`
 
   CREATE INDEX IF NOT EXISTS model_training_runs_created
     ON model_training_runs(created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS model_training_match_index (
+    fixture_id INTEGER PRIMARY KEY,
+    calendar_date TEXT NOT NULL,
+    match_date TEXT NOT NULL,
+    competition TEXT NOT NULL,
+    season INTEGER,
+    home_team_name TEXT NOT NULL,
+    away_team_name TEXT NOT NULL,
+    home_score INTEGER NOT NULL,
+    away_score INTEGER NOT NULL,
+    odds_history_json TEXT NOT NULL DEFAULT '[]'
+  );
+
+  CREATE INDEX IF NOT EXISTS model_training_match_index_date
+    ON model_training_match_index(calendar_date, match_date, fixture_id);
+
+  CREATE TABLE IF NOT EXISTS model_training_index_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    version INTEGER NOT NULL
+  );
 `);
 
 const jobColumns = database
@@ -197,6 +218,115 @@ function nullableNumber(value: SQLOutputValue): number | null {
 
 function nullableString(value: SQLOutputValue): string | null {
   return value === null ? null : stringValue(value);
+}
+
+const VERIFIED_ODDS_HISTORY_SQL = `COALESCE(
+  (
+    SELECT json_group_array(json_object(
+      'fixtureId', json_extract(q.value, '$.fixtureId'),
+      'homeProbability', json_extract(q.value, '$.homeProbability'),
+      'drawProbability', json_extract(q.value, '$.drawProbability'),
+      'awayProbability', json_extract(q.value, '$.awayProbability'),
+      'verifiedBookmakerCount', json_extract(q.value, '$.verifiedBookmakerCount'),
+      'quoteSource', json_extract(q.value, '$.quoteSource')
+    ))
+    FROM json_each(processed_matches.tmp_json, '$.oddsHistory') AS q
+    WHERE json_extract(q.value, '$.quoteSource') = 'verified'
+      AND json_type(q.value, '$.fixtureId') = 'integer'
+      AND json_type(q.value, '$.verifiedBookmakerCount') = 'integer'
+      AND json_extract(q.value, '$.verifiedBookmakerCount') > 0
+      AND json_type(q.value, '$.homeProbability') IN ('integer', 'real')
+      AND json_type(q.value, '$.drawProbability') IN ('integer', 'real')
+      AND json_type(q.value, '$.awayProbability') IN ('integer', 'real')
+      AND json_extract(q.value, '$.homeProbability') >= 0
+      AND json_extract(q.value, '$.drawProbability') >= 0
+      AND json_extract(q.value, '$.awayProbability') >= 0
+      AND (
+        json_extract(q.value, '$.homeProbability') +
+        json_extract(q.value, '$.drawProbability') +
+        json_extract(q.value, '$.awayProbability')
+      ) BETWEEN 0.98 AND 1.02
+  ),
+  '[]'
+)`;
+
+let modelTrainingIndexReady = false;
+
+function ensureModelTrainingMatchIndex(): void {
+  if (modelTrainingIndexReady) return;
+  const state = database
+    .prepare("SELECT version FROM model_training_index_state WHERE id = 1")
+    .get() as SqlRow | undefined;
+  if (numberValue(state?.version ?? 0) < 1) {
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      database.exec("DELETE FROM model_training_match_index");
+      database.prepare(
+        `INSERT INTO model_training_match_index (
+           fixture_id, calendar_date, match_date, competition, season,
+           home_team_name, away_team_name, home_score, away_score,
+           odds_history_json
+         )
+         SELECT fixture_id, calendar_date, match_date, competition, season,
+                home_team_name, away_team_name, home_score, away_score,
+                ${VERIFIED_ODDS_HISTORY_SQL}
+         FROM processed_matches
+         WHERE home_score IS NOT NULL AND away_score IS NOT NULL
+           AND actual_outcome IS NOT NULL`,
+      ).run();
+      database.prepare(
+        `INSERT INTO model_training_index_state (id, version) VALUES (1, 1)
+         ON CONFLICT(id) DO UPDATE SET version = excluded.version`,
+      ).run();
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  modelTrainingIndexReady = true;
+}
+
+function compactVerifiedOddsHistory(
+  quotes: FootballMatchTmpContext["oddsHistory"],
+): string {
+  return JSON.stringify(
+    quotes
+      .filter((quote) => {
+        const probabilities = [
+          quote.homeProbability,
+          quote.drawProbability,
+          quote.awayProbability,
+        ];
+        if (
+          !Number.isSafeInteger(quote.fixtureId) ||
+          quote.quoteSource !== "verified" ||
+          typeof quote.verifiedBookmakerCount !== "number" ||
+          quote.verifiedBookmakerCount <= 0 ||
+          probabilities.some(
+            (value) =>
+              typeof value !== "number" ||
+              !Number.isFinite(value) ||
+              value < 0,
+          )
+        ) {
+          return false;
+        }
+        const total = (probabilities as number[]).reduce(
+          (sum, value) => sum + value,
+          0,
+        );
+        return total >= 0.98 && total <= 1.02;
+      })
+      .map((quote) => ({
+        fixtureId: quote.fixtureId,
+        homeProbability: quote.homeProbability,
+        drawProbability: quote.drawProbability,
+        awayProbability: quote.awayProbability,
+        verifiedBookmakerCount: quote.verifiedBookmakerCount,
+        quoteSource: quote.quoteSource,
+      })),
+  );
 }
 
 function toJob(row: SqlRow | undefined): FootballProcessingJob | null {
@@ -422,7 +552,48 @@ function storedJson<T>(value: SQLOutputValue, fallback: T): T {
   }
 }
 
+function correctedLegacyBaselineAccuracy(
+  trainingSampleCount: number,
+  validationSampleCount: number,
+): number | null {
+  if (trainingSampleCount < 1 || validationSampleCount < 1) return null;
+  ensureModelTrainingMatchIndex();
+  const sampleCount = trainingSampleCount + validationSampleCount;
+  const rows = database
+    .prepare(
+      `SELECT home_score, away_score FROM (
+         SELECT home_score, away_score, calendar_date, match_date, fixture_id
+         FROM model_training_match_index
+         ORDER BY calendar_date DESC, match_date DESC, fixture_id DESC
+         LIMIT ?
+       )
+       ORDER BY calendar_date ASC, match_date ASC, fixture_id ASC`,
+    )
+    .all(sampleCount) as SqlRow[];
+  if (rows.length <= trainingSampleCount) return null;
+  const labels = rows.map((match) => {
+    const home = numberValue(match.home_score);
+    const away = numberValue(match.away_score);
+    return home > away ? 0 : home === away ? 1 : 2;
+  });
+  const trainingLabels = labels.slice(0, trainingSampleCount);
+  const classCounts = [0, 0, 0];
+  for (const label of trainingLabels) classCounts[label] += 1;
+  const majorityLabel = classCounts.indexOf(Math.max(...classCounts));
+  const validationLabels = labels.slice(trainingSampleCount);
+  return validationLabels.filter((label) => label === majorityLabel).length /
+    validationLabels.length;
+}
+
 function modelTrainingRunFromRow(row: SqlRow): FootballModelTrainingRun {
+  const storedBaselineAccuracy = nullableNumber(row.baseline_accuracy);
+  const baselineAccuracy =
+    storedBaselineAccuracy !== null && storedBaselineAccuracy > 1
+      ? correctedLegacyBaselineAccuracy(
+          numberValue(row.training_sample_count),
+          numberValue(row.validation_sample_count),
+        )
+      : storedBaselineAccuracy;
   return {
     id: stringValue(row.id),
     modelType: stringValue(row.model_type) as FootballModelType,
@@ -436,7 +607,7 @@ function modelTrainingRunFromRow(row: SqlRow): FootballModelTrainingRun {
     validationSampleCount: numberValue(row.validation_sample_count),
     verifiedOddsFixtureCount: numberValue(row.verified_odds_fixture_count),
     accuracy: nullableNumber(row.accuracy),
-    baselineAccuracy: nullableNumber(row.baseline_accuracy),
+    baselineAccuracy,
     logLoss: nullableNumber(row.log_loss),
     brierScore: nullableNumber(row.brier_score),
     confusionMatrix: storedJson<number[][]>(row.confusion_json, [[0, 0, 0], [0, 0, 0], [0, 0, 0]]),
@@ -450,17 +621,18 @@ function modelTrainingRunFromRow(row: SqlRow): FootballModelTrainingRun {
 }
 
 export function listModelTrainingMatches(limit = 10_000): ModelTrainingMatch[] {
+  ensureModelTrainingMatchIndex();
   const safeLimit = Math.min(10_000, Math.max(1, Math.trunc(limit)));
   const rows = database
     .prepare(
       `SELECT fixture_id, calendar_date, match_date, competition, season,
-              home_team_name, away_team_name, home_score, away_score, tmp_json
+              home_team_name, away_team_name, home_score, away_score,
+              odds_history_json
        FROM (
          SELECT fixture_id, calendar_date, match_date, competition, season,
-                home_team_name, away_team_name, home_score, away_score, tmp_json
-         FROM processed_matches
-         WHERE home_score IS NOT NULL AND away_score IS NOT NULL
-           AND actual_outcome IS NOT NULL
+                home_team_name, away_team_name, home_score, away_score,
+                odds_history_json
+         FROM model_training_match_index
          ORDER BY calendar_date DESC, match_date DESC, fixture_id DESC
          LIMIT ?
        )
@@ -477,7 +649,7 @@ export function listModelTrainingMatches(limit = 10_000): ModelTrainingMatch[] {
     awayTeamName: stringValue(row.away_team_name),
     homeScore: numberValue(row.home_score),
     awayScore: numberValue(row.away_score),
-    tmpJson: stringValue(row.tmp_json),
+    tmpJson: `{"oddsHistory":${stringValue(row.odds_history_json)}}`,
   }));
 }
 
@@ -695,6 +867,46 @@ export function saveProcessedMatch(
       JSON.stringify(payloads.lastFive),
       JSON.stringify(payloads.tmp),
     );
+  if (
+    summary.homeScore !== null &&
+    summary.awayScore !== null &&
+    summary.actualOutcome !== null
+  ) {
+    database
+      .prepare(
+        `INSERT INTO model_training_match_index (
+           fixture_id, calendar_date, match_date, competition, season,
+           home_team_name, away_team_name, home_score, away_score,
+           odds_history_json
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(fixture_id) DO UPDATE SET
+           calendar_date = excluded.calendar_date,
+           match_date = excluded.match_date,
+           competition = excluded.competition,
+           season = excluded.season,
+           home_team_name = excluded.home_team_name,
+           away_team_name = excluded.away_team_name,
+           home_score = excluded.home_score,
+           away_score = excluded.away_score,
+           odds_history_json = excluded.odds_history_json`,
+      )
+      .run(
+        summary.fixtureId,
+        calendarDate,
+        summary.date.toISOString(),
+        summary.competition,
+        summary.season,
+        summary.homeTeamName,
+        summary.awayTeamName,
+        summary.homeScore,
+        summary.awayScore,
+        compactVerifiedOddsHistory(payloads.tmp.oddsHistory),
+      );
+  } else {
+    database
+      .prepare("DELETE FROM model_training_match_index WHERE fixture_id = ?")
+      .run(summary.fixtureId);
+  }
 }
 
 export function saveTesterMatch(
@@ -820,6 +1032,7 @@ export function getProcessedMatchPayload(
 
 export function deleteAllProcessedMatches(): number {
   const result = database.prepare("DELETE FROM processed_matches").run();
+  database.prepare("DELETE FROM model_training_match_index").run();
   return Number(result.changes);
 }
 

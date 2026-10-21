@@ -45,6 +45,7 @@ import FixturesPage from '@/pages/fixtures';
 import MatchDetailsPage from '@/pages/match-details';
 import ProcessingPage from '@/pages/processing';
 import DatabasePage, { TesterPage } from '@/pages/database';
+import ModelTrainingPage from '@/pages/model-training';
 
 const queryClient = new QueryClient();
 
@@ -439,7 +440,7 @@ function BrowserConsole() {
             </div>
           </div>
           <div className="flex items-center gap-2.5" aria-live="polite">
-            <nav aria-label="Main navigation" className="mr-2 flex items-center gap-1 rounded-xl border border-[#deddd3] bg-[#efeee7] p-1">
+            <nav aria-label="Main navigation" className="mr-2 flex flex-wrap items-center gap-1 rounded-xl border border-[#deddd3] bg-[#efeee7] p-1">
               <Link href="/" aria-current="page" className="inline-flex h-8 items-center gap-2 rounded-lg bg-[#253746] px-3 text-[10px] font-extrabold text-[#f8f2e7] shadow-sm" data-testid="link-browser-home">
                 <Globe2 size={13} /> <span>Browser</span>
               </Link>
@@ -448,6 +449,7 @@ function BrowserConsole() {
               </Link>
               <Link href="/processing" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6] hover:text-[#344550]" data-testid="link-processing">Processing</Link>
               <Link href="/database" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6] hover:text-[#344550]" data-testid="link-database">Database</Link>
+              <Link href="/model-training" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6] hover:text-[#344550]" data-testid="link-model-training">Model training</Link>
             </nav>
             <span className={`relative flex size-2.5 rounded-full ${health.isError ? 'bg-[#c76c5c]' : health.isLoading ? 'bg-[#d59a42]' : 'bg-[#4d997e]'}`}>
               {health.isLoading && <span className="absolute inset-0 animate-ping rounded-full bg-current opacity-30" />}
@@ -824,6 +826,7 @@ function Router() {
         <Route path="/matches/:fixtureId" component={MatchDetailsPage} />
         <Route path="/processing" component={ProcessingPage} />
         <Route path="/database" component={DatabasePage} />
+        <Route path="/model-training" component={ModelTrainingPage} />
         <Route path="/tester" component={TesterPage} />
         <Route component={NotFound} />
       </Switch>

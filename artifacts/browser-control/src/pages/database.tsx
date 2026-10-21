@@ -43,11 +43,12 @@ function Header({ kind }: { kind: ArchiveKind }) {
   const idleClass = 'inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]';
   return <header className="border-b border-[#d9d8cf] bg-[#f7f5ef]"><div className="mx-auto flex min-h-[68px] max-w-[1420px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-7">
     <Link href="/" className="flex items-center gap-3" data-testid="link-brand-home"><span className="grid size-10 place-items-center rounded-[13px] bg-[#253746] text-[#f8f2e7]"><Trophy size={19} /></span><span><strong className="block text-[14px] tracking-[-.04em] text-[#2b3e49]">Browser Control</strong><span className="text-[10px] text-[#858780]">Football research archive</span></span></Link>
-    <nav aria-label="Main navigation" className="flex items-center gap-1 rounded-xl border border-[#deddd3] bg-[#efeee7] p-1">
+    <nav aria-label="Main navigation" className="flex flex-wrap items-center gap-1 rounded-xl border border-[#deddd3] bg-[#efeee7] p-1">
       <Link href="/processing" className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]" data-testid="link-processing"><RefreshCw size={13} /> Processing</Link>
       <Link href="/database" aria-current={kind === 'database' ? 'page' : undefined} className={kind === 'database' ? activeClass : idleClass} data-testid="link-database"><Database size={13} /> Database</Link>
       <Link href="/tester" aria-current={kind === 'tester' ? 'page' : undefined} className={kind === 'tester' ? activeClass : idleClass} data-testid="link-tester"><FlaskConical size={13} /> Tester</Link>
       <Link href="/fixtures" className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]" data-testid="link-fixtures"><CalendarDays size={13} /> Fixtures</Link>
+      <Link href="/model-training" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]" data-testid="link-model-training">Model training</Link>
     </nav>
   </div></header>;
 }
