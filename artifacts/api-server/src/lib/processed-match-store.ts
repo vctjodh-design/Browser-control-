@@ -15,6 +15,7 @@ import type {
   FootballModelTrainingRun,
   FootballModelTrainingStatus,
   FootballModelType,
+  FootballModelPrediction,
 } from "@workspace/api-zod";
 
 type SqlRow = Record<string, SQLOutputValue>;
@@ -160,6 +161,18 @@ database.exec(`
     id INTEGER PRIMARY KEY CHECK (id = 1),
     version INTEGER NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS tester_model_predictions (
+    fixture_id INTEGER NOT NULL,
+    run_id TEXT NOT NULL,
+    model_type TEXT NOT NULL CHECK (model_type IN ('lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph')),
+    prediction_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (fixture_id, run_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS tester_model_predictions_fixture_created
+    ON tester_model_predictions(fixture_id, created_at DESC);
 `);
 
 const jobColumns = database
@@ -614,10 +627,141 @@ function modelTrainingRunFromRow(row: SqlRow): FootballModelTrainingRun {
     trainingLoss: storedJson<number[]>(row.training_loss_json, []),
     validationLoss: storedJson<number[]>(row.validation_loss_json, []),
     hasSavedWeights: nullableString(row.weights_json) !== null,
+    hasPredictionArtifact: hasPredictionArtifact(row.weights_json),
     error: nullableString(row.error),
     createdAt: new Date(stringValue(row.created_at)),
     updatedAt: new Date(stringValue(row.updated_at)),
   };
+}
+
+function hasPredictionArtifact(value: SQLOutputValue): boolean {
+  const serialized = nullableString(value);
+  if (!serialized) return false;
+  try {
+    const artifact = JSON.parse(serialized) as {
+      version?: unknown;
+      weights?: unknown;
+      normalization?: { means?: unknown; scales?: unknown; positionsPerSample?: unknown };
+    };
+    return artifact.version === 1 &&
+      Array.isArray(artifact.weights) &&
+      Array.isArray(artifact.normalization?.means) &&
+      Array.isArray(artifact.normalization?.scales) &&
+      typeof artifact.normalization?.positionsPerSample === "number";
+  } catch {
+    return false;
+  }
+}
+
+export type TesterPredictionTarget = {
+  fixtureId: number;
+  calendarDate: string;
+  matchDate: string;
+  competition: string;
+  season: number | null;
+  homeTeamName: string;
+  awayTeamName: string;
+};
+
+export function getTesterPredictionTarget(
+  fixtureId: number,
+): TesterPredictionTarget | null {
+  const row = database
+    .prepare(
+      `SELECT fixture_id, calendar_date, match_date, competition, season,
+              home_team_name, away_team_name
+       FROM tester_matches WHERE fixture_id = ?`,
+    )
+    .get(fixtureId) as SqlRow | undefined;
+  if (!row) return null;
+  return {
+    fixtureId: numberValue(row.fixture_id),
+    calendarDate: stringValue(row.calendar_date),
+    matchDate: stringValue(row.match_date),
+    competition: stringValue(row.competition),
+    season: nullableNumber(row.season),
+    homeTeamName: stringValue(row.home_team_name),
+    awayTeamName: stringValue(row.away_team_name),
+  };
+}
+
+export function getModelTrainingArtifact(id: string): unknown | null {
+  const row = database
+    .prepare("SELECT weights_json FROM model_training_runs WHERE id = ?")
+    .get(id) as SqlRow | undefined;
+  const serialized = nullableString(row?.weights_json ?? null);
+  if (!serialized) return null;
+  try {
+    return JSON.parse(serialized) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function modelPredictionFromRow(row: SqlRow): FootballModelPrediction {
+  const stored = storedJson<Omit<FootballModelPrediction, "fixtureId" | "runId" | "modelType" | "createdAt">>(
+    row.prediction_json,
+    {
+      result: { home: 0, draw: 0, away: 0 },
+      bothTeamsToScore: { yes: 0, no: 0 },
+      overUnder25: { over: 0, under: 0 },
+      overUnder35: { over: 0, under: 0 },
+      correctScoreTop: [],
+      historyMatchCount: 0,
+      verifiedOddsHistoryCount: 0,
+    },
+  );
+  return {
+    fixtureId: numberValue(row.fixture_id),
+    runId: stringValue(row.run_id),
+    modelType: stringValue(row.model_type) as FootballModelType,
+    ...stored,
+    createdAt: new Date(stringValue(row.created_at)),
+  };
+}
+
+export function saveModelPrediction(
+  prediction: FootballModelPrediction,
+): FootballModelPrediction {
+  const {
+    fixtureId,
+    runId,
+    modelType,
+    createdAt,
+    ...predictionData
+  } = prediction;
+  database
+    .prepare(
+      `INSERT INTO tester_model_predictions (
+         fixture_id, run_id, model_type, prediction_json, created_at
+       ) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(fixture_id, run_id) DO UPDATE SET
+         model_type = excluded.model_type,
+         prediction_json = excluded.prediction_json,
+         created_at = excluded.created_at`,
+    )
+    .run(
+      fixtureId,
+      runId,
+      modelType,
+      JSON.stringify(predictionData),
+      createdAt.toISOString(),
+    );
+  return prediction;
+}
+
+export function listModelPredictionsForFixture(
+  fixtureId: number,
+): FootballModelPrediction[] {
+  const rows = database
+    .prepare(
+      `SELECT fixture_id, run_id, model_type, prediction_json, created_at
+       FROM tester_model_predictions
+       WHERE fixture_id = ?
+       ORDER BY created_at DESC, model_type ASC`,
+    )
+    .all(fixtureId) as SqlRow[];
+  return rows.map(modelPredictionFromRow);
 }
 
 export function listModelTrainingMatches(limit = 10_000): ModelTrainingMatch[] {
@@ -706,6 +850,7 @@ export function createModelTrainingRun(
     trainingLoss: [],
     validationLoss: [],
     hasSavedWeights: false,
+    hasPredictionArtifact: false,
     error: null,
     createdAt: new Date(now),
     updatedAt: new Date(now),

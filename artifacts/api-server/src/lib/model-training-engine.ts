@@ -3,12 +3,26 @@ import type {
   FootballModelType,
   FootballModelTrainingInput,
 } from "@workspace/api-zod";
-import type { ModelTrainingMatch } from "./processed-match-store";
+import type {
+  ModelTrainingMatch,
+  TesterPredictionTarget,
+} from "./processed-match-store";
 
 const OUTCOME_INDEX = { home: 0, draw: 1, away: 2 } as const;
 const TEAM_EVENT_FEATURES = 7;
 const SEQUENCE_FEATURES = TEAM_EVENT_FEATURES * 2 + 1;
 const GRAPH_NODE_COUNT = 4;
+const SCORE_BUCKET_COUNT = 6;
+
+const MARKET_HEADS = [
+  { name: "result", classes: 3 },
+  { name: "bothTeamsToScore", classes: 2 },
+  { name: "overUnder25", classes: 2 },
+  { name: "overUnder35", classes: 2 },
+  { name: "correctScore", classes: SCORE_BUCKET_COUNT * SCORE_BUCKET_COUNT },
+] as const;
+
+type MarketHeadName = (typeof MARKET_HEADS)[number]["name"];
 
 type VerifiedOdds = {
   home: number;
@@ -33,11 +47,20 @@ type TrainingExample = {
   sequence: number[];
   graph: number[];
   graphAdjacency: number[];
-  label: number;
+  labels: Record<MarketHeadName, number>;
   hasPriorVerifiedOdds: boolean;
 };
 
 export type TrainingWeights = Array<{ shape: number[]; values: number[] }>;
+export type ModelPredictorArtifact = {
+  version: 1;
+  weights: TrainingWeights;
+  normalization: {
+    means: number[];
+    scales: number[];
+    positionsPerSample: number;
+  };
+};
 
 export type ModelTrainingResult = {
   sampleCount: number;
@@ -51,7 +74,17 @@ export type ModelTrainingResult = {
   confusionMatrix: number[][];
   trainingLoss: number[];
   validationLoss: number[];
-  weights: TrainingWeights;
+  predictorArtifact: ModelPredictorArtifact;
+};
+
+export type ArchivedModelPrediction = {
+  result: { home: number; draw: number; away: number };
+  bothTeamsToScore: { yes: number; no: number };
+  overUnder25: { over: number; under: number };
+  overUnder35: { over: number; under: number };
+  correctScoreTop: Array<{ scoreline: string; probability: number }>;
+  historyMatchCount: number;
+  verifiedOddsHistoryCount: number;
 };
 
 type EpochProgress = (
@@ -328,10 +361,21 @@ function graphFeatures(
   return { nodes, adjacency: adjacency.flat() };
 }
 
-function labelFor(match: ModelTrainingMatch): number {
-  if (match.homeScore > match.awayScore) return OUTCOME_INDEX.home;
-  if (match.homeScore === match.awayScore) return OUTCOME_INDEX.draw;
-  return OUTCOME_INDEX.away;
+function labelsFor(match: ModelTrainingMatch): Record<MarketHeadName, number> {
+  const totalGoals = match.homeScore + match.awayScore;
+  return {
+    result: match.homeScore > match.awayScore
+      ? OUTCOME_INDEX.home
+      : match.homeScore === match.awayScore
+        ? OUTCOME_INDEX.draw
+        : OUTCOME_INDEX.away,
+    bothTeamsToScore: match.homeScore > 0 && match.awayScore > 0 ? 1 : 0,
+    overUnder25: totalGoals >= 3 ? 1 : 0,
+    overUnder35: totalGoals >= 4 ? 1 : 0,
+    correctScore:
+      Math.min(SCORE_BUCKET_COUNT - 1, match.homeScore) * SCORE_BUCKET_COUNT +
+      Math.min(SCORE_BUCKET_COUNT - 1, match.awayScore),
+  };
 }
 
 function buildTrainingExamples(
@@ -370,7 +414,7 @@ function buildTrainingExamples(
         sequence: sequenceFeatures(homeHistory, awayHistory, sequenceLength),
         graph: graph.nodes,
         graphAdjacency: graph.adjacency,
-        label: labelFor(match),
+        labels: labelsFor(match),
         hasPriorVerifiedOdds: oddsInPriorForm,
       });
     }
@@ -401,23 +445,20 @@ function buildTrainingExamples(
   return examples;
 }
 
-function normalizeRows(
+function fitNormalization(
   rows: number[][],
   trainingSampleCount: number,
   featureCount: number,
-  sequenceLength?: number,
-): number[][] {
+  positionsPerSample: number,
+): ModelPredictorArtifact["normalization"] {
   const means = Array(featureCount).fill(0) as number[];
   const squares = Array(featureCount).fill(0) as number[];
-  const positionsPerSample = sequenceLength ?? 1;
   const divisor = Math.max(1, trainingSampleCount * positionsPerSample);
 
   for (let sample = 0; sample < trainingSampleCount; sample += 1) {
     for (let position = 0; position < positionsPerSample; position += 1) {
       for (let feature = 0; feature < featureCount; feature += 1) {
-        const value = sequenceLength
-          ? rows[sample][position * featureCount + feature]
-          : rows[sample][feature];
+        const value = rows[sample][position * featureCount + feature];
         means[feature] += value / divisor;
         squares[feature] += value * value / divisor;
       }
@@ -425,28 +466,33 @@ function normalizeRows(
   }
 
   const scales = means.map((mean, index) => Math.sqrt(Math.max(1e-6, squares[index] - mean * mean)));
+  return { means, scales, positionsPerSample };
+}
+
+function normalizeRows(
+  rows: number[][],
+  normalization: ModelPredictorArtifact["normalization"],
+): number[][] {
+  const featureCount = normalization.means.length;
   return rows.map((row) => {
     const normalized = [...row];
-    const positions = sequenceLength ?? 1;
-    for (let position = 0; position < positions; position += 1) {
+    for (let position = 0; position < normalization.positionsPerSample; position += 1) {
       for (let feature = 0; feature < featureCount; feature += 1) {
-        const index = sequenceLength ? position * featureCount + feature : feature;
-        normalized[index] = (row[index] - means[feature]) / scales[feature];
+        const index = position * featureCount + feature;
+        normalized[index] =
+          (row[index] - normalization.means[feature]) /
+          normalization.scales[feature];
       }
     }
     return normalized;
   });
 }
 
-function graphConvolutionModel(hiddenUnits: number): tf.LayersModel {
-  const nodes = tf.input({
-    shape: [GRAPH_NODE_COUNT, TEAM_EVENT_FEATURES],
-    name: "team_nodes",
-  });
-  const adjacency = tf.input({
-    shape: [GRAPH_NODE_COUNT, GRAPH_NODE_COUNT],
-    name: "match_graph_adjacency",
-  });
+function graphConvolutionFeatures(
+  nodes: tf.SymbolicTensor,
+  adjacency: tf.SymbolicTensor,
+  hiddenUnits: number,
+): tf.SymbolicTensor {
   const firstMessages = tf.layers.dot({ axes: [2, 1] }).apply([
     adjacency,
     nodes,
@@ -477,17 +523,15 @@ function graphConvolutionModel(hiddenUnits: number): tf.LayersModel {
   const pooled = tf.layers
     .globalAveragePooling1d()
     .apply(secondUpdate) as tf.SymbolicTensor;
-  const hidden = tf.layers
+  return tf.layers
     .dense({ units: hiddenUnits, activation: "relu" })
     .apply(pooled) as tf.SymbolicTensor;
-  const output = tf.layers
-    .dense({ units: 3, activation: "softmax" })
-    .apply(hidden) as tf.SymbolicTensor;
-  return tf.model({ inputs: [nodes, adjacency], outputs: output });
 }
 
-function attentionModel(sequenceLength: number, hiddenUnits: number): tf.LayersModel {
-  const input = tf.input({ shape: [sequenceLength, SEQUENCE_FEATURES] });
+function attentionFeatures(
+  input: tf.SymbolicTensor,
+  hiddenUnits: number,
+): tf.SymbolicTensor {
   const query = tf.layers.dense({ units: hiddenUnits, useBias: false }).apply(input) as tf.SymbolicTensor;
   const key = tf.layers.dense({ units: hiddenUnits, useBias: false }).apply(input) as tf.SymbolicTensor;
   const value = tf.layers.dense({ units: hiddenUnits }).apply(input) as tf.SymbolicTensor;
@@ -495,9 +539,15 @@ function attentionModel(sequenceLength: number, hiddenUnits: number): tf.LayersM
   const attention = tf.layers.activation({ activation: "softmax" }).apply(scores) as tf.SymbolicTensor;
   const context = tf.layers.dot({ axes: [2, 1] }).apply([attention, value]) as tf.SymbolicTensor;
   const pooled = tf.layers.globalAveragePooling1d().apply(context) as tf.SymbolicTensor;
-  const hidden = tf.layers.dense({ units: hiddenUnits, activation: "relu" }).apply(pooled) as tf.SymbolicTensor;
-  const output = tf.layers.dense({ units: 3, activation: "softmax" }).apply(hidden) as tf.SymbolicTensor;
-  return tf.model({ inputs: input, outputs: output });
+  return tf.layers.dense({ units: hiddenUnits, activation: "relu" }).apply(pooled) as tf.SymbolicTensor;
+}
+
+function marketOutputs(representation: tf.SymbolicTensor): tf.SymbolicTensor[] {
+  return MARKET_HEADS.map(({ name, classes }) =>
+    tf.layers
+      .dense({ units: classes, activation: "softmax", name })
+      .apply(representation) as tf.SymbolicTensor,
+  );
 }
 
 function createModel(
@@ -506,25 +556,40 @@ function createModel(
   hiddenUnits: number,
 ): tf.LayersModel {
   if (modelType === "lstm" || modelType === "gru") {
-    const model = tf.sequential();
-    const recurrentLayer = modelType === "lstm"
-      ? tf.layers.lstm({ units: hiddenUnits, inputShape: [sequenceLength, SEQUENCE_FEATURES] })
-      : tf.layers.gru({ units: hiddenUnits, inputShape: [sequenceLength, SEQUENCE_FEATURES] });
-    model.add(recurrentLayer);
-    model.add(tf.layers.dense({ units: 3, activation: "softmax" }));
-    return model;
+    const input = tf.input({ shape: [sequenceLength, SEQUENCE_FEATURES] });
+    const recurrent = modelType === "lstm"
+      ? tf.layers.lstm({ units: hiddenUnits }).apply(input) as tf.SymbolicTensor
+      : tf.layers.gru({ units: hiddenUnits }).apply(input) as tf.SymbolicTensor;
+    const representation = tf.layers
+      .dense({ units: hiddenUnits, activation: "relu" })
+      .apply(recurrent) as tf.SymbolicTensor;
+    return tf.model({ inputs: input, outputs: marketOutputs(representation) });
   }
   if (modelType === "transformer") {
-    return attentionModel(sequenceLength, hiddenUnits);
+    const input = tf.input({ shape: [sequenceLength, SEQUENCE_FEATURES] });
+    const representation = attentionFeatures(input, hiddenUnits);
+    return tf.model({ inputs: input, outputs: marketOutputs(representation) });
   }
   if (modelType === "gnn" || modelType === "dynamic-graph") {
-    return graphConvolutionModel(hiddenUnits);
+    const nodes = tf.input({
+      shape: [GRAPH_NODE_COUNT, TEAM_EVENT_FEATURES],
+      name: "team_nodes",
+    });
+    const adjacency = tf.input({
+      shape: [GRAPH_NODE_COUNT, GRAPH_NODE_COUNT],
+      name: "match_graph_adjacency",
+    });
+    const representation = graphConvolutionFeatures(nodes, adjacency, hiddenUnits);
+    return tf.model({
+      inputs: [nodes, adjacency],
+      outputs: marketOutputs(representation),
+    });
   }
   throw new Error(`Unsupported model type: ${modelType}`);
 }
 
-function oneHot(label: number): number[] {
-  return [0, 1, 2].map((index) => index === label ? 1 : 0);
+function oneHot(label: number, classes: number): number[] {
+  return Array.from({ length: classes }, (_, index) => index === label ? 1 : 0);
 }
 
 function metricsFor(
@@ -583,18 +648,32 @@ export async function trainArchivedModel(
   const graphModel = modelType === "gnn" || modelType === "dynamic-graph";
   const featureCount = sequenceModel ? SEQUENCE_FEATURES : TEAM_EVENT_FEATURES;
   const rawRows = examples.map((example) => sequenceModel ? example.sequence : example.graph);
-  const normalizedRows = normalizeRows(
+  const normalization = fitNormalization(
     rawRows,
     trainingSampleCount,
     featureCount,
-    sequenceModel ? sequenceLength : graphModel ? GRAPH_NODE_COUNT : undefined,
+    sequenceModel ? sequenceLength : graphModel ? GRAPH_NODE_COUNT : 1,
   );
+  const normalizedRows = normalizeRows(rawRows, normalization);
   const trainRows = normalizedRows.slice(0, trainingSampleCount);
   const validationRows = normalizedRows.slice(trainingSampleCount);
-  const trainLabels = examples.slice(0, trainingSampleCount).map((example) => example.label);
-  const validationLabels = examples.slice(trainingSampleCount).map((example) => example.label);
-  const trainTargets = tf.tensor2d(trainLabels.map(oneHot), [trainingSampleCount, 3]);
-  const validationTargets = tf.tensor2d(validationLabels.map(oneHot), [validationSampleCount, 3]);
+  const trainLabels = examples
+    .slice(0, trainingSampleCount)
+    .map((example) => example.labels.result);
+  const validationLabels = examples
+    .slice(trainingSampleCount)
+    .map((example) => example.labels.result);
+  const createTargets = (start: number, count: number) =>
+    MARKET_HEADS.map(({ name, classes }) =>
+      tf.tensor2d(
+        examples
+          .slice(start, start + count)
+          .map((example) => oneHot(example.labels[name], classes)),
+        [count, classes],
+      ),
+    );
+  const trainTargets = createTargets(0, trainingSampleCount);
+  const validationTargets = createTargets(trainingSampleCount, validationSampleCount);
   const inputSteps = sequenceModel ? sequenceLength : GRAPH_NODE_COUNT;
   const inputFeatures = sequenceModel ? SEQUENCE_FEATURES : TEAM_EVENT_FEATURES;
   const trainInputs = tf.tensor3d(
@@ -630,11 +709,12 @@ export async function trainArchivedModel(
   const model = createModel(modelType, sequenceLength, hiddenUnits);
   const trainingLoss: number[] = [];
   const validationLoss: number[] = [];
+  let predictionTensors: tf.Tensor[] = [];
 
   try {
     model.compile({
       optimizer: tf.train.adam(0.008),
-      loss: "categoricalCrossentropy",
+      loss: MARKET_HEADS.map(() => "categoricalCrossentropy"),
     });
     await model.fit(modelTrainInputs, trainTargets, {
       epochs,
@@ -651,9 +731,8 @@ export async function trainArchivedModel(
       }],
     });
 
-    const prediction = model.predict(modelValidationInputs) as tf.Tensor;
-    const predictionValues = Array.from(await prediction.data());
-    prediction.dispose();
+    predictionTensors = model.predict(modelValidationInputs) as tf.Tensor[];
+    const predictionValues = Array.from(await predictionTensors[0].data());
     const probabilityRows = Array.from({ length: validationSampleCount }, (_, index) =>
       predictionValues.slice(index * 3, index * 3 + 3),
     );
@@ -671,15 +750,167 @@ export async function trainArchivedModel(
       ...metrics,
       trainingLoss,
       validationLoss,
-      weights,
+      predictorArtifact: {
+        version: 1,
+        weights,
+        normalization,
+      },
     };
   } finally {
+    predictionTensors.forEach((tensor) => tensor.dispose());
     trainInputs.dispose();
-    trainTargets.dispose();
+    trainTargets.forEach((tensor) => tensor.dispose());
     validationInputs.dispose();
-    validationTargets.dispose();
+    validationTargets.forEach((tensor) => tensor.dispose());
     trainAdjacency?.dispose();
     validationAdjacency?.dispose();
+    model.dispose();
+  }
+}
+
+export function isModelPredictorArtifact(
+  value: unknown,
+): value is ModelPredictorArtifact {
+  if (!value || typeof value !== "object") return false;
+  const artifact = value as Partial<ModelPredictorArtifact>;
+  return artifact.version === 1 &&
+    Array.isArray(artifact.weights) &&
+    artifact.weights.every((weight) =>
+      Array.isArray(weight.shape) &&
+      Array.isArray(weight.values) &&
+      weight.shape.every((dimension) => Number.isSafeInteger(dimension) && dimension > 0) &&
+      weight.values.every((weightValue) => Number.isFinite(weightValue)),
+    ) &&
+    !!artifact.normalization &&
+    Array.isArray(artifact.normalization.means) &&
+    Array.isArray(artifact.normalization.scales) &&
+    artifact.normalization.means.length > 0 &&
+    artifact.normalization.means.length === artifact.normalization.scales.length &&
+    artifact.normalization.means.every(Number.isFinite) &&
+    artifact.normalization.scales.every((scale) => Number.isFinite(scale) && scale > 0) &&
+    Number.isSafeInteger(artifact.normalization.positionsPerSample) &&
+    artifact.normalization.positionsPerSample > 0;
+}
+
+export async function predictArchivedFixture(input: {
+  modelType: FootballModelType;
+  sequenceLength: number;
+  hiddenUnits: number;
+  artifact: unknown;
+  target: TesterPredictionTarget;
+  matches: ModelTrainingMatch[];
+}): Promise<ArchivedModelPrediction> {
+  if (!isModelPredictorArtifact(input.artifact)) {
+    throw new Error("This run has no compatible prediction artifact. Train a new model run before predicting.");
+  }
+  await tf.setBackend("cpu");
+  await tf.ready();
+  const artifact = input.artifact;
+  const historyMatches = input.matches.filter(
+    (match) =>
+      match.fixtureId !== input.target.fixtureId &&
+      match.calendarDate < input.target.calendarDate,
+  );
+  const targetMatch: ModelTrainingMatch = {
+    ...input.target,
+    homeScore: 0,
+    awayScore: 0,
+    tmpJson: '{"oddsHistory":[]}',
+  };
+  const examples = buildTrainingExamples(
+    [...historyMatches, targetMatch],
+    input.modelType,
+    input.sequenceLength,
+  );
+  const example = examples.at(-1);
+  if (!example) {
+    throw new Error("The tester fixture does not contain enough information to build model inputs.");
+  }
+
+  const sequenceModel =
+    input.modelType === "lstm" ||
+    input.modelType === "gru" ||
+    input.modelType === "transformer";
+  const graphModel =
+    input.modelType === "gnn" || input.modelType === "dynamic-graph";
+  const featureCount = sequenceModel ? SEQUENCE_FEATURES : TEAM_EVENT_FEATURES;
+  const expectedPositions = sequenceModel ? input.sequenceLength : GRAPH_NODE_COUNT;
+  if (
+    artifact.normalization.means.length !== featureCount ||
+    artifact.normalization.positionsPerSample !== expectedPositions
+  ) {
+    throw new Error("The saved feature normalization does not match this model architecture.");
+  }
+  const rawFeatures = sequenceModel ? example.sequence : example.graph;
+  const normalizedFeatures = normalizeRows([rawFeatures], artifact.normalization)[0];
+  const inputSteps = sequenceModel ? input.sequenceLength : GRAPH_NODE_COUNT;
+  const inputFeatureCount = sequenceModel ? SEQUENCE_FEATURES : TEAM_EVENT_FEATURES;
+  const featuresTensor = tf.tensor3d(
+    normalizedFeatures,
+    [1, inputSteps, inputFeatureCount],
+  );
+  const adjacencyTensor = graphModel
+    ? tf.tensor3d(example.graphAdjacency, [1, GRAPH_NODE_COUNT, GRAPH_NODE_COUNT])
+    : null;
+  const weightTensors = artifact.weights.map((weight) =>
+    tf.tensor(weight.values, weight.shape, "float32"),
+  );
+  const model = createModel(
+    input.modelType,
+    input.sequenceLength,
+    input.hiddenUnits,
+  );
+  let predictionTensors: tf.Tensor[] = [];
+
+  try {
+    model.setWeights(weightTensors);
+    const modelInputs = graphModel
+      ? [featuresTensor, adjacencyTensor as tf.Tensor3D]
+      : featuresTensor;
+    predictionTensors = model.predict(modelInputs) as tf.Tensor[];
+    const outputValues = await Promise.all(
+      predictionTensors.map(async (tensor) => Array.from(await tensor.data())),
+    );
+    const correctScores = outputValues[4]
+      .map((probability, index) => {
+        const homeGoals = Math.floor(index / SCORE_BUCKET_COUNT);
+        const awayGoals = index % SCORE_BUCKET_COUNT;
+        const formatGoals = (goals: number) => goals === 5 ? "5+" : String(goals);
+        return {
+          scoreline: `${formatGoals(homeGoals)}-${formatGoals(awayGoals)}`,
+          probability,
+        };
+      })
+      .sort((first, second) => second.probability - first.probability)
+      .slice(0, 5);
+
+    return {
+      result: {
+        home: outputValues[0][0],
+        draw: outputValues[0][1],
+        away: outputValues[0][2],
+      },
+      bothTeamsToScore: {
+        no: outputValues[1][0],
+        yes: outputValues[1][1],
+      },
+      overUnder25: {
+        under: outputValues[2][0],
+        over: outputValues[2][1],
+      },
+      overUnder35: {
+        under: outputValues[3][0],
+        over: outputValues[3][1],
+      },
+      correctScoreTop: correctScores,
+      historyMatchCount: historyMatches.length,
+      verifiedOddsHistoryCount: parseVerifiedOdds(historyMatches).size,
+    };
+  } finally {
+    predictionTensors.forEach((tensor) => tensor.dispose());
+    weightTensors.forEach((tensor) => tensor.dispose());
+    featuresTensor.dispose();
+    adjacencyTensor?.dispose();
     model.dispose();
   }
 }

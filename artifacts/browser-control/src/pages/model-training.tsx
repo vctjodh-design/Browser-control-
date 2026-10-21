@@ -200,7 +200,7 @@ export default function ModelTrainingPage() {
           <div>
             <p className="mono mb-2 text-[9px] uppercase tracking-[.2em] text-[#9b7160]">Research bench / model lab</p>
             <h1 className="max-w-[720px] text-[34px] font-extrabold leading-[1.02] tracking-[-.065em] text-[#263746] sm:text-[48px]">Train on the <span className="text-[#d96f51]">record.</span></h1>
-            <p className="mt-3 max-w-[600px] text-[12px] leading-6 text-[#727973]">Build outcome models from completed matches in your archive. Every target is evaluated in time order, using only information available before kickoff.</p>
+            <p className="mt-3 max-w-[600px] text-[12px] leading-6 text-[#727973]">Train on completed archive matches. New runs learn 1X2, BTTS, over/under 2.5 and 3.5, and correct-score markets, with each target evaluated in time order.</p>
           </div>
           <div className="flex items-center gap-2 self-start rounded-lg border border-[#dcd9d0] bg-[#faf9f5] px-3 py-2 sm:self-auto">
             <span className="grid size-7 place-items-center rounded-lg bg-[#e6eee8] text-[#537867]"><ShieldCheck size={15} /></span>

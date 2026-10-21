@@ -193,6 +193,7 @@ export const GetFootballModelTrainingDashboardResponse = zod.object({
   "trainingLoss": zod.array(zod.number()),
   "validationLoss": zod.array(zod.number()),
   "hasSavedWeights": zod.boolean(),
+  "hasPredictionArtifact": zod.boolean(),
   "error": zod.string().nullable(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -245,6 +246,7 @@ export const StartFootballModelTrainingResponse = zod.object({
   "trainingLoss": zod.array(zod.number()),
   "validationLoss": zod.array(zod.number()),
   "hasSavedWeights": zod.boolean(),
+  "hasPredictionArtifact": zod.boolean(),
   "error": zod.string().nullable(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -278,6 +280,7 @@ export const GetFootballModelTrainingRunResponse = zod.object({
   "trainingLoss": zod.array(zod.number()),
   "validationLoss": zod.array(zod.number()),
   "hasSavedWeights": zod.boolean(),
+  "hasPredictionArtifact": zod.boolean(),
   "error": zod.string().nullable(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -468,6 +471,171 @@ export const GetFootballTesterMatchResponse = zod.object({
   "issueCount": zod.number().int(),
   "processedAt": zod.coerce.date()
 }).describe('Pre-match features for a fixture. Target-match scores and outcomes are intentionally excluded.')
+
+
+/**
+ * @summary Get saved model predictions for a tester fixture
+ */
+
+
+
+export const GetFootballTesterMatchModelPredictionsParams = zod.object({
+  "fixtureId": zod.coerce.number().int().min(1)
+})
+
+
+
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemResultHomeMin = 0;
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemResultHomeMax = 1;
+
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemResultDrawMin = 0;
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemResultDrawMax = 1;
+
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemResultAwayMin = 0;
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemResultAwayMax = 1;
+
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemBothTeamsToScoreYesMin = 0;
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemBothTeamsToScoreYesMax = 1;
+
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemBothTeamsToScoreNoMin = 0;
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemBothTeamsToScoreNoMax = 1;
+
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder25OverMin = 0;
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder25OverMax = 1;
+
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder25UnderMin = 0;
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder25UnderMax = 1;
+
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder35OverMin = 0;
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder35OverMax = 1;
+
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder35UnderMin = 0;
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder35UnderMax = 1;
+
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemCorrectScoreTopItemProbabilityMin = 0;
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemCorrectScoreTopItemProbabilityMax = 1;
+
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemHistoryMatchCountMin = 0;
+
+export const getFootballTesterMatchModelPredictionsResponsePredictionsItemVerifiedOddsHistoryCountMin = 0;
+
+
+
+export const GetFootballTesterMatchModelPredictionsResponse = zod.object({
+  "fixtureId": zod.number().int().min(1),
+  "predictions": zod.array(zod.object({
+  "fixtureId": zod.number().int().min(1),
+  "runId": zod.string().uuid(),
+  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph']),
+  "result": zod.object({
+  "home": zod.number().min(getFootballTesterMatchModelPredictionsResponsePredictionsItemResultHomeMin).max(getFootballTesterMatchModelPredictionsResponsePredictionsItemResultHomeMax),
+  "draw": zod.number().min(getFootballTesterMatchModelPredictionsResponsePredictionsItemResultDrawMin).max(getFootballTesterMatchModelPredictionsResponsePredictionsItemResultDrawMax),
+  "away": zod.number().min(getFootballTesterMatchModelPredictionsResponsePredictionsItemResultAwayMin).max(getFootballTesterMatchModelPredictionsResponsePredictionsItemResultAwayMax)
+}),
+  "bothTeamsToScore": zod.object({
+  "yes": zod.number().min(getFootballTesterMatchModelPredictionsResponsePredictionsItemBothTeamsToScoreYesMin).max(getFootballTesterMatchModelPredictionsResponsePredictionsItemBothTeamsToScoreYesMax),
+  "no": zod.number().min(getFootballTesterMatchModelPredictionsResponsePredictionsItemBothTeamsToScoreNoMin).max(getFootballTesterMatchModelPredictionsResponsePredictionsItemBothTeamsToScoreNoMax)
+}),
+  "overUnder25": zod.object({
+  "over": zod.number().min(getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder25OverMin).max(getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder25OverMax),
+  "under": zod.number().min(getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder25UnderMin).max(getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder25UnderMax)
+}),
+  "overUnder35": zod.object({
+  "over": zod.number().min(getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder35OverMin).max(getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder35OverMax),
+  "under": zod.number().min(getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder35UnderMin).max(getFootballTesterMatchModelPredictionsResponsePredictionsItemOverUnder35UnderMax)
+}),
+  "correctScoreTop": zod.array(zod.object({
+  "scoreline": zod.string(),
+  "probability": zod.number().min(getFootballTesterMatchModelPredictionsResponsePredictionsItemCorrectScoreTopItemProbabilityMin).max(getFootballTesterMatchModelPredictionsResponsePredictionsItemCorrectScoreTopItemProbabilityMax)
+})),
+  "historyMatchCount": zod.number().int().min(getFootballTesterMatchModelPredictionsResponsePredictionsItemHistoryMatchCountMin),
+  "verifiedOddsHistoryCount": zod.number().int().min(getFootballTesterMatchModelPredictionsResponsePredictionsItemVerifiedOddsHistoryCountMin),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * Uses the saved pre-match tester fixture and only earlier archived match history; predictions are persisted for graph views.
+ * @summary Predict all markets using the newest trained model of each architecture
+ */
+
+
+
+export const PredictFootballTesterMatchParams = zod.object({
+  "fixtureId": zod.coerce.number().int().min(1)
+})
+
+
+
+export const predictFootballTesterMatchResponsePredictionsItemResultHomeMin = 0;
+export const predictFootballTesterMatchResponsePredictionsItemResultHomeMax = 1;
+
+export const predictFootballTesterMatchResponsePredictionsItemResultDrawMin = 0;
+export const predictFootballTesterMatchResponsePredictionsItemResultDrawMax = 1;
+
+export const predictFootballTesterMatchResponsePredictionsItemResultAwayMin = 0;
+export const predictFootballTesterMatchResponsePredictionsItemResultAwayMax = 1;
+
+export const predictFootballTesterMatchResponsePredictionsItemBothTeamsToScoreYesMin = 0;
+export const predictFootballTesterMatchResponsePredictionsItemBothTeamsToScoreYesMax = 1;
+
+export const predictFootballTesterMatchResponsePredictionsItemBothTeamsToScoreNoMin = 0;
+export const predictFootballTesterMatchResponsePredictionsItemBothTeamsToScoreNoMax = 1;
+
+export const predictFootballTesterMatchResponsePredictionsItemOverUnder25OverMin = 0;
+export const predictFootballTesterMatchResponsePredictionsItemOverUnder25OverMax = 1;
+
+export const predictFootballTesterMatchResponsePredictionsItemOverUnder25UnderMin = 0;
+export const predictFootballTesterMatchResponsePredictionsItemOverUnder25UnderMax = 1;
+
+export const predictFootballTesterMatchResponsePredictionsItemOverUnder35OverMin = 0;
+export const predictFootballTesterMatchResponsePredictionsItemOverUnder35OverMax = 1;
+
+export const predictFootballTesterMatchResponsePredictionsItemOverUnder35UnderMin = 0;
+export const predictFootballTesterMatchResponsePredictionsItemOverUnder35UnderMax = 1;
+
+export const predictFootballTesterMatchResponsePredictionsItemCorrectScoreTopItemProbabilityMin = 0;
+export const predictFootballTesterMatchResponsePredictionsItemCorrectScoreTopItemProbabilityMax = 1;
+
+export const predictFootballTesterMatchResponsePredictionsItemHistoryMatchCountMin = 0;
+
+export const predictFootballTesterMatchResponsePredictionsItemVerifiedOddsHistoryCountMin = 0;
+
+
+
+export const PredictFootballTesterMatchResponse = zod.object({
+  "fixtureId": zod.number().int().min(1),
+  "predictions": zod.array(zod.object({
+  "fixtureId": zod.number().int().min(1),
+  "runId": zod.string().uuid(),
+  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph']),
+  "result": zod.object({
+  "home": zod.number().min(predictFootballTesterMatchResponsePredictionsItemResultHomeMin).max(predictFootballTesterMatchResponsePredictionsItemResultHomeMax),
+  "draw": zod.number().min(predictFootballTesterMatchResponsePredictionsItemResultDrawMin).max(predictFootballTesterMatchResponsePredictionsItemResultDrawMax),
+  "away": zod.number().min(predictFootballTesterMatchResponsePredictionsItemResultAwayMin).max(predictFootballTesterMatchResponsePredictionsItemResultAwayMax)
+}),
+  "bothTeamsToScore": zod.object({
+  "yes": zod.number().min(predictFootballTesterMatchResponsePredictionsItemBothTeamsToScoreYesMin).max(predictFootballTesterMatchResponsePredictionsItemBothTeamsToScoreYesMax),
+  "no": zod.number().min(predictFootballTesterMatchResponsePredictionsItemBothTeamsToScoreNoMin).max(predictFootballTesterMatchResponsePredictionsItemBothTeamsToScoreNoMax)
+}),
+  "overUnder25": zod.object({
+  "over": zod.number().min(predictFootballTesterMatchResponsePredictionsItemOverUnder25OverMin).max(predictFootballTesterMatchResponsePredictionsItemOverUnder25OverMax),
+  "under": zod.number().min(predictFootballTesterMatchResponsePredictionsItemOverUnder25UnderMin).max(predictFootballTesterMatchResponsePredictionsItemOverUnder25UnderMax)
+}),
+  "overUnder35": zod.object({
+  "over": zod.number().min(predictFootballTesterMatchResponsePredictionsItemOverUnder35OverMin).max(predictFootballTesterMatchResponsePredictionsItemOverUnder35OverMax),
+  "under": zod.number().min(predictFootballTesterMatchResponsePredictionsItemOverUnder35UnderMin).max(predictFootballTesterMatchResponsePredictionsItemOverUnder35UnderMax)
+}),
+  "correctScoreTop": zod.array(zod.object({
+  "scoreline": zod.string(),
+  "probability": zod.number().min(predictFootballTesterMatchResponsePredictionsItemCorrectScoreTopItemProbabilityMin).max(predictFootballTesterMatchResponsePredictionsItemCorrectScoreTopItemProbabilityMax)
+})),
+  "historyMatchCount": zod.number().int().min(predictFootballTesterMatchResponsePredictionsItemHistoryMatchCountMin),
+  "verifiedOddsHistoryCount": zod.number().int().min(predictFootballTesterMatchResponsePredictionsItemVerifiedOddsHistoryCountMin),
+  "createdAt": zod.coerce.date()
+}))
+})
 
 
 /**

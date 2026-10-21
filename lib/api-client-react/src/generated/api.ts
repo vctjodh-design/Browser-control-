@@ -42,6 +42,7 @@ import type {
   FootballProcessingJob,
   FootballProcessingJobLookup,
   FootballTesterMatchPayload,
+  FootballTesterMatchPredictions,
   FootballTesterMatchSummary,
   FootballTesterMatches,
   GetFootballFixturesParams,
@@ -1468,6 +1469,158 @@ export function useGetFootballTesterMatch<TData = Awaited<ReturnType<typeof getF
 
 
 
+
+export const getGetFootballTesterMatchModelPredictionsUrl = (fixtureId: number,) => {
+
+
+
+
+  return `/api/football/tester-matches/${fixtureId}/model-predictions`
+}
+
+/**
+ * @summary Get saved model predictions for a tester fixture
+ */
+export const getFootballTesterMatchModelPredictions = async (fixtureId: number, options?: Parameters<typeof customFetch>[1]): Promise<FootballTesterMatchPredictions> => {
+
+  return customFetch<FootballTesterMatchPredictions>(getGetFootballTesterMatchModelPredictionsUrl(fixtureId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballTesterMatchModelPredictionsQueryKey = (fixtureId: number,) => {
+    return [
+    `/api/football/tester-matches/${fixtureId}/model-predictions`
+    ] as const;
+    }
+
+
+export const getGetFootballTesterMatchModelPredictionsQueryOptions = <TData = Awaited<ReturnType<typeof getFootballTesterMatchModelPredictions>>, TError = ErrorType<FootballFixtureError>>(fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterMatchModelPredictions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballTesterMatchModelPredictionsQueryKey(fixtureId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballTesterMatchModelPredictions>>> = ({ signal }) => getFootballTesterMatchModelPredictions(fixtureId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: fixtureId !== null && fixtureId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterMatchModelPredictions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballTesterMatchModelPredictionsQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballTesterMatchModelPredictions>>>
+export type GetFootballTesterMatchModelPredictionsQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary Get saved model predictions for a tester fixture
+ */
+
+export function useGetFootballTesterMatchModelPredictions<TData = Awaited<ReturnType<typeof getFootballTesterMatchModelPredictions>>, TError = ErrorType<FootballFixtureError>>(
+ fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballTesterMatchModelPredictions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballTesterMatchModelPredictionsQueryOptions(fixtureId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getPredictFootballTesterMatchUrl = (fixtureId: number,) => {
+
+
+
+
+  return `/api/football/tester-matches/${fixtureId}/model-predictions`
+}
+
+/**
+ * Uses the saved pre-match tester fixture and only earlier archived match history; predictions are persisted for graph views.
+ * @summary Predict all markets using the newest trained model of each architecture
+ */
+export const predictFootballTesterMatch = async (fixtureId: number, options?: Parameters<typeof customFetch>[1]): Promise<FootballTesterMatchPredictions> => {
+
+  return customFetch<FootballTesterMatchPredictions>(getPredictFootballTesterMatchUrl(fixtureId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getPredictFootballTesterMatchMutationKey = () => ['predictFootballTesterMatch'] as const;
+
+export const getPredictFootballTesterMatchMutationOptions = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof predictFootballTesterMatch>>, TError,PredictFootballTesterMatchMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof predictFootballTesterMatch>>, TError,PredictFootballTesterMatchMutationVariables, TContext> => {
+
+const mutationKey = getPredictFootballTesterMatchMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof predictFootballTesterMatch>>, PredictFootballTesterMatchMutationVariables> = (props) => {
+          const {fixtureId} = props ?? {};
+
+          return  predictFootballTesterMatch(fixtureId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PredictFootballTesterMatchMutationResult = NonNullable<Awaited<ReturnType<typeof predictFootballTesterMatch>>>
+
+    export type PredictFootballTesterMatchMutationError = ErrorType<FootballFixtureError>
+    export type PredictFootballTesterMatchMutationVariables = {fixtureId: number}
+
+    /**
+ * @summary Predict all markets using the newest trained model of each architecture
+ */
+export const usePredictFootballTesterMatch = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof predictFootballTesterMatch>>, TError,PredictFootballTesterMatchMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof predictFootballTesterMatch>>,
+        TError,
+        PredictFootballTesterMatchMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPredictFootballTesterMatchMutationOptions(options));
+    }
 
 export const getGetFootballTesterMatchPayloadUrl = (params: GetFootballTesterMatchPayloadParams,) => {
   const normalizedParams = new URLSearchParams();

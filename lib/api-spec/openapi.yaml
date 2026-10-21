@@ -526,6 +526,68 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballFixtureError"
+  /football/tester-matches/{fixtureId}/model-predictions:
+    get:
+      operationId: getFootballTesterMatchModelPredictions
+      tags: [model-training]
+      summary: Get saved model predictions for a tester fixture
+      parameters:
+        - name: fixtureId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Saved predictions from the available trained models
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballTesterMatchPredictions"
+        "400":
+          description: Invalid match ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+    post:
+      operationId: predictFootballTesterMatch
+      tags: [model-training]
+      summary: Predict all markets using the newest trained model of each architecture
+      description: Uses the saved pre-match tester fixture and only earlier archived match history; predictions are persisted for graph views.
+      parameters:
+        - name: fixtureId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Predictions from every available trained architecture
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballTesterMatchPredictions"
+        "400":
+          description: Invalid match ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "404":
+          description: Tester fixture was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "422":
+          description: No prediction-ready model is available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
   /football/tester-match-payload:
     get:
       operationId: getFootballTesterMatchPayload
@@ -1156,6 +1218,8 @@ components:
             type: number
         hasSavedWeights:
           type: boolean
+        hasPredictionArtifact:
+          type: boolean
         error:
           type: ["string", "null"]
         createdAt:
@@ -1184,6 +1248,7 @@ components:
         - trainingLoss
         - validationLoss
         - hasSavedWeights
+        - hasPredictionArtifact
         - error
         - createdAt
         - updatedAt
@@ -1226,6 +1291,111 @@ components:
         - outcomeCounts
         - verifiedOddsFixtureCount
         - runs
+    FootballModelResultProbabilities:
+      type: object
+      properties:
+        home:
+          type: number
+          minimum: 0
+          maximum: 1
+        draw:
+          type: number
+          minimum: 0
+          maximum: 1
+        away:
+          type: number
+          minimum: 0
+          maximum: 1
+      required: [home, draw, away]
+    FootballYesNoProbabilities:
+      type: object
+      properties:
+        yes:
+          type: number
+          minimum: 0
+          maximum: 1
+        no:
+          type: number
+          minimum: 0
+          maximum: 1
+      required: [yes, no]
+    FootballOverUnderProbabilities:
+      type: object
+      properties:
+        over:
+          type: number
+          minimum: 0
+          maximum: 1
+        under:
+          type: number
+          minimum: 0
+          maximum: 1
+      required: [over, under]
+    FootballCorrectScorePrediction:
+      type: object
+      properties:
+        scoreline:
+          type: string
+        probability:
+          type: number
+          minimum: 0
+          maximum: 1
+      required: [scoreline, probability]
+    FootballModelPrediction:
+      type: object
+      properties:
+        fixtureId:
+          type: integer
+          minimum: 1
+        runId:
+          type: string
+          format: uuid
+        modelType:
+          $ref: "#/components/schemas/FootballModelType"
+        result:
+          $ref: "#/components/schemas/FootballModelResultProbabilities"
+        bothTeamsToScore:
+          $ref: "#/components/schemas/FootballYesNoProbabilities"
+        overUnder25:
+          $ref: "#/components/schemas/FootballOverUnderProbabilities"
+        overUnder35:
+          $ref: "#/components/schemas/FootballOverUnderProbabilities"
+        correctScoreTop:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballCorrectScorePrediction"
+        historyMatchCount:
+          type: integer
+          minimum: 0
+        verifiedOddsHistoryCount:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - fixtureId
+        - runId
+        - modelType
+        - result
+        - bothTeamsToScore
+        - overUnder25
+        - overUnder35
+        - correctScoreTop
+        - historyMatchCount
+        - verifiedOddsHistoryCount
+        - createdAt
+    FootballTesterMatchPredictions:
+      type: object
+      properties:
+        fixtureId:
+          type: integer
+          minimum: 1
+        predictions:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballModelPrediction"
+      required: [fixtureId, predictions]
     DeleteFootballProcessedMatchesResponse:
       type: object
       properties:

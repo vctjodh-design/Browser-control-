@@ -128,6 +128,7 @@ export interface FootballModelTrainingRun {
   trainingLoss: number[];
   validationLoss: number[];
   hasSavedWeights: boolean;
+  hasPredictionArtifact: boolean;
   /** @nullable */
   error: string | null;
   createdAt: string;
@@ -150,6 +151,82 @@ export interface FootballModelTrainingDashboard {
   outcomeCounts: FootballModelTrainingOutcomeCounts;
   verifiedOddsFixtureCount: number;
   runs: FootballModelTrainingRun[];
+}
+
+export interface FootballModelResultProbabilities {
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  home: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  draw: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  away: number;
+}
+
+export interface FootballYesNoProbabilities {
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  yes: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  no: number;
+}
+
+export interface FootballOverUnderProbabilities {
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  over: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  under: number;
+}
+
+export interface FootballCorrectScorePrediction {
+  scoreline: string;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  probability: number;
+}
+
+export interface FootballModelPrediction {
+  /** @minimum 1 */
+  fixtureId: number;
+  runId: string;
+  modelType: FootballModelType;
+  result: FootballModelResultProbabilities;
+  bothTeamsToScore: FootballYesNoProbabilities;
+  overUnder25: FootballOverUnderProbabilities;
+  overUnder35: FootballOverUnderProbabilities;
+  correctScoreTop: FootballCorrectScorePrediction[];
+  /** @minimum 0 */
+  historyMatchCount: number;
+  /** @minimum 0 */
+  verifiedOddsHistoryCount: number;
+  createdAt: string;
+}
+
+export interface FootballTesterMatchPredictions {
+  /** @minimum 1 */
+  fixtureId: number;
+  predictions: FootballModelPrediction[];
 }
 
 export interface DeleteFootballProcessedMatchesResponse {

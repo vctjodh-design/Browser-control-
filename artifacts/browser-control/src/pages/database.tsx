@@ -19,6 +19,7 @@ import {
 import type { FootballProcessedMatchSummary, FootballTesterMatchSummary } from '@workspace/api-client-react';
 import { Link, useLocation } from 'wouter';
 import { Archive, Braces, CalendarDays, Check, ChevronRight, CircleAlert, Database, FileJson2, FlaskConical, RefreshCw, Search, Trash2, Trophy, X } from 'lucide-react';
+import { TesterModelPredictionsPanel } from '@/components/model-predictions-panel';
 
 type ArchiveKind = 'database' | 'tester';
 type ArchiveRecord = FootballProcessedMatchSummary | FootballTesterMatchSummary;
@@ -117,6 +118,7 @@ function DetailPanel({ fixtureId, kind }: { fixtureId: number | null; kind: Arch
       <p className="border-t border-[#e8e6de] bg-[#fbfaf6] px-4 py-2.5 text-[9px] leading-4 text-[#858982]">{kind === 'tester' ? 'The target match score and outcome are not stored. Recent form and H2H use only matches before kickoff; league standings are the latest available, not a historical match-day snapshot.' : 'League goal average uses the season standings available at import time; it is not a historical match-day snapshot.'}</p>
       {record.completeness === 'partial' && <p role="status" className="border-t border-[#ead9c4] bg-[#fbf3e9] px-4 py-2.5 text-[9px] text-[#84684f]">Partial analysis record · {record.issueCount} issue{record.issueCount === 1 ? '' : 's'} recorded. The stored payload may contain unavailable sections.</p>}
     </article>
+      {kind === 'tester' && <TesterModelPredictionsPanel fixtureId={displayRecord.fixtureId} />}
       <p className="px-1 text-[9px] leading-4 text-[#858982]">Large stored payloads load on demand. Open a section to fetch its compressed archive data.</p>
       <DataBlock fixtureId={displayRecord.fixtureId} section="details" kind={kind} title={kind === 'tester' ? 'Pre-match metadata and standings' : 'Match details payload'} />
       <DataBlock fixtureId={displayRecord.fixtureId} section="lastFive" kind={kind} title={kind === 'tester' ? 'Last-five and H2H pre-match payload' : 'Last five payload'} />

@@ -32,6 +32,7 @@ export interface FootballModelTrainingRun {
   trainingLoss: number[];
   validationLoss: number[];
   hasSavedWeights: boolean;
+  hasPredictionArtifact: boolean;
   /** @nullable */
   error: string | null;
   createdAt: Date;

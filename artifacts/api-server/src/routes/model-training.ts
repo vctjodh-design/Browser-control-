@@ -1,21 +1,31 @@
 import { Router, type IRouter } from "express";
 import {
+  GetFootballTesterMatchModelPredictionsParams,
+  GetFootballTesterMatchModelPredictionsResponse,
   GetFootballModelTrainingDashboardResponse,
   GetFootballModelTrainingRunParams,
   GetFootballModelTrainingRunResponse,
+  PredictFootballTesterMatchParams,
+  PredictFootballTesterMatchResponse,
   StartFootballModelTrainingBody,
   StartFootballModelTrainingResponse,
 } from "@workspace/api-zod";
 import {
   createModelTrainingRun,
   findActiveModelTrainingRun,
+  getModelTrainingArtifact,
   getModelTrainingRun,
+  getTesterPredictionTarget,
   listModelTrainingMatches,
+  listModelPredictionsForFixture,
   listModelTrainingRuns,
+  saveModelPrediction,
   updateModelTrainingRun,
 } from "../lib/processed-match-store";
 import {
   countVerifiedOddsFixtures,
+  isModelPredictorArtifact,
+  predictArchivedFixture,
   trainArchivedModel,
 } from "../lib/model-training-engine";
 import { logger } from "../lib/logger";
@@ -84,7 +94,7 @@ function trainRunInBackground(
       trainingLoss: result.trainingLoss,
       validationLoss: result.validationLoss,
       error: null,
-    }, JSON.stringify(result.weights));
+    }, JSON.stringify(result.predictorArtifact));
   }).catch((error: unknown) => {
     const latest = getModelTrainingRun(runId);
     if (latest) {
@@ -144,5 +154,110 @@ router.post("/football/model-training/runs", (req, res): void => {
   res.status(202).json(StartFootballModelTrainingResponse.parse(run));
   setImmediate(() => trainRunInBackground(run.id, input.data, matches));
 });
+
+router.get(
+  "/football/tester-matches/:fixtureId/model-predictions",
+  (req, res): void => {
+    const params = GetFootballTesterMatchModelPredictionsParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+    res.json(
+      GetFootballTesterMatchModelPredictionsResponse.parse({
+        fixtureId: params.data.fixtureId,
+        predictions: listModelPredictionsForFixture(params.data.fixtureId),
+      }),
+    );
+  },
+);
+
+router.post(
+  "/football/tester-matches/:fixtureId/model-predictions",
+  async (req, res): Promise<void> => {
+    const params = PredictFootballTesterMatchParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+    const fixtureId = params.data.fixtureId;
+    const target = getTesterPredictionTarget(fixtureId);
+    if (!target) {
+      res.status(404).json({ error: "Tester record was not found." });
+      return;
+    }
+
+    const latestByModelType = new Map<
+      string,
+      ReturnType<typeof listModelTrainingRuns>[number]
+    >();
+    for (const run of listModelTrainingRuns(50)) {
+      if (
+        run.status === "completed" &&
+        run.hasPredictionArtifact &&
+        !latestByModelType.has(run.modelType)
+      ) {
+        latestByModelType.set(run.modelType, run);
+      }
+    }
+    const runs = [...latestByModelType.values()];
+    if (!runs.length) {
+      res.status(422).json({
+        error: "Train a new model after the multi-market update before predicting. Older runs do not include prediction-ready weights.",
+      });
+      return;
+    }
+
+    const matches = listModelTrainingMatches();
+    for (const run of runs) {
+      const artifact = getModelTrainingArtifact(run.id);
+      if (!isModelPredictorArtifact(artifact)) continue;
+      try {
+        const forecast = await predictArchivedFixture({
+          modelType: run.modelType,
+          sequenceLength: run.sequenceLength,
+          hiddenUnits: run.hiddenUnits,
+          artifact,
+          target,
+          matches,
+        });
+        const prediction = PredictFootballTesterMatchResponse.parse({
+          fixtureId,
+          predictions: [
+            {
+              fixtureId,
+              runId: run.id,
+              modelType: run.modelType,
+              ...forecast,
+              createdAt: new Date(),
+            },
+          ],
+        }).predictions[0];
+        saveModelPrediction(prediction);
+      } catch (error) {
+        logger.warn(
+          {
+            runId: run.id,
+            modelType: run.modelType,
+            errorName: error instanceof Error ? error.name : "UnknownError",
+          },
+          "Could not score tester fixture with a trained model",
+        );
+      }
+    }
+
+    const response = {
+      fixtureId,
+      predictions: listModelPredictionsForFixture(fixtureId),
+    };
+    if (!response.predictions.length) {
+      res.status(422).json({
+        error: "No trained model could score this fixture. Retrain a model and try again.",
+      });
+      return;
+    }
+    res.json(PredictFootballTesterMatchResponse.parse(response));
+  },
+);
 
 export default router;
