@@ -13,6 +13,7 @@ import { MatchupAnalysisPanel } from '@/components/matchup-analysis-panel';
 import { PerformanceGraphsPanel } from '@/components/performance-graphs-panel';
 import { ModelPredictionGraphs } from '@/components/model-predictions-panel';
 import { LastFivePanel } from '@/components/last-five-panel';
+import FairAiSourceDataPanel from '@/components/fair-ai-source-data-panel';
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -26,17 +27,18 @@ import {
   Trophy,
 } from 'lucide-react';
 
-type MatchTab = 'table' | 'odds' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
+type MatchTab = 'table' | 'fair-ai' | 'odds' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
 const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'table', label: 'Table', short: '01' },
-  { id: 'odds', label: 'Odds', short: '02' },
-  { id: 'form', label: 'Team form', short: '03' },
-  { id: 'lastfive', label: 'Last five', short: '04' },
-  { id: 'h2h', label: 'Head to head', short: '05' },
-  { id: 'tmp', label: 'TMP', short: '06' },
-  { id: 'insights', label: 'Matchup analysis', short: '07' },
-  { id: 'graphs', label: 'Graph Representations', short: '08' },
-  { id: 'predictions', label: 'Predictions', short: '09' },
+  { id: 'fair-ai', label: 'FAIR AI', short: '02' },
+  { id: 'odds', label: 'Odds', short: '03' },
+  { id: 'form', label: 'Team form', short: '04' },
+  { id: 'lastfive', label: 'Last five', short: '05' },
+  { id: 'h2h', label: 'Head to head', short: '06' },
+  { id: 'tmp', label: 'TMP', short: '07' },
+  { id: 'insights', label: 'Matchup analysis', short: '08' },
+  { id: 'graphs', label: 'Graph Representations', short: '09' },
+  { id: 'predictions', label: 'Predictions', short: '10' },
 ];
 
 function readableError(error: unknown) {
@@ -314,6 +316,18 @@ export default function MatchDetailsPage() {
               </div>
               <div className="p-4 sm:p-6">
                 {activeTab === 'table' && <StandingsPanel details={details} />}
+                {activeTab === 'fair-ai' && (
+                  <section className="space-y-4" aria-labelledby="fair-ai-match-title" data-testid="panel-fair-ai">
+                    <div className="rounded-xl border border-[#d9e0d6] bg-[#f0f4ed] px-4 py-3.5">
+                      <p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">Player-level decision analysis</p>
+                      <h2 id="fair-ai-match-title" className="mt-1 text-[14px] font-extrabold text-[#344550]">FAIR AI data for {match.home.name} vs {match.away.name}</h2>
+                      <p className="mt-1 text-[9px] leading-5 text-[#727973]">
+                        This tab shows the source-data coverage available for this match and the archive. KickoffScore provides aggregate match and lineup records here, but no pitch coordinates or player tracking, so spatial xT/EVA evaluation is not available yet.
+                      </p>
+                    </div>
+                    <FairAiSourceDataPanel />
+                  </section>
+                )}
                 {activeTab === 'odds' && <OddsPanel details={details} />}
                 {activeTab === 'form' && <FormPanel details={details} />}
                 {activeTab === 'h2h' && <HeadToHeadPanel details={details} />}
