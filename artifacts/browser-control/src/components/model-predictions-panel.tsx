@@ -84,9 +84,25 @@ function PredictionCards({
   predictions: FootballModelPrediction[];
   compact?: boolean;
 }) {
+  const latestByModel = new Map<FootballModelType, FootballModelPrediction>();
+  for (const prediction of predictions) {
+    const existing = latestByModel.get(prediction.modelType);
+    if (
+      !existing ||
+      Date.parse(String(prediction.createdAt)) >= Date.parse(String(existing.createdAt))
+    ) {
+      latestByModel.set(prediction.modelType, prediction);
+    }
+  }
+  const latestPredictions = [...latestByModel.values()].sort(
+    (first, second) =>
+      Object.keys(MODEL_NAMES).indexOf(first.modelType) -
+      Object.keys(MODEL_NAMES).indexOf(second.modelType),
+  );
+
   return (
     <div className="space-y-3" data-testid="list-model-predictions">
-      {predictions.map((prediction) => (
+      {latestPredictions.map((prediction) => (
         <article
           key={prediction.runId}
           className="overflow-hidden rounded-xl border border-[#e0ded5] bg-[#fbfaf6]"

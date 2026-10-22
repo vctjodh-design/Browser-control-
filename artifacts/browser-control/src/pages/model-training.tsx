@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'wouter';
+import ModelPredictionsTab from '@/components/model-predictions-tab';
 import {
   getGetFootballModelTrainingDashboardQueryKey,
   getGetFootballModelTrainingRunQueryKey,
@@ -139,6 +140,7 @@ function ConfusionMatrix({ matrix }: { matrix: number[][] }) {
 
 export default function ModelTrainingPage() {
   const client = useQueryClient();
+  const [activeTab, setActiveTab] = useState<'training' | 'predictions'>('training');
   const dashboardQuery = useGetFootballModelTrainingDashboard({
     query: { queryKey: getGetFootballModelTrainingDashboardQueryKey() },
   });
@@ -211,6 +213,52 @@ export default function ModelTrainingPage() {
           </div>
         </header>
 
+        <div
+          className="mb-5 inline-flex rounded-xl border border-[#deddd3] bg-[#efeee7] p-1"
+          role="tablist"
+          aria-label="Model lab views"
+          data-testid="tabs-model-lab"
+        >
+          {([
+            { id: 'training', label: 'Training', icon: Activity },
+            { id: 'predictions', label: 'Predictions', icon: BarChart3 },
+          ] as const).map((tab) => {
+            const Icon = tab.icon;
+            const selected = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                id={`tab-model-${tab.id}`}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                aria-controls={`panel-model-${tab.id}`}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => setActiveTab(tab.id)}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+                    event.preventDefault();
+                    const nextTab = activeTab === 'training' ? 'predictions' : 'training';
+                    setActiveTab(nextTab);
+                    document.getElementById(`tab-model-${nextTab}`)?.focus();
+                  }
+                }}
+                className={`inline-flex h-9 items-center gap-2 rounded-lg px-3.5 text-[9px] font-extrabold transition ${
+                  selected
+                    ? 'bg-[#253746] text-[#f8f2e7] shadow-sm'
+                    : 'text-[#64716d] hover:bg-[#fbfaf6] hover:text-[#344550]'
+                }`}
+                data-testid={`tab-model-${tab.id}`}
+              >
+                <Icon size={13} />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {activeTab === 'training' ? (
+          <div id="panel-model-training" role="tabpanel" aria-labelledby="tab-model-training">
         <section aria-labelledby="archive-summary-title" className="mb-6 overflow-hidden rounded-[16px] border border-[#d6d5cc] bg-[#f9f8f3] shadow-[0_12px_36px_rgba(47,59,64,.045)]" data-testid="section-training-dataset">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e1dfd7] bg-[#f4f3ed] px-4 py-3.5 sm:px-5">
             <div className="flex items-center gap-2.5"><span className="grid size-8 place-items-center rounded-lg bg-[#e6eee8] text-[#537867]"><Layers3 size={15} /></span><div><h2 id="archive-summary-title" className="text-[12px] font-extrabold text-[#344550]">Database archive</h2><p className="text-[9px] text-[#858982]">Training source · completed historical matches only</p></div></div>
@@ -340,6 +388,12 @@ export default function ModelTrainingPage() {
         </section>
 
         <footer className="mt-5 flex items-start gap-2 rounded-lg border border-[#e5dcc6] bg-[#f7f0df] px-3.5 py-3 text-[8px] leading-[1.7] text-[#81745e]" role="note" data-testid="notice-experimental-results"><AlertTriangle size={13} className="mt-0.5 shrink-0 text-[#a2814b]" /><p><strong className="text-[#756341]">Research only.</strong> Model outputs are experimental and may be unstable on small or changing datasets. They are not betting advice, and should not be used as a guarantee of match outcomes.</p></footer>
+          </div>
+        ) : (
+          <div id="panel-model-predictions" role="tabpanel" aria-labelledby="tab-model-predictions">
+            <ModelPredictionsTab />
+          </div>
+        )}
       </div>
     </main>
   );
