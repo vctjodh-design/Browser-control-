@@ -10,6 +10,7 @@ import type {
 } from "@workspace/api-zod";
 import { database } from "./processed-match-store";
 import { runFairAiPossessionSimulation } from "./fair-ai-possession-simulator";
+import { getFreshKickoffScoreFairAiSnapshots } from "./kickoffscore-last-five";
 
 type JsonObject = Record<string, unknown>;
 type SqlRow = Record<string, unknown>;
@@ -629,6 +630,7 @@ function importArchivePayload(
     awayScore: number | null;
     observedAt: string;
   },
+  replaceFixtureData = false,
 ): void {
   const detailUrl = safeSourceUrl(details.sourceUrl, fixtureId);
   const primary = object(details.match);
@@ -653,6 +655,11 @@ function importArchivePayload(
 
   database.exec("BEGIN IMMEDIATE");
   try {
+    if (replaceFixtureData) {
+      database.prepare("DELETE FROM fair_ai_player_matches WHERE fixture_id = ?").run(fixtureId);
+      database.prepare("DELETE FROM fair_ai_team_match_profiles WHERE fixture_id = ?").run(fixtureId);
+      database.prepare("DELETE FROM fair_ai_match_events WHERE fixture_id = ?").run(fixtureId);
+    }
     registerMatch(primaryMatch, detailUrl, fallback.observedAt, fixtureId);
     importStandings(details, detailUrl, fallback.observedAt);
     importLineups(
@@ -755,6 +762,55 @@ export function saveFairAiFixture(
       observedAt: summary.processedAt.toISOString(),
     },
   );
+}
+
+function saveFreshFairAiSourceSnapshot(
+  fixtureId: number,
+  details: JsonObject,
+): void {
+  const match = object(details.match);
+  const home = object(match.home);
+  const away = object(match.away);
+  const matchDate = text(match.date);
+  const homeTeamName = text(home.name);
+  const awayTeamName = text(away.name);
+  if (!matchDate || !homeTeamName || !awayTeamName) {
+    throw new Error(`KickoffScore returned incomplete match details for fixture ${fixtureId}.`);
+  }
+  importArchivePayload(
+    fixtureId,
+    details,
+    {},
+    {
+      matchDate,
+      competition: text(match.competition) ?? "Football",
+      leagueId: integer(match.leagueId),
+      season: integer(match.season),
+      homeTeamName,
+      awayTeamName,
+      homeScore: integer(home.score),
+      awayScore: integer(away.score),
+      observedAt: new Date().toISOString(),
+    },
+    true,
+  );
+}
+
+async function refreshFairAiTeamsFromSource(teamKeys: string[]): Promise<void> {
+  const selectedTeams = [...new Set(teamKeys)].map((key) => {
+    const row = database
+      .prepare("SELECT source_team_id FROM fair_ai_teams WHERE team_key = ?")
+      .get(key) as SqlRow | undefined;
+    const sourceTeamId = integer(row?.source_team_id);
+    if (sourceTeamId === null) {
+      throw new Error("This team has no KickoffScore ID, so its live match details cannot be refreshed.");
+    }
+    return sourceTeamId;
+  });
+  const refreshed = await getFreshKickoffScoreFairAiSnapshots(selectedTeams, 5);
+  for (const snapshot of refreshed.snapshots) {
+    if (snapshot) saveFreshFairAiSourceSnapshot(snapshot.fixtureId, snapshot.details);
+  }
 }
 
 let workerStarted = false;
@@ -1483,14 +1539,18 @@ function simulationTeam(team: FootballFairAiTeam): FootballFairAiTeam {
   };
 }
 
-export function runFairAiArchiveSimulation(
+export async function runFairAiArchiveSimulation(
   input: FootballFairAiSimulationInput,
-): FootballFairAiSimulation | null {
+): Promise<FootballFairAiSimulation | null> {
   const homeBase = fairAiTeamRows("", input.homeTeamKey)[0];
   const awayBase = fairAiTeamRows("", input.awayTeamKey)[0];
   if (!homeBase || !awayBase) return null;
-  const home = simulationTeam(homeBase);
-  const away = simulationTeam(awayBase);
+  await refreshFairAiTeamsFromSource([input.homeTeamKey, input.awayTeamKey]);
+  const refreshedHomeBase = fairAiTeamRows("", input.homeTeamKey)[0];
+  const refreshedAwayBase = fairAiTeamRows("", input.awayTeamKey)[0];
+  if (!refreshedHomeBase || !refreshedAwayBase) return null;
+  const home = simulationTeam(refreshedHomeBase);
+  const away = simulationTeam(refreshedAwayBase);
   return runFairAiPossessionSimulation(home, away, input.iterations ?? 10_000);
 }
 

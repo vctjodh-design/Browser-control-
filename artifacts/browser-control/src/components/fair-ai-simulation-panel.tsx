@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
+  getGetFootballFairAiDataQueryKey,
   getGetFootballFairAiTeamsQueryKey,
   useGetFootballFairAiTeams,
   useRunFootballFairAiSimulation,
@@ -219,6 +221,7 @@ function SampledPossession({
 }
 
 export default function FairAiSimulationPanel() {
+  const queryClient = useQueryClient();
   const [homeSearch, setHomeSearch] = useState('');
   const [awaySearch, setAwaySearch] = useState('');
   const [home, setHome] = useState<FootballFairAiTeam | null>(null);
@@ -230,7 +233,19 @@ export default function FairAiSimulationPanel() {
   const runSimulation = () => {
     if (!home || !away || home.teamKey === away.teamKey || simulation.isPending) return;
     setSelectedPossession(0);
-    simulation.mutate({ data: { homeTeamKey: home.teamKey, awayTeamKey: away.teamKey, iterations: 10_000 } });
+    simulation.mutate(
+      { data: { homeTeamKey: home.teamKey, awayTeamKey: away.teamKey, iterations: 10_000 } },
+      {
+        onSuccess: () => {
+          void queryClient.invalidateQueries({
+            queryKey: getGetFootballFairAiDataQueryKey(),
+          });
+          void queryClient.invalidateQueries({
+            queryKey: getGetFootballFairAiTeamsQueryKey(),
+          });
+        },
+      },
+    );
   };
 
   const result = simulation.data;
@@ -270,7 +285,7 @@ export default function FairAiSimulationPanel() {
           <p>Possession paths, pitch coordinates and EVA-style values are generated simulation proxies—not observed player tracking or measured FAIR EVA/xT. This is a simulation, not a trained RL policy.</p>
         </div>
         <p className="max-w-[820px] text-[9px] leading-[1.7] text-[#737c73]">
-          Select two teams with completed archive matches. The Monte Carlo run estimates match outcomes, then exposes example possession sequences, player actions and a model-generated pitch activity grid.
+          Each run first fetches the selected teams&apos; five latest completed match records directly from KickoffScore. It then estimates match outcomes and shows example possession sequences, player actions and a model-generated pitch activity grid. If fresh source data is unavailable, the run stops rather than using stale records.
         </p>
         <div className="grid gap-3 md:grid-cols-2">
           <TeamPicker side="home" search={homeSearch} onSearch={setHomeSearch} selected={home} onSelect={setHome} />
@@ -284,7 +299,7 @@ export default function FairAiSimulationPanel() {
             className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#253746] px-4 text-[9px] font-extrabold text-[#f8f2e7] transition hover:bg-[#344b5a] disabled:cursor-not-allowed disabled:opacity-45"
             data-testid="button-run-fair-ai-simulation"
           >
-            {simulation.isPending ? <><RefreshCw size={12} className="animate-spin" /> Running 10,000 runs…</> : <><Play size={12} /> Run simulation</>}
+            {simulation.isPending ? <><RefreshCw size={12} className="animate-spin" /> Refreshing source &amp; running…</> : <><Play size={12} /> Run simulation</>}
           </button>
           {home && away && home.teamKey === away.teamKey && (
             <span className="text-[8px] text-[#a35f4d]" role="status">Select two different teams.</span>
