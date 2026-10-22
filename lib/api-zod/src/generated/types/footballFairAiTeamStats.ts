@@ -18,13 +18,49 @@ export interface FootballFairAiTeamStats {
   /** @nullable */
   shotsOnTargetPerMatch: number | null;
   /** @nullable */
+  passesPerMatch: number | null;
+  /** @nullable */
+  shotsInsideBoxPerMatch: number | null;
+  /** @nullable */
   boxTouchesPerMatch: number | null;
   /** @nullable */
   bigChancesPerMatch: number | null;
   /** @nullable */
+  bigChancesMissedPerMatch: number | null;
+  /** @nullable */
   passCompletionPct: number | null;
   /** @nullable */
+  longBallCompletionPct: number | null;
+  /** @nullable */
+  finalThirdPassCompletionPct: number | null;
+  /** @nullable */
+  duelWinPct: number | null;
+  /** @nullable */
   defensiveActionsPerMatch: number | null;
+  /** @nullable */
+  recoveriesPerMatch: number | null;
+  /** @nullable */
+  redCardsPerMatch: number | null;
+  /** @nullable */
+  yellowCardsPerMatch: number | null;
+  /** @nullable */
+  leagueRank: number | null;
+  /** @nullable */
+  leaguePlayed: number | null;
+  /** @nullable */
+  leaguePoints: number | null;
+  /** @nullable */
+  goalDifference: number | null;
+  /** @nullable */
+  leagueForm: string | null;
+  coachMatches: number;
+  coachWins: number;
+  coachDraws: number;
+  coachLosses: number;
+  /** @nullable */
+  coachWinPct: number | null;
+  /** @nullable */
+  daysSinceLastMatch: number | null;
   matchStatSampleCount: number;
   /** @nullable */
   coachName: string | null;

@@ -925,7 +925,7 @@ export const getRunFootballFairAiSimulationUrl = () => {
 }
 
 /**
- * @summary Run an archive-based Monte Carlo scoreline preview
+ * @summary Run an archive-based possession and player-action simulation
  */
 export const runFootballFairAiSimulation = async (footballFairAiSimulationInput: FootballFairAiSimulationInput, options?: Parameters<typeof customFetch>[1]): Promise<FootballFairAiSimulation> => {
 
@@ -991,7 +991,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RunFootballFairAiSimulationMutationVariables = {data: BodyType<FootballFairAiSimulationInput>}
 
     /**
- * @summary Run an archive-based Monte Carlo scoreline preview
+ * @summary Run an archive-based possession and player-action simulation
  */
 export const useRunFootballFairAiSimulation = <TError = ErrorType<FootballFixtureError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runFootballFairAiSimulation>>, TError,RunFootballFairAiSimulationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}

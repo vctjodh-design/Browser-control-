@@ -7,4 +7,4 @@ The user is building a 100% replica of FAIR AI: player-level football decision e
 
 **Why:** The user explicitly stated the goal is a 100% FAIR AI replica. The current archive does not provide tracked pitch coordinates or action trajectories as model inputs.
 
-**How to apply:** Treat player, coach, team, and match sources as inputs to the intended replica. Verify source coverage and identifiers; keep unavailable inputs visible and do not present aggregate match forecasts as player-level xT, EVA, or RL simulation.
+**How to apply:** Treat player, coach, team, and match sources as inputs to the intended replica. A generated pitch grid and EVA-style delta are acceptable only as clearly labeled simulation proxies; never present them as observed tracking, measured xT/EVA, or a trained RL policy. Verify source coverage and identifiers, and keep unavailable inputs visible.

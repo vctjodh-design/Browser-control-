@@ -92,14 +92,14 @@ export default function FairAiSourceDataPanel() {
         <button
           type="button"
           onClick={startIngestion}
-          disabled={busy || complete}
+          disabled={busy}
           className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#253746] px-3 text-[9px] font-extrabold text-[#f8f2e7] transition hover:bg-[#344b5a] disabled:cursor-not-allowed disabled:opacity-55 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d96f51]"
           data-testid="button-ingest-fair-ai-data"
         >
           {busy
             ? <><RefreshCw size={12} className="animate-spin" aria-hidden="true" /> Importing archive</>
             : complete
-              ? <><CheckCircle2 size={12} aria-hidden="true" /> Archive imported</>
+              ? <><RefreshCw size={12} aria-hidden="true" /> Refresh imported archive</>
               : <><RefreshCw size={12} aria-hidden="true" /> {summary?.processedSourceFixtureCount ? 'Resume archive import' : 'Import archive'}</>}
         </button>
       </div>

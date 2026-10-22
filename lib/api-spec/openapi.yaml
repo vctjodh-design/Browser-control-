@@ -283,7 +283,7 @@ paths:
     post:
       operationId: runFootballFairAiSimulation
       tags: [fair-ai]
-      summary: Run an archive-based Monte Carlo scoreline preview
+      summary: Run an archive-based possession and player-action simulation
       requestBody:
         required: true
         content:
@@ -292,7 +292,7 @@ paths:
               $ref: "#/components/schemas/FootballFairAiSimulationInput"
       responses:
         "200":
-          description: Monte Carlo outcome distribution and historical input summary
+          description: Monte Carlo match outcomes, simulated possession sequences, player contributions, and generated pitch activity grid
           content:
             application/json:
               schema:
@@ -1540,11 +1540,15 @@ components:
           type: ["number", "null"]
         shotsOnTargetPerMatch:
           type: ["number", "null"]
+        passesPerMatch:
+          type: ["number", "null"]
         shotsInsideBoxPerMatch:
           type: ["number", "null"]
         boxTouchesPerMatch:
           type: ["number", "null"]
         bigChancesPerMatch:
+          type: ["number", "null"]
+        bigChancesMissedPerMatch:
           type: ["number", "null"]
         passCompletionPct:
           type: ["number", "null"]
@@ -1564,11 +1568,21 @@ components:
           type: ["number", "null"]
         leagueRank:
           type: ["integer", "null"]
+        leaguePlayed:
+          type: ["integer", "null"]
         leaguePoints:
           type: ["integer", "null"]
         goalDifference:
           type: ["integer", "null"]
+        leagueForm:
+          type: ["string", "null"]
         coachMatches:
+          type: integer
+        coachWins:
+          type: integer
+        coachDraws:
+          type: integer
+        coachLosses:
           type: integer
         coachWinPct:
           type: ["number", "null"]
@@ -1584,9 +1598,11 @@ components:
         - possessionPct
         - shotsPerMatch
         - shotsOnTargetPerMatch
+        - passesPerMatch
         - shotsInsideBoxPerMatch
         - boxTouchesPerMatch
         - bigChancesPerMatch
+        - bigChancesMissedPerMatch
         - passCompletionPct
         - longBallCompletionPct
         - finalThirdPassCompletionPct
@@ -1596,9 +1612,14 @@ components:
         - redCardsPerMatch
         - yellowCardsPerMatch
         - leagueRank
+        - leaguePlayed
         - leaguePoints
         - goalDifference
+        - leagueForm
         - coachMatches
+        - coachWins
+        - coachDraws
+        - coachLosses
         - coachWinPct
         - daysSinceLastMatch
         - matchStatSampleCount
@@ -1610,11 +1631,41 @@ components:
           type: string
         name:
           type: string
+        shirtNumber:
+          type: ["integer", "null"]
         position:
+          type: ["string", "null"]
+        age:
+          type: ["integer", "null"]
+        height:
+          type: ["string", "null"]
+        weight:
+          type: ["string", "null"]
+        nationality:
+          type: ["string", "null"]
+        preferredFoot:
+          type: ["string", "null"]
+        marketValue:
+          type: ["string", "null"]
+        contractUntil:
           type: ["string", "null"]
         starter:
           type: boolean
         appearances:
+          type: integer
+        ratedAppearances:
+          type: integer
+        minutesPlayed:
+          type: integer
+        cleanSheets:
+          type: integer
+        goalsConceded:
+          type: integer
+        totalSaves:
+          type: integer
+        yellowCards:
+          type: integer
+        redCards:
           type: integer
         averageRating:
           type: ["number", "null"]
@@ -1626,6 +1677,8 @@ components:
           type: number
         shotsPer90:
           type: number
+        shotAccuracyPct:
+          type: ["number", "null"]
         expectedGoalsPer90:
           type: number
         goalsPer90:
@@ -1643,14 +1696,30 @@ components:
       required:
         - playerKey
         - name
+        - shirtNumber
         - position
+        - age
+        - height
+        - weight
+        - nationality
+        - preferredFoot
+        - marketValue
+        - contractUntil
         - starter
         - appearances
+        - ratedAppearances
+        - minutesPlayed
+        - cleanSheets
+        - goalsConceded
+        - totalSaves
+        - yellowCards
+        - redCards
         - averageRating
         - minutesPerMatch
         - passCompletionPct
         - keyPassesPer90
         - shotsPer90
+        - shotAccuracyPct
         - expectedGoalsPer90
         - goalsPer90
         - assistsPer90
@@ -1728,6 +1797,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FootballFairAiSimulationContribution"
+        possessionModel:
+          $ref: "#/components/schemas/FootballFairAiPossessionModel"
         method:
           type: string
         limitations:
@@ -1744,8 +1815,159 @@ components:
         - probabilities
         - topScorelines
         - playerContributions
+        - possessionModel
         - method
         - limitations
+    FootballFairAiPossessionModel:
+      type: object
+      properties:
+        gridColumns:
+          type: integer
+        gridRows:
+          type: integer
+        coordinateBasis:
+          type: string
+        home:
+          $ref: "#/components/schemas/FootballFairAiPossessionTeam"
+        away:
+          $ref: "#/components/schemas/FootballFairAiPossessionTeam"
+        sampledPossessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFairAiSimulatedPossession"
+      required:
+        - gridColumns
+        - gridRows
+        - coordinateBasis
+        - home
+        - away
+        - sampledPossessions
+    FootballFairAiPossessionTeam:
+      type: object
+      properties:
+        teamKey:
+          type: string
+        teamName:
+          type: string
+        possessionSharePct:
+          type: number
+        possessionsPerMatch:
+          type: number
+        actionsPerMatch:
+          type: number
+        averageActionsPerPossession:
+          type: number
+        passesPerMatch:
+          type: number
+        carriesPerMatch:
+          type: number
+        shotsPerMatch:
+          type: number
+        turnoversPerMatch:
+          type: number
+        expectedGoalsPerMatch:
+          type: number
+        estimatedValueAddedPer90:
+          type: number
+        gridCells:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFairAiPossessionGridCell"
+      required:
+        - teamKey
+        - teamName
+        - possessionSharePct
+        - possessionsPerMatch
+        - actionsPerMatch
+        - averageActionsPerPossession
+        - passesPerMatch
+        - carriesPerMatch
+        - shotsPerMatch
+        - turnoversPerMatch
+        - expectedGoalsPerMatch
+        - estimatedValueAddedPer90
+        - gridCells
+    FootballFairAiPossessionGridCell:
+      type: object
+      properties:
+        x:
+          type: integer
+        y:
+          type: integer
+        touches:
+          type: number
+        passes:
+          type: number
+        carries:
+          type: number
+        shots:
+          type: number
+        turnovers:
+          type: number
+        estimatedValueAdded:
+          type: number
+      required: [x, y, touches, passes, carries, shots, turnovers, estimatedValueAdded]
+    FootballFairAiSimulatedPossession:
+      type: object
+      properties:
+        possessionNumber:
+          type: integer
+        teamName:
+          type: string
+        minute:
+          type: integer
+        outcome:
+          type: string
+          enum: [goal, shot, turnover, retained]
+        estimatedValueAdded:
+          type: number
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFairAiSimulatedAction"
+      required: [possessionNumber, teamName, minute, outcome, estimatedValueAdded, actions]
+    FootballFairAiSimulatedAction:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [pass, carry, shot]
+        actorName:
+          type: string
+        targetName:
+          type: ["string", "null"]
+        minute:
+          type: integer
+        startX:
+          type: number
+        startY:
+          type: number
+        endX:
+          type: number
+        endY:
+          type: number
+        outcome:
+          type: string
+          enum: [complete, intercepted, out_of_play, saved, blocked, goal, missed]
+        valueBefore:
+          type: number
+        valueAfter:
+          type: number
+        estimatedValueAdded:
+          type: number
+      required:
+        - action
+        - actorName
+        - targetName
+        - minute
+        - startX
+        - startY
+        - endX
+        - endY
+        - outcome
+        - valueBefore
+        - valueAfter
+        - estimatedValueAdded
     FootballFairAiSimulationContribution:
       type: object
       properties:
@@ -1759,6 +1981,16 @@ components:
           type: integer
         simulatedAssists:
           type: integer
+        simulatedPasses:
+          type: integer
+        simulatedCarries:
+          type: integer
+        simulatedShots:
+          type: integer
+        simulatedDefensiveActions:
+          type: integer
+        estimatedValueAdded:
+          type: number
         contributionScore:
           type: number
       required:
@@ -1767,6 +1999,11 @@ components:
         - playerName
         - simulatedGoals
         - simulatedAssists
+        - simulatedPasses
+        - simulatedCarries
+        - simulatedShots
+        - simulatedDefensiveActions
+        - estimatedValueAdded
         - contributionScore
     FootballFairAiSimulationProbabilities:
       type: object

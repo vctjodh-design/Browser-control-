@@ -12,5 +12,10 @@ export interface FootballFairAiSimulationContribution {
   playerName: string;
   simulatedGoals: number;
   simulatedAssists: number;
+  simulatedPasses: number;
+  simulatedCarries: number;
+  simulatedShots: number;
+  simulatedDefensiveActions: number;
+  estimatedValueAdded: number;
   contributionScore: number;
 }

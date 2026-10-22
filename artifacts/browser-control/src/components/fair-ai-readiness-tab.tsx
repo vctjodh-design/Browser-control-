@@ -257,7 +257,7 @@ export default function FairAiReadinessTab({
                   <div className="min-w-0">
                     <h3 id="fair-scope-title" className="text-[10px] font-extrabold text-[#4f6e5a]">Current engine scope</h3>
                     <p className="mt-1 text-[9px] leading-[1.7] text-[#6f7e70]">
-                      Trained outputs cover 1X2, both teams to score (BTTS), over/under 2.5 and 3.5 goals, and top correct scores. The FAIR AI tab now runs a 10,000-sample archive simulation using available player match statistics and team performance metrics. It is <strong>not a trained reinforcement-learning policy</strong> and does not calculate measured spatial xT/EVA because the source has no continuous player tracking or per-action start/end locations.
+                      Trained outputs cover 1X2, both teams to score (BTTS), over/under 2.5 and 3.5 goals, and top correct scores. The FAIR AI tab also runs a possession-by-possession Monte Carlo simulation using archived player ratings and match statistics, formations, team metrics, and available coach records. Its 12 × 8 pitch paths and EVA-style values are generated proxies—not observed tracking or measured xT/EVA—and this is <strong>not a trained reinforcement-learning policy</strong>. Player bio/season details (age, height, preferred foot, contract, market value) and club profile details (average age, squad value, founding year) are not present in the fixture archive.
                     </p>
                   </div>
                 </div>
@@ -268,7 +268,7 @@ export default function FairAiReadinessTab({
                   <div>
                     <h3 id="archive-vs-features-title" className="text-[10px] font-extrabold text-[#5c6158]">Archived is not modeled</h3>
                     <p className="mt-1 text-[9px] leading-[1.7] text-[#7c8077]">
-                      The archive may store lineups, match events, and aggregate player statistics. Those records are distinct from the active feature set; their presence alone does not mean models consume them.
+                      The possession simulator consumes available lineups, formations, player and team match statistics, coach records, and card events. Standings remain captured context rather than model inputs because historical as-of snapshots are not guaranteed; archived fields are not automatically part of the separate trained prediction models.
                     </p>
                   </div>
                 </div>
@@ -297,7 +297,7 @@ export default function FairAiReadinessTab({
               </ol>
               <div className="flex items-start gap-2.5 border-t border-[#e8e6de] bg-[#f7f6f0] px-3 py-3 text-[9px] leading-[1.65] text-[#777f77] sm:px-4">
                 <GitBranch size={13} className="mt-0.5 shrink-0 text-[#75847a]" aria-hidden="true" />
-                <p><strong className="text-[#53645b]">Before an RL simulator:</strong> player, action, and coach features must be collected and validated. Spatial xT/EVA requires coordinates paired with action outcomes; the simulator is not currently implemented.</p>
+                <p><strong className="text-[#53645b]">For a trained RL policy:</strong> validated state/action/reward data is still required. The current possession simulator is a transparent synthetic baseline, and measured spatial xT/EVA still requires observed coordinates paired with action outcomes.</p>
               </div>
             </section>
 

@@ -203,13 +203,49 @@ export interface FootballFairAiTeamStats {
   /** @nullable */
   shotsOnTargetPerMatch: number | null;
   /** @nullable */
+  passesPerMatch: number | null;
+  /** @nullable */
+  shotsInsideBoxPerMatch: number | null;
+  /** @nullable */
   boxTouchesPerMatch: number | null;
   /** @nullable */
   bigChancesPerMatch: number | null;
   /** @nullable */
+  bigChancesMissedPerMatch: number | null;
+  /** @nullable */
   passCompletionPct: number | null;
   /** @nullable */
+  longBallCompletionPct: number | null;
+  /** @nullable */
+  finalThirdPassCompletionPct: number | null;
+  /** @nullable */
+  duelWinPct: number | null;
+  /** @nullable */
   defensiveActionsPerMatch: number | null;
+  /** @nullable */
+  recoveriesPerMatch: number | null;
+  /** @nullable */
+  redCardsPerMatch: number | null;
+  /** @nullable */
+  yellowCardsPerMatch: number | null;
+  /** @nullable */
+  leagueRank: number | null;
+  /** @nullable */
+  leaguePlayed: number | null;
+  /** @nullable */
+  leaguePoints: number | null;
+  /** @nullable */
+  goalDifference: number | null;
+  /** @nullable */
+  leagueForm: string | null;
+  coachMatches: number;
+  coachWins: number;
+  coachDraws: number;
+  coachLosses: number;
+  /** @nullable */
+  coachWinPct: number | null;
+  /** @nullable */
+  daysSinceLastMatch: number | null;
   matchStatSampleCount: number;
   /** @nullable */
   coachName: string | null;
@@ -219,9 +255,32 @@ export interface FootballFairAiSimulationPlayer {
   playerKey: string;
   name: string;
   /** @nullable */
+  shirtNumber: number | null;
+  /** @nullable */
   position: string | null;
+  /** @nullable */
+  age: number | null;
+  /** @nullable */
+  height: string | null;
+  /** @nullable */
+  weight: string | null;
+  /** @nullable */
+  nationality: string | null;
+  /** @nullable */
+  preferredFoot: string | null;
+  /** @nullable */
+  marketValue: string | null;
+  /** @nullable */
+  contractUntil: string | null;
   starter: boolean;
   appearances: number;
+  ratedAppearances: number;
+  minutesPlayed: number;
+  cleanSheets: number;
+  goalsConceded: number;
+  totalSaves: number;
+  yellowCards: number;
+  redCards: number;
   /** @nullable */
   averageRating: number | null;
   minutesPerMatch: number;
@@ -229,6 +288,8 @@ export interface FootballFairAiSimulationPlayer {
   passCompletionPct: number | null;
   keyPassesPer90: number;
   shotsPer90: number;
+  /** @nullable */
+  shotAccuracyPct: number | null;
   expectedGoalsPer90: number;
   goalsPer90: number;
   assistsPer90: number;
@@ -307,7 +368,105 @@ export interface FootballFairAiSimulationContribution {
   playerName: string;
   simulatedGoals: number;
   simulatedAssists: number;
+  simulatedPasses: number;
+  simulatedCarries: number;
+  simulatedShots: number;
+  simulatedDefensiveActions: number;
+  estimatedValueAdded: number;
   contributionScore: number;
+}
+
+export interface FootballFairAiPossessionGridCell {
+  x: number;
+  y: number;
+  touches: number;
+  passes: number;
+  carries: number;
+  shots: number;
+  turnovers: number;
+  estimatedValueAdded: number;
+}
+
+export interface FootballFairAiPossessionTeam {
+  teamKey: string;
+  teamName: string;
+  possessionSharePct: number;
+  possessionsPerMatch: number;
+  actionsPerMatch: number;
+  averageActionsPerPossession: number;
+  passesPerMatch: number;
+  carriesPerMatch: number;
+  shotsPerMatch: number;
+  turnoversPerMatch: number;
+  expectedGoalsPerMatch: number;
+  estimatedValueAddedPer90: number;
+  gridCells: FootballFairAiPossessionGridCell[];
+}
+
+export type FootballFairAiSimulatedPossessionOutcome = typeof FootballFairAiSimulatedPossessionOutcome[keyof typeof FootballFairAiSimulatedPossessionOutcome];
+
+
+export const FootballFairAiSimulatedPossessionOutcome = {
+  goal: 'goal',
+  shot: 'shot',
+  turnover: 'turnover',
+  retained: 'retained',
+} as const;
+
+export type FootballFairAiSimulatedActionAction = typeof FootballFairAiSimulatedActionAction[keyof typeof FootballFairAiSimulatedActionAction];
+
+
+export const FootballFairAiSimulatedActionAction = {
+  pass: 'pass',
+  carry: 'carry',
+  shot: 'shot',
+} as const;
+
+export type FootballFairAiSimulatedActionOutcome = typeof FootballFairAiSimulatedActionOutcome[keyof typeof FootballFairAiSimulatedActionOutcome];
+
+
+export const FootballFairAiSimulatedActionOutcome = {
+  complete: 'complete',
+  intercepted: 'intercepted',
+  out_of_play: 'out_of_play',
+  saved: 'saved',
+  blocked: 'blocked',
+  goal: 'goal',
+  missed: 'missed',
+} as const;
+
+export interface FootballFairAiSimulatedAction {
+  action: FootballFairAiSimulatedActionAction;
+  actorName: string;
+  /** @nullable */
+  targetName: string | null;
+  minute: number;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  outcome: FootballFairAiSimulatedActionOutcome;
+  valueBefore: number;
+  valueAfter: number;
+  estimatedValueAdded: number;
+}
+
+export interface FootballFairAiSimulatedPossession {
+  possessionNumber: number;
+  teamName: string;
+  minute: number;
+  outcome: FootballFairAiSimulatedPossessionOutcome;
+  estimatedValueAdded: number;
+  actions: FootballFairAiSimulatedAction[];
+}
+
+export interface FootballFairAiPossessionModel {
+  gridColumns: number;
+  gridRows: number;
+  coordinateBasis: string;
+  home: FootballFairAiPossessionTeam;
+  away: FootballFairAiPossessionTeam;
+  sampledPossessions: FootballFairAiSimulatedPossession[];
 }
 
 export interface FootballFairAiSimulation {
@@ -320,6 +479,7 @@ export interface FootballFairAiSimulation {
   probabilities: FootballFairAiSimulationProbabilities;
   topScorelines: FootballFairAiSimulationScoreline[];
   playerContributions: FootballFairAiSimulationContribution[];
+  possessionModel: FootballFairAiPossessionModel;
   method: string;
   limitations: string[];
 }

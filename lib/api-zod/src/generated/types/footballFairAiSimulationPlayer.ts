@@ -10,9 +10,32 @@ export interface FootballFairAiSimulationPlayer {
   playerKey: string;
   name: string;
   /** @nullable */
+  shirtNumber: number | null;
+  /** @nullable */
   position: string | null;
+  /** @nullable */
+  age: number | null;
+  /** @nullable */
+  height: string | null;
+  /** @nullable */
+  weight: string | null;
+  /** @nullable */
+  nationality: string | null;
+  /** @nullable */
+  preferredFoot: string | null;
+  /** @nullable */
+  marketValue: string | null;
+  /** @nullable */
+  contractUntil: string | null;
   starter: boolean;
   appearances: number;
+  ratedAppearances: number;
+  minutesPlayed: number;
+  cleanSheets: number;
+  goalsConceded: number;
+  totalSaves: number;
+  yellowCards: number;
+  redCards: number;
   /** @nullable */
   averageRating: number | null;
   minutesPerMatch: number;
@@ -20,6 +43,8 @@ export interface FootballFairAiSimulationPlayer {
   passCompletionPct: number | null;
   keyPassesPer90: number;
   shotsPer90: number;
+  /** @nullable */
+  shotAccuracyPct: number | null;
   expectedGoalsPer90: number;
   goalsPer90: number;
   assistsPer90: number;
