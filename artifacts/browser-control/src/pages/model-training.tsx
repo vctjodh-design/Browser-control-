@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'wouter';
 import FairAiReadinessTab from '@/components/fair-ai-readiness-tab';
@@ -142,6 +142,7 @@ function ConfusionMatrix({ matrix }: { matrix: number[][] }) {
 
 export default function ModelTrainingPage() {
   const client = useQueryClient();
+  const fairAiPanelRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<'training' | 'predictions' | 'fair-ai'>('fair-ai');
   const dashboardQuery = useGetFootballModelTrainingDashboard({
     query: { queryKey: getGetFootballModelTrainingDashboardQueryKey() },
@@ -199,6 +200,17 @@ export default function ModelTrainingPage() {
             <Link href="/processing" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]" data-testid="link-processing">Processing</Link>
             <Link href="/database" className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]" data-testid="link-database"><Database size={13} /> Database</Link>
             <Link href="/model-training" aria-current="page" className="inline-flex h-8 items-center rounded-lg bg-[#253746] px-3 text-[10px] font-extrabold text-[#f8f2e7]" data-testid="link-model-training">Model training</Link>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('fair-ai');
+                requestAnimationFrame(() => fairAiPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+              }}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#cfdccf] bg-[#eaf1e9] px-3 text-[10px] font-extrabold text-[#4e755c] transition hover:bg-[#deeadf]"
+              data-testid="link-fair-ai-simulation"
+            >
+              <Sparkles size={12} /> FAIR AI Simulation
+            </button>
           </nav>
         </div>
       </header>
@@ -224,7 +236,7 @@ export default function ModelTrainingPage() {
           {([
             { id: 'training', label: 'Training', icon: Activity },
             { id: 'predictions', label: 'Predictions', icon: BarChart3 },
-            { id: 'fair-ai', label: 'FAIR AI', icon: Sparkles },
+            { id: 'fair-ai', label: 'FAIR AI Simulation', icon: Sparkles },
           ] as const).map((tab) => {
             const Icon = tab.icon;
             const selected = activeTab === tab.id;
@@ -400,7 +412,7 @@ export default function ModelTrainingPage() {
             <ModelPredictionsTab />
           </div>
         ) : (
-          <div id="panel-model-fair-ai" role="tabpanel" aria-labelledby="tab-model-fair-ai">
+          <div id="panel-model-fair-ai" ref={fairAiPanelRef} role="tabpanel" aria-labelledby="tab-model-fair-ai">
             <FairAiSimulationPanel />
             <FairAiReadinessTab
               dashboard={dashboard}
