@@ -5,6 +5,8 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { FootballFairAiSimulationPlayer } from './footballFairAiSimulationPlayer';
+import type { FootballFairAiTeamStats } from './footballFairAiTeamStats';
 
 export interface FootballFairAiTeam {
   teamKey: string;
@@ -17,4 +19,6 @@ export interface FootballFairAiTeam {
   avgPlayerRating: number | null;
   /** @nullable */
   formation: string | null;
+  teamStats?: FootballFairAiTeamStats;
+  players?: FootballFairAiSimulationPlayer[];
 }

@@ -191,6 +191,54 @@ export interface FootballFairAiDataSummary {
   trackingCoordinateRecords: number;
 }
 
+export interface FootballFairAiTeamStats {
+  /** @nullable */
+  expectedGoalsFor: number | null;
+  /** @nullable */
+  expectedGoalsAgainst: number | null;
+  /** @nullable */
+  possessionPct: number | null;
+  /** @nullable */
+  shotsPerMatch: number | null;
+  /** @nullable */
+  shotsOnTargetPerMatch: number | null;
+  /** @nullable */
+  boxTouchesPerMatch: number | null;
+  /** @nullable */
+  bigChancesPerMatch: number | null;
+  /** @nullable */
+  passCompletionPct: number | null;
+  /** @nullable */
+  defensiveActionsPerMatch: number | null;
+  matchStatSampleCount: number;
+  /** @nullable */
+  coachName: string | null;
+}
+
+export interface FootballFairAiSimulationPlayer {
+  playerKey: string;
+  name: string;
+  /** @nullable */
+  position: string | null;
+  starter: boolean;
+  appearances: number;
+  /** @nullable */
+  averageRating: number | null;
+  minutesPerMatch: number;
+  /** @nullable */
+  passCompletionPct: number | null;
+  keyPassesPer90: number;
+  shotsPer90: number;
+  expectedGoalsPer90: number;
+  goalsPer90: number;
+  assistsPer90: number;
+  /** @nullable */
+  duelsWonPct: number | null;
+  tacklesPer90: number;
+  interceptionsPer90: number;
+  savesPer90: number;
+}
+
 export interface FootballFairAiTeam {
   teamKey: string;
   name: string;
@@ -202,6 +250,8 @@ export interface FootballFairAiTeam {
   avgPlayerRating: number | null;
   /** @nullable */
   formation: string | null;
+  teamStats?: FootballFairAiTeamStats;
+  players?: FootballFairAiSimulationPlayer[];
 }
 
 export interface FootballFairAiTeamsResponse {
@@ -251,6 +301,15 @@ export interface FootballFairAiSimulationProbabilities {
   away: number;
 }
 
+export interface FootballFairAiSimulationContribution {
+  playerKey: string;
+  teamName: string;
+  playerName: string;
+  simulatedGoals: number;
+  simulatedAssists: number;
+  contributionScore: number;
+}
+
 export interface FootballFairAiSimulation {
   iterations: number;
   home: FootballFairAiTeam;
@@ -260,6 +319,7 @@ export interface FootballFairAiSimulation {
   outcomes: FootballFairAiSimulationOutcome;
   probabilities: FootballFairAiSimulationProbabilities;
   topScorelines: FootballFairAiSimulationScoreline[];
+  playerContributions: FootballFairAiSimulationContribution[];
   method: string;
   limitations: string[];
 }

@@ -90,6 +90,12 @@ function percent(value: number) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function metricValue(value: number | null | undefined, digits = 1) {
+  return value === null || value === undefined || !Number.isFinite(value)
+    ? '—'
+    : value.toFixed(digits);
+}
+
 function simulationError(error: unknown) {
   if (error && typeof error === 'object' && 'message' in error) return String(error.message);
   return 'The simulation could not be completed. Try again.';
@@ -121,7 +127,7 @@ export default function FairAiSimulationPanel() {
           <span className="grid size-9 place-items-center rounded-xl bg-[#deeadf] text-[#557b63]" aria-hidden="true"><Sparkles size={16} /></span>
           <div>
             <p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">FAIR AI / simulation</p>
-            <h2 id="fair-simulation-title" className="mt-0.5 text-[13px] font-extrabold text-[#344550]">Archive Monte Carlo preview</h2>
+            <h2 id="fair-simulation-title" className="mt-0.5 text-[13px] font-extrabold text-[#344550]">Player &amp; team-stat Monte Carlo</h2>
           </div>
         </div>
         <span className="rounded-full border border-[#e2d5b9] bg-[#f7f0df] px-2.5 py-1 text-[8px] font-extrabold uppercase tracking-[.08em] text-[#927447]">
@@ -131,7 +137,7 @@ export default function FairAiSimulationPanel() {
 
       <div className="space-y-3 p-3 sm:p-5">
         <p className="max-w-[820px] text-[9px] leading-[1.7] text-[#737c73]">
-          Choose two teams with completed archive matches. This visible preview samples scorelines from their recent observed goal rates; it is not a player-action or spatial reinforcement-learning simulation.
+          Choose two teams with completed archive matches. The 10,000-run forecast uses recent xG, possession, shots, defensive stats, formations, and individual player ratings and action statistics where available.
         </p>
         <div className="grid gap-3 md:grid-cols-2">
           <TeamPicker side="home" search={homeSearch} onSearch={setHomeSearch} selected={home} onSelect={setHome} />
@@ -175,13 +181,13 @@ export default function FairAiSimulationPanel() {
             </div>
             <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
               <div className="rounded-xl border border-[#e2e2d8] bg-white p-3">
-                <p className="text-[8px] font-extrabold uppercase tracking-[.1em] text-[#858982]">Expected goals · archive rate</p>
+                <p className="text-[8px] font-extrabold uppercase tracking-[.1em] text-[#858982]">Expected goals · team stats + player profile</p>
                 <p className="mono mt-2 text-[16px] font-semibold text-[#344c43]">
                   {result.expectedHomeGoals.toFixed(2)} <span className="px-1 text-[#a5a69d]">—</span> {result.expectedAwayGoals.toFixed(2)}
                 </p>
                 <p className="mt-1 truncate text-[8px] text-[#858982]">{result.home.name} · {result.away.name}</p>
                 <p className="mt-2 text-[8px] leading-4 text-[#777f77]">
-                  Inputs: {result.home.recentMatchCount} and {result.away.recentMatchCount} recent completed matches, blended goals-for and goals-against averages.
+                  Inputs: {result.home.teamStats?.matchStatSampleCount ?? 0} home and {result.away.teamStats?.matchStatSampleCount ?? 0} away team-stat samples; player inputs use up to 10 recent archived matches.
                 </p>
               </div>
               <div className="rounded-xl border border-[#e2e2d8] bg-white p-3">
@@ -198,9 +204,89 @@ export default function FairAiSimulationPanel() {
                 </p>
               </div>
             </div>
+            <div className="grid gap-3 xl:grid-cols-2">
+              {[result.home, result.away].map((team) => {
+                const stats = team.teamStats;
+                const players = team.players ?? [];
+                return (
+                  <section key={team.teamKey} className="overflow-hidden rounded-xl border border-[#e2e2d8] bg-white" aria-label={`${team.name} simulation inputs`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e9e7df] bg-[#f5f4ed] px-3 py-2.5">
+                      <div>
+                        <h3 className="text-[9px] font-extrabold text-[#4d5f58]">{team.name}</h3>
+                        <p className="mt-0.5 text-[7px] text-[#858982]">{team.formation ?? 'Formation unavailable'} · {stats?.coachName ?? 'Coach unavailable'}</p>
+                      </div>
+                      <span className="mono text-[7px] text-[#81877e]">{players.length} player profiles</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-px bg-[#e9e7df]">
+                      {[
+                        ['xG / match', stats?.expectedGoalsFor],
+                        ['xGA / match', stats?.expectedGoalsAgainst],
+                        ['Possession', stats?.possessionPct, '%'],
+                        ['Shots', stats?.shotsPerMatch],
+                        ['On target', stats?.shotsOnTargetPerMatch],
+                        ['Box touches', stats?.boxTouchesPerMatch],
+                        ['Big chances', stats?.bigChancesPerMatch],
+                        ['Pass accuracy', stats?.passCompletionPct, '%'],
+                        ['Defensive actions', stats?.defensiveActionsPerMatch],
+                      ].map(([label, value, suffix]) => (
+                        <div key={String(label)} className="bg-white px-2.5 py-2">
+                          <p className="text-[7px] font-bold text-[#858982]">{label}</p>
+                          <p className="mono mt-0.5 text-[9px] font-semibold text-[#4d6555]">
+                            {metricValue(typeof value === 'number' ? value : null)}{suffix && value !== null && value !== undefined ? suffix : ''}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="border-t border-[#e9e7df] px-3 py-2.5">
+                      <p className="mb-1.5 text-[7px] font-extrabold uppercase tracking-[.1em] text-[#858982]">Latest observed XI · recent player rates</p>
+                      {players.length ? (
+                        <div className="space-y-1">
+                          {players.slice(0, 6).map((player) => (
+                            <div key={player.playerKey} className="rounded-md bg-[#f8f8f2] px-2 py-1.5">
+                              <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-x-3">
+                                <span className="min-w-0 truncate text-[8px] font-bold text-[#52615e]">{player.name}<span className="ml-1 font-normal text-[#92948b]">{player.position ?? '—'} · {player.starter ? 'XI' : 'sub'}</span></span>
+                                <span className="mono text-[7px] text-[#778078]">R {metricValue(player.averageRating, 2)}</span>
+                                <span className="mono text-[7px] text-[#778078]">xG {metricValue(player.expectedGoalsPer90, 2)}/90</span>
+                                <span className="mono text-[7px] text-[#778078]">KP {metricValue(player.keyPassesPer90, 2)}/90</span>
+                              </div>
+                              <p className="mono mt-0.5 pl-1 text-[7px] text-[#899087]">
+                                Pass {metricValue(player.passCompletionPct, 1)}% · D+I {metricValue(player.tacklesPer90 + player.interceptionsPer90, 2)}/90 · Saves {metricValue(player.savesPer90, 2)}/90
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[8px] text-[#858982]">No rated player-match profiles are available for this team yet.</p>
+                      )}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+            {result.playerContributions.length > 0 && (
+              <section className="rounded-xl border border-[#e2e2d8] bg-white p-3" aria-labelledby="fair-simulation-contributions-title">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h3 id="fair-simulation-contributions-title" className="text-[8px] font-extrabold uppercase tracking-[.1em] text-[#68756e]">Sampled player goal / assist credits</h3>
+                  <span className="mono text-[7px] text-[#92948b]">Across {result.iterations.toLocaleString()} runs · credits sampled from individual rates</span>
+                </div>
+                <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                  {result.playerContributions.slice(0, 8).map((player) => (
+                    <div key={`${player.teamName}-${player.playerKey}`} className="flex items-center justify-between gap-3 rounded-md bg-[#f5f4ed] px-2.5 py-2">
+                      <span className="min-w-0 truncate text-[8px] font-bold text-[#52615e]">{player.playerName}<span className="ml-1 font-normal text-[#858982]">· {player.teamName}</span></span>
+                      <span className="mono shrink-0 text-[7px] text-[#718172]">{player.simulatedGoals.toLocaleString()} G · {player.simulatedAssists.toLocaleString()} A</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
             <div className="flex items-start gap-2 rounded-lg border border-[#e8dfca] bg-[#faf5e9] px-3 py-2.5 text-[8px] leading-[1.6] text-[#7d6c4d]" role="note">
               <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-              <div><strong>Data boundary:</strong> {result.limitations[0]} The source has no tracked coordinates or action trajectories, so it cannot produce genuine player-level xT/EVA or RL outputs. Ratings and formations are available as archive context only.</div>
+              <div>
+                <strong>Model scope:</strong>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                  {result.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
+                </ul>
+              </div>
             </div>
           </div>
         )}

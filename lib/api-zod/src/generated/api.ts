@@ -248,7 +248,39 @@ export const GetFootballFairAiTeamsResponse = zod.object({
   "avgGoalsFor": zod.number(),
   "avgGoalsAgainst": zod.number(),
   "avgPlayerRating": zod.number().nullable(),
-  "formation": zod.string().nullable()
+  "formation": zod.string().nullable(),
+  "teamStats": zod.object({
+  "expectedGoalsFor": zod.number().nullable(),
+  "expectedGoalsAgainst": zod.number().nullable(),
+  "possessionPct": zod.number().nullable(),
+  "shotsPerMatch": zod.number().nullable(),
+  "shotsOnTargetPerMatch": zod.number().nullable(),
+  "boxTouchesPerMatch": zod.number().nullable(),
+  "bigChancesPerMatch": zod.number().nullable(),
+  "passCompletionPct": zod.number().nullable(),
+  "defensiveActionsPerMatch": zod.number().nullable(),
+  "matchStatSampleCount": zod.number().int(),
+  "coachName": zod.string().nullable()
+}).optional(),
+  "players": zod.array(zod.object({
+  "playerKey": zod.string(),
+  "name": zod.string(),
+  "position": zod.string().nullable(),
+  "starter": zod.boolean(),
+  "appearances": zod.number().int(),
+  "averageRating": zod.number().nullable(),
+  "minutesPerMatch": zod.number(),
+  "passCompletionPct": zod.number().nullable(),
+  "keyPassesPer90": zod.number(),
+  "shotsPer90": zod.number(),
+  "expectedGoalsPer90": zod.number(),
+  "goalsPer90": zod.number(),
+  "assistsPer90": zod.number(),
+  "duelsWonPct": zod.number().nullable(),
+  "tacklesPer90": zod.number(),
+  "interceptionsPer90": zod.number(),
+  "savesPer90": zod.number()
+})).optional()
 }))
 })
 
@@ -291,7 +323,39 @@ export const RunFootballFairAiSimulationResponse = zod.object({
   "avgGoalsFor": zod.number(),
   "avgGoalsAgainst": zod.number(),
   "avgPlayerRating": zod.number().nullable(),
-  "formation": zod.string().nullable()
+  "formation": zod.string().nullable(),
+  "teamStats": zod.object({
+  "expectedGoalsFor": zod.number().nullable(),
+  "expectedGoalsAgainst": zod.number().nullable(),
+  "possessionPct": zod.number().nullable(),
+  "shotsPerMatch": zod.number().nullable(),
+  "shotsOnTargetPerMatch": zod.number().nullable(),
+  "boxTouchesPerMatch": zod.number().nullable(),
+  "bigChancesPerMatch": zod.number().nullable(),
+  "passCompletionPct": zod.number().nullable(),
+  "defensiveActionsPerMatch": zod.number().nullable(),
+  "matchStatSampleCount": zod.number().int(),
+  "coachName": zod.string().nullable()
+}).optional(),
+  "players": zod.array(zod.object({
+  "playerKey": zod.string(),
+  "name": zod.string(),
+  "position": zod.string().nullable(),
+  "starter": zod.boolean(),
+  "appearances": zod.number().int(),
+  "averageRating": zod.number().nullable(),
+  "minutesPerMatch": zod.number(),
+  "passCompletionPct": zod.number().nullable(),
+  "keyPassesPer90": zod.number(),
+  "shotsPer90": zod.number(),
+  "expectedGoalsPer90": zod.number(),
+  "goalsPer90": zod.number(),
+  "assistsPer90": zod.number(),
+  "duelsWonPct": zod.number().nullable(),
+  "tacklesPer90": zod.number(),
+  "interceptionsPer90": zod.number(),
+  "savesPer90": zod.number()
+})).optional()
 }),
   "away": zod.object({
   "teamKey": zod.string(),
@@ -301,7 +365,39 @@ export const RunFootballFairAiSimulationResponse = zod.object({
   "avgGoalsFor": zod.number(),
   "avgGoalsAgainst": zod.number(),
   "avgPlayerRating": zod.number().nullable(),
-  "formation": zod.string().nullable()
+  "formation": zod.string().nullable(),
+  "teamStats": zod.object({
+  "expectedGoalsFor": zod.number().nullable(),
+  "expectedGoalsAgainst": zod.number().nullable(),
+  "possessionPct": zod.number().nullable(),
+  "shotsPerMatch": zod.number().nullable(),
+  "shotsOnTargetPerMatch": zod.number().nullable(),
+  "boxTouchesPerMatch": zod.number().nullable(),
+  "bigChancesPerMatch": zod.number().nullable(),
+  "passCompletionPct": zod.number().nullable(),
+  "defensiveActionsPerMatch": zod.number().nullable(),
+  "matchStatSampleCount": zod.number().int(),
+  "coachName": zod.string().nullable()
+}).optional(),
+  "players": zod.array(zod.object({
+  "playerKey": zod.string(),
+  "name": zod.string(),
+  "position": zod.string().nullable(),
+  "starter": zod.boolean(),
+  "appearances": zod.number().int(),
+  "averageRating": zod.number().nullable(),
+  "minutesPerMatch": zod.number(),
+  "passCompletionPct": zod.number().nullable(),
+  "keyPassesPer90": zod.number(),
+  "shotsPer90": zod.number(),
+  "expectedGoalsPer90": zod.number(),
+  "goalsPer90": zod.number(),
+  "assistsPer90": zod.number(),
+  "duelsWonPct": zod.number().nullable(),
+  "tacklesPer90": zod.number(),
+  "interceptionsPer90": zod.number(),
+  "savesPer90": zod.number()
+})).optional()
 }),
   "expectedHomeGoals": zod.number(),
   "expectedAwayGoals": zod.number(),
@@ -320,6 +416,14 @@ export const RunFootballFairAiSimulationResponse = zod.object({
   "awayGoals": zod.number().int(),
   "count": zod.number().int(),
   "probability": zod.number()
+})),
+  "playerContributions": zod.array(zod.object({
+  "playerKey": zod.string(),
+  "teamName": zod.string(),
+  "playerName": zod.string(),
+  "simulatedGoals": zod.number().int(),
+  "simulatedAssists": zod.number().int(),
+  "contributionScore": zod.number()
 })),
   "method": zod.string(),
   "limitations": zod.array(zod.string())

@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { FootballFairAiSimulationContribution } from './footballFairAiSimulationContribution';
 import type { FootballFairAiSimulationOutcome } from './footballFairAiSimulationOutcome';
 import type { FootballFairAiSimulationProbabilities } from './footballFairAiSimulationProbabilities';
 import type { FootballFairAiSimulationScoreline } from './footballFairAiSimulationScoreline';
@@ -19,6 +20,7 @@ export interface FootballFairAiSimulation {
   outcomes: FootballFairAiSimulationOutcome;
   probabilities: FootballFairAiSimulationProbabilities;
   topScorelines: FootballFairAiSimulationScoreline[];
+  playerContributions: FootballFairAiSimulationContribution[];
   method: string;
   limitations: string[];
 }

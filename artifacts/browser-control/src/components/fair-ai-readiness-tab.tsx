@@ -257,7 +257,7 @@ export default function FairAiReadinessTab({
                   <div className="min-w-0">
                     <h3 id="fair-scope-title" className="text-[10px] font-extrabold text-[#4f6e5a]">Current engine scope</h3>
                     <p className="mt-1 text-[9px] leading-[1.7] text-[#6f7e70]">
-                      Trained outputs cover 1X2, both teams to score (BTTS), over/under 2.5 and 3.5 goals, and top correct scores. The current engine is <strong>not reinforcement learning</strong>, does not compute player-level xT/EVA, does not have tracked player/pitch coordinates or action trajectories as model inputs, and does not run 10,000 player-level match simulations.
+                      Trained outputs cover 1X2, both teams to score (BTTS), over/under 2.5 and 3.5 goals, and top correct scores. The FAIR AI tab now runs a 10,000-sample archive simulation using available player match statistics and team performance metrics. It is <strong>not a trained reinforcement-learning policy</strong> and does not calculate measured spatial xT/EVA because the source has no continuous player tracking or per-action start/end locations.
                     </p>
                   </div>
                 </div>

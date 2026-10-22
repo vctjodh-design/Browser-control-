@@ -1,7 +1,9 @@
 import type {
   FootballFairAiSimulation,
   FootballFairAiSimulationInput,
+  FootballFairAiSimulationPlayer,
   FootballFairAiTeam,
+  FootballFairAiTeamStats,
   FootballMatchDetails,
   FootballMatchLastFive,
   FootballProcessedMatchSummary,
@@ -821,6 +823,337 @@ export function getFairAiTeams(search = ""): { teams: FootballFairAiTeam[] } {
   return { teams: fairAiTeamRows(search.trim().slice(0, 80)) };
 }
 
+function numericStat(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const parsed = Number.parseFloat(value.replace("%", "").trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function statRows(value: unknown): JsonObject[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(object);
+}
+
+function matchingStat(stats: JsonObject[], aliases: string[]): number | null {
+  const target = new Set(aliases.map((alias) => alias.toLowerCase()));
+  for (const stat of stats) {
+    const label = text(stat.label);
+    if (!label) continue;
+    const leaf = label.split("·").at(-1)?.trim().toLowerCase() ?? "";
+    if (target.has(leaf)) return numericStat(stat.value);
+  }
+  return null;
+}
+
+function average(values: Array<number | null>): number | null {
+  const present = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  return present.length ? present.reduce((total, value) => total + value, 0) / present.length : null;
+}
+
+function playerStat(
+  stats: JsonObject[],
+  categories: string[],
+  metrics: string[],
+): number | null {
+  const categorySet = new Set(categories.map((category) => category.toLowerCase()));
+  const metricSet = new Set(metrics.map((metric) => metric.toLowerCase()));
+  for (const stat of stats) {
+    const label = text(stat.label);
+    if (!label) continue;
+    const parts = label.split("·").map((part) => part.trim().toLowerCase());
+    const metric = parts.at(-1) ?? "";
+    if (metricSet.has(metric) && parts.slice(0, -1).some((part) => categorySet.has(part))) {
+      return numericStat(stat.value);
+    }
+  }
+  return null;
+}
+
+type PlayerAccumulator = {
+  playerKey: string;
+  name: string;
+  position: string | null;
+  appearances: number;
+  minutes: number;
+  ratingTotal: number;
+  ratingCount: number;
+  starter: boolean;
+  latestAppearance: number;
+  passTotal: number;
+  passAccurate: number;
+  keyPasses: number;
+  shots: number;
+  expectedGoals: number;
+  goals: number;
+  assists: number;
+  duelsTotal: number;
+  duelsWon: number;
+  tackles: number;
+  interceptions: number;
+  saves: number;
+};
+
+function summarizePlayers(teamKey: string): FootballFairAiSimulationPlayer[] {
+  const rows = database
+    .prepare(
+      `WITH recent AS (
+         SELECT profiles.fixture_id, matches.match_date
+         FROM fair_ai_team_match_profiles AS profiles
+         JOIN fair_ai_matches AS matches ON matches.fixture_id = profiles.fixture_id
+         WHERE profiles.team_key = ?
+         ORDER BY matches.match_date DESC, matches.fixture_id DESC
+         LIMIT 10
+       )
+       SELECT players.player_key, players.name, players.position, player_matches.rating,
+              player_matches.statistics_json, recent.match_date
+       FROM recent
+       JOIN fair_ai_player_matches AS player_matches
+         ON player_matches.fixture_id = recent.fixture_id
+        AND player_matches.team_key = ?
+       JOIN fair_ai_players AS players ON players.player_key = player_matches.player_key
+       ORDER BY recent.match_date DESC`,
+    )
+    .all(teamKey, teamKey) as SqlRow[];
+
+  const playerMap = new Map<string, PlayerAccumulator>();
+  for (const row of rows) {
+    const key = text(row.player_key);
+    const name = text(row.name);
+    if (!key || !name) continue;
+    let data: JsonObject = {};
+    try {
+      data = object(JSON.parse(String(row.statistics_json)));
+    } catch {
+      continue;
+    }
+    const stats = statRows(data.statistics);
+    const appearanceDate = Date.parse(String(row.match_date ?? ""));
+    const player = playerMap.get(key) ?? {
+      playerKey: key,
+      name,
+      position: text(row.position),
+      appearances: 0,
+      minutes: 0,
+      ratingTotal: 0,
+      ratingCount: 0,
+      starter: false,
+      latestAppearance: 0,
+      passTotal: 0,
+      passAccurate: 0,
+      keyPasses: 0,
+      shots: 0,
+      expectedGoals: 0,
+      goals: 0,
+      assists: 0,
+      duelsTotal: 0,
+      duelsWon: 0,
+      tackles: 0,
+      interceptions: 0,
+      saves: 0,
+    };
+    const minutes = playerStat(stats, ["games"], ["minutes"]);
+    if (minutes !== null && minutes > 0) {
+      player.appearances += 1;
+      player.minutes += minutes;
+    }
+    const rating = number(row.rating);
+    if (rating !== null) {
+      player.ratingTotal += rating;
+      player.ratingCount += 1;
+    }
+    if (appearanceDate >= player.latestAppearance) {
+      player.latestAppearance = appearanceDate;
+      const substitute = playerStat(stats, ["games"], ["substitute"]);
+      const substituteText = stats.find((stat) =>
+        text(stat.label)?.toLowerCase().endsWith("substitute"),
+      );
+      const substituteValue = text(substituteText?.value)?.toLowerCase();
+      player.starter = substitute === 0 || substituteValue === "no" || substituteValue === "false";
+    }
+    const passTotal = playerStat(stats, ["passes"], ["total"]);
+    const passAccurate =
+      playerStat(stats, ["passes"], ["accurate"]) ??
+      playerStat(stats, ["passes"], ["accuracy"]);
+    player.passTotal += passTotal ?? 0;
+    player.passAccurate += passAccurate ?? 0;
+    player.keyPasses += playerStat(stats, ["passes"], ["key"]) ?? 0;
+    player.shots += playerStat(stats, ["shots"], ["total"]) ?? 0;
+    player.expectedGoals += playerStat(stats, ["statistics", "bsd"], ["expected_goals"]) ?? 0;
+    player.goals += playerStat(stats, ["goals"], ["total"]) ?? 0;
+    player.assists += playerStat(stats, ["goals"], ["assists"]) ?? 0;
+    player.duelsTotal += playerStat(stats, ["duels"], ["total"]) ?? 0;
+    player.duelsWon += playerStat(stats, ["duels"], ["won"]) ?? 0;
+    player.tackles += playerStat(stats, ["tackles"], ["total"]) ?? 0;
+    player.interceptions += playerStat(stats, ["tackles"], ["interceptions"]) ?? 0;
+    player.saves +=
+      playerStat(stats, ["goals"], ["saves"]) ??
+      playerStat(stats, ["goalkeeper"], ["saves"]) ??
+      0;
+    playerMap.set(key, player);
+  }
+
+  return [...playerMap.values()]
+    .filter((player) => player.appearances > 0)
+    .sort((left, right) =>
+      Number(right.starter) - Number(left.starter) ||
+      (right.ratingTotal / Math.max(1, right.ratingCount)) -
+        (left.ratingTotal / Math.max(1, left.ratingCount)),
+    )
+    .slice(0, 16)
+    .map((player) => {
+      const per90 = (value: number) => player.minutes > 0 ? (value / player.minutes) * 90 : 0;
+      return {
+        playerKey: player.playerKey,
+        name: player.name,
+        position: player.position,
+        starter: player.starter,
+        appearances: player.appearances,
+        averageRating: player.ratingCount ? player.ratingTotal / player.ratingCount : null,
+        minutesPerMatch: player.appearances ? player.minutes / player.appearances : 0,
+        passCompletionPct: player.passTotal > 0
+          ? Math.min(100, (player.passAccurate / player.passTotal) * 100)
+          : null,
+        keyPassesPer90: per90(player.keyPasses),
+        shotsPer90: per90(player.shots),
+        expectedGoalsPer90: per90(player.expectedGoals),
+        goalsPer90: per90(player.goals),
+        assistsPer90: per90(player.assists),
+        duelsWonPct: player.duelsTotal > 0
+          ? Math.min(100, (player.duelsWon / player.duelsTotal) * 100)
+          : null,
+        tacklesPer90: per90(player.tackles),
+        interceptionsPer90: per90(player.interceptions),
+        savesPer90: per90(player.saves),
+      };
+    });
+}
+
+function summarizeTeamStats(teamKey: string): FootballFairAiTeamStats {
+  const rows = database
+    .prepare(
+      `SELECT profiles.fixture_id, profiles.coach_key, profiles.team_statistics_json,
+              matches.home_team_key, matches.away_team_key, matches.match_date
+       FROM fair_ai_team_match_profiles AS profiles
+       JOIN fair_ai_matches AS matches ON matches.fixture_id = profiles.fixture_id
+       WHERE profiles.team_key = ?
+       ORDER BY matches.match_date DESC, matches.fixture_id DESC
+       LIMIT 10`,
+    )
+    .all(teamKey) as SqlRow[];
+  const ownStats = rows.map((row) => statRows(JSON.parse(String(row.team_statistics_json))));
+  const opponentStats = rows.map((row) => {
+    const opponentKey = row.home_team_key === teamKey
+      ? text(row.away_team_key)
+      : text(row.home_team_key);
+    if (!opponentKey) return [];
+    const opponent = database
+      .prepare(
+        `SELECT team_statistics_json FROM fair_ai_team_match_profiles
+         WHERE fixture_id = ? AND team_key = ?`,
+      )
+      .get(integer(row.fixture_id) ?? 0, opponentKey) as SqlRow | undefined;
+    if (!opponent?.team_statistics_json) return [];
+    try {
+      return statRows(JSON.parse(String(opponent.team_statistics_json)));
+    } catch {
+      return [];
+    }
+  });
+  const values = (samples: JsonObject[][], aliases: string[]) =>
+    average(samples.map((stats) => matchingStat(stats, aliases)));
+  const defensiveActions = rows.map((_, index) => {
+    const stats = ownStats[index] ?? [];
+    const tackles = matchingStat(stats, ["tackles", "total tackles"]) ?? 0;
+    const interceptions = matchingStat(stats, ["interceptions"]) ?? 0;
+    const recoveries = matchingStat(stats, ["recoveries"]) ?? 0;
+    return tackles + interceptions + recoveries;
+  });
+  const coachKey = text(rows[0]?.coach_key);
+  const coach = coachKey
+    ? database.prepare("SELECT name FROM fair_ai_coaches WHERE coach_key = ?").get(coachKey) as SqlRow | undefined
+    : undefined;
+
+  return {
+    expectedGoalsFor: values(ownStats, ["expected_goals"]),
+    expectedGoalsAgainst: values(opponentStats, ["expected_goals"]),
+    possessionPct: values(ownStats, ["ball possession"]),
+    shotsPerMatch: values(ownStats, ["total shots"]),
+    shotsOnTargetPerMatch: values(ownStats, ["shots on goal", "shots on target"]),
+    boxTouchesPerMatch: values(ownStats, ["touches in opposition box"]),
+    bigChancesPerMatch: values(ownStats, ["big chances"]),
+    passCompletionPct: values(ownStats, ["passes %"]),
+    defensiveActionsPerMatch: average(defensiveActions),
+    matchStatSampleCount: ownStats.filter((stats) => stats.length > 0).length,
+    coachName: text(coach?.name),
+  };
+}
+
+function simulationTeam(team: FootballFairAiTeam): FootballFairAiTeam {
+  return {
+    ...team,
+    teamStats: summarizeTeamStats(team.teamKey),
+    players: summarizePlayers(team.teamKey),
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function ratingFactor(team: FootballFairAiTeam): number {
+  const players = team.players ?? [];
+  const starters = players.filter((player) => player.starter && player.averageRating !== null);
+  const selected = starters.length ? starters : players.filter((player) => player.averageRating !== null);
+  const teamRating = selected.length
+    ? selected.reduce((total, player) => total + (player.averageRating ?? 6.5), 0) / selected.length
+    : team.avgPlayerRating ?? 6.5;
+  const attackingProfiles = selected.filter((player) => ["F", "M", "FW", "MF"].includes((player.position ?? "").toUpperCase()));
+  const chanceCreation = attackingProfiles.length
+    ? attackingProfiles.reduce((total, player) => total + player.expectedGoalsPer90 + player.keyPassesPer90 * 0.04, 0) / attackingProfiles.length
+    : 0.12;
+  const passAccuracy = average(selected.map((player) => player.passCompletionPct));
+  const passingFactor = passAccuracy === null ? 1 : clamp(0.98 + (passAccuracy - 72) * 0.0007, 0.94, 1.04);
+  return clamp(
+    (1 + (teamRating - 6.5) * 0.045 + (chanceCreation - 0.12) * 0.18) * passingFactor,
+    0.82,
+    1.18,
+  );
+}
+
+function defensiveFactor(team: FootballFairAiTeam): number {
+  const players = team.players ?? [];
+  const starters = players.filter((player) => player.starter);
+  const defenders = starters.filter((player) =>
+    ["D", "DF"].includes((player.position ?? "").toUpperCase()),
+  );
+  const keeper = starters.find((player) =>
+    ["G", "GK"].includes((player.position ?? "").toUpperCase()),
+  );
+  const defensiveRate = average(
+    defenders.map((player) => player.tacklesPer90 + player.interceptionsPer90),
+  );
+  const defensiveActionFactor = defensiveRate === null
+    ? 1
+    : clamp(1 - (defensiveRate - 3) * 0.004, 0.96, 1.04);
+  const keeperFactor = keeper?.averageRating === null || keeper?.averageRating === undefined
+    ? 1
+    : clamp(1 - (keeper.averageRating - 6.5) * 0.018, 0.94, 1.06);
+  const teamActionFactor = team.teamStats?.defensiveActionsPerMatch == null
+    ? 1
+    : clamp(1 - (team.teamStats.defensiveActionsPerMatch - 100) * 0.00025, 0.97, 1.03);
+  return defensiveActionFactor * keeperFactor * teamActionFactor;
+}
+
+function chanceVolumeFactor(team: FootballFairAiTeam): number {
+  const stats = team.teamStats;
+  if (!stats) return 1;
+  const shotSignal = stats.shotsPerMatch === null ? 0 : (stats.shotsPerMatch - 12) * 0.0015;
+  const boxSignal = stats.boxTouchesPerMatch === null ? 0 : (stats.boxTouchesPerMatch - 18) * 0.0008;
+  const bigChanceSignal = stats.bigChancesPerMatch === null ? 0 : (stats.bigChancesPerMatch - 2) * 0.008;
+  return clamp(1 + shotSignal + boxSignal + bigChanceSignal, 0.92, 1.08);
+}
+
 function samplePoisson(lambda: number): number {
   const threshold = Math.exp(-lambda);
   let product = 1;
@@ -832,28 +1165,123 @@ function samplePoisson(lambda: number): number {
   return events - 1;
 }
 
+function chooseContributor(
+  team: FootballFairAiTeam,
+  kind: "scorer" | "creator",
+  excludePlayerKey?: string,
+): NonNullable<FootballFairAiTeam["players"]>[number] | null {
+  const players = (team.players ?? []).filter((player) =>
+    player.playerKey !== excludePlayerKey &&
+    player.appearances > 0 &&
+    (player.starter || !(team.players ?? []).some((candidate) => candidate.starter)),
+  );
+  if (!players.length) return null;
+  const weighted = players.map((player) => {
+    const position = (player.position ?? "").toUpperCase();
+    const attackingPosition = ["F", "FW", "M", "MF"].includes(position);
+    const positionalWeight = kind === "scorer"
+      ? position === "F" || position === "FW" ? 2.2 : position === "M" || position === "MF" ? 1.2 : 0.45
+      : attackingPosition ? 1.45 : position === "D" || position === "DF" ? 0.7 : 0.08;
+    const skillWeight = kind === "scorer"
+      ? 0.02 + player.expectedGoalsPer90 * 4 + player.goalsPer90 * 1.8 + player.shotsPer90 * 0.12
+      : 0.02 + player.keyPassesPer90 * 1.5 + player.assistsPer90 * 2;
+    return { player, weight: positionalWeight * skillWeight };
+  });
+  const total = weighted.reduce((sum, item) => sum + item.weight, 0);
+  let target = Math.random() * total;
+  for (const item of weighted) {
+    target -= item.weight;
+    if (target <= 0) return item.player;
+  }
+  return weighted.at(-1)?.player ?? null;
+}
+
 export function runFairAiArchiveSimulation(
   input: FootballFairAiSimulationInput,
 ): FootballFairAiSimulation | null {
-  const home = fairAiTeamRows("", input.homeTeamKey)[0];
-  const away = fairAiTeamRows("", input.awayTeamKey)[0];
-  if (!home || !away) return null;
+  const homeBase = fairAiTeamRows("", input.homeTeamKey)[0];
+  const awayBase = fairAiTeamRows("", input.awayTeamKey)[0];
+  if (!homeBase || !awayBase) return null;
+  const home = simulationTeam(homeBase);
+  const away = simulationTeam(awayBase);
 
   const iterations = Math.min(50000, Math.max(1000, input.iterations ?? 10000));
+  const homeXg = home.teamStats?.expectedGoalsFor ?? home.avgGoalsFor;
+  const awayXg = away.teamStats?.expectedGoalsFor ?? away.avgGoalsFor;
+  const homeXga = home.teamStats?.expectedGoalsAgainst ?? home.avgGoalsAgainst;
+  const awayXga = away.teamStats?.expectedGoalsAgainst ?? away.avgGoalsAgainst;
+  const possessionHome = home.teamStats?.possessionPct;
+  const possessionAway = away.teamStats?.possessionPct;
+  const homePossession = possessionHome !== null && possessionHome !== undefined &&
+    possessionAway !== null && possessionAway !== undefined
+    ? (possessionHome + (100 - possessionAway)) / 2
+    : possessionHome ?? 50;
+  const awayPossession = 100 - homePossession;
   const expectedHomeGoals = Math.min(
     3.8,
-    Math.max(0.15, (home.avgGoalsFor + away.avgGoalsAgainst) / 2 + 0.12),
+    Math.max(
+      0.15,
+      ((homeXg * 0.65 + awayXga * 0.35) * ratingFactor(home) +
+        0.08) *
+        defensiveFactor(away) *
+        chanceVolumeFactor(home) *
+        clamp(0.92 + homePossession / 625, 0.94, 1.1),
+    ),
   );
   const expectedAwayGoals = Math.min(
     3.5,
-    Math.max(0.15, (away.avgGoalsFor + home.avgGoalsAgainst) / 2),
+    Math.max(
+      0.15,
+      (awayXg * 0.65 + homeXga * 0.35) *
+        ratingFactor(away) *
+        defensiveFactor(home) *
+        chanceVolumeFactor(away) *
+        clamp(0.92 + awayPossession / 625, 0.94, 1.1),
+    ),
   );
   const scorelines = new Map<string, { homeGoals: number; awayGoals: number; count: number }>();
   const outcomes = { home: 0, draw: 0, away: 0 };
+  const playerContributions = new Map<string, {
+    playerKey: string;
+    teamName: string;
+    playerName: string;
+    simulatedGoals: number;
+    simulatedAssists: number;
+  }>();
+  const creditGoal = (team: FootballFairAiTeam) => {
+    const scorer = chooseContributor(team, "scorer");
+    if (!scorer) return;
+    const scorerKey = `${team.teamKey}:${scorer.playerKey}`;
+    const scorerCredit = playerContributions.get(scorerKey) ?? {
+      playerKey: scorer.playerKey,
+      teamName: team.name,
+      playerName: scorer.name,
+      simulatedGoals: 0,
+      simulatedAssists: 0,
+    };
+    scorerCredit.simulatedGoals += 1;
+    playerContributions.set(scorerKey, scorerCredit);
+    if (Math.random() < 0.72) {
+      const creator = chooseContributor(team, "creator", scorer.playerKey);
+      if (!creator) return;
+      const creatorKey = `${team.teamKey}:${creator.playerKey}`;
+      const creatorCredit = playerContributions.get(creatorKey) ?? {
+        playerKey: creator.playerKey,
+        teamName: team.name,
+        playerName: creator.name,
+        simulatedGoals: 0,
+        simulatedAssists: 0,
+      };
+      creatorCredit.simulatedAssists += 1;
+      playerContributions.set(creatorKey, creatorCredit);
+    }
+  };
 
   for (let run = 0; run < iterations; run += 1) {
     const homeGoals = samplePoisson(expectedHomeGoals);
     const awayGoals = samplePoisson(expectedAwayGoals);
+    for (let goal = 0; goal < homeGoals; goal += 1) creditGoal(home);
+    for (let goal = 0; goal < awayGoals; goal += 1) creditGoal(away);
     if (homeGoals > awayGoals) outcomes.home += 1;
     else if (homeGoals === awayGoals) outcomes.draw += 1;
     else outcomes.away += 1;
@@ -875,6 +1303,13 @@ export function runFairAiArchiveSimulation(
       draw: outcomes.draw / iterations,
       away: outcomes.away / iterations,
     },
+    playerContributions: [...playerContributions.values()]
+      .map((player) => ({
+        ...player,
+        contributionScore: (player.simulatedGoals + player.simulatedAssists * 0.7) / iterations,
+      }))
+      .sort((left, right) => right.contributionScore - left.contributionScore)
+      .slice(0, 10),
     topScorelines: [...scorelines.values()]
       .sort((left, right) => right.count - left.count)
       .slice(0, 6)
@@ -882,11 +1317,11 @@ export function runFairAiArchiveSimulation(
         ...scoreline,
         probability: scoreline.count / iterations,
       })),
-    method: "Monte Carlo scoreline sampling from each team's last 10 completed archive matches.",
+    method: "10,000-run Monte Carlo using recent team xG, shots, possession, and chance volume, adjusted by individual starter ratings, passing, shooting, defensive, and goalkeeper statistics; goals and assists are sampled for individual players.",
     limitations: [
-      "This is an archive-based scoreline preview, not the full FAIR AI reinforcement-learning simulator.",
-      "Player ratings and formations are shown as source context; the forecast uses match goals, not player action policies.",
-      "No tracking coordinates, action trajectories, or spatial xT/EVA inputs are available in the imported source.",
+      "Player ratings, recent action statistics, formations, and team performance metrics inform the scoreline distribution; player goal and assist credits are sampled from their observed rates.",
+      "Lineups are the latest observed selection, not a confirmed future starting XI; unavailable player metrics remain unknown.",
+      "The source does not include continuous player tracking or per-action start/end locations, so spatial xT/EVA and a trained reinforcement-learning policy are not claimed.",
       "Results are experimental and are not betting advice.",
     ],
   };

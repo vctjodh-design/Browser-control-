@@ -1512,6 +1512,12 @@ components:
           type: ["number", "null"]
         formation:
           type: ["string", "null"]
+        teamStats:
+          $ref: "#/components/schemas/FootballFairAiTeamStats"
+        players:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFairAiSimulationPlayer"
       required:
         - teamKey
         - name
@@ -1521,6 +1527,137 @@ components:
         - avgGoalsAgainst
         - avgPlayerRating
         - formation
+    FootballFairAiTeamStats:
+      type: object
+      properties:
+        expectedGoalsFor:
+          type: ["number", "null"]
+        expectedGoalsAgainst:
+          type: ["number", "null"]
+        possessionPct:
+          type: ["number", "null"]
+        shotsPerMatch:
+          type: ["number", "null"]
+        shotsOnTargetPerMatch:
+          type: ["number", "null"]
+        shotsInsideBoxPerMatch:
+          type: ["number", "null"]
+        boxTouchesPerMatch:
+          type: ["number", "null"]
+        bigChancesPerMatch:
+          type: ["number", "null"]
+        passCompletionPct:
+          type: ["number", "null"]
+        longBallCompletionPct:
+          type: ["number", "null"]
+        finalThirdPassCompletionPct:
+          type: ["number", "null"]
+        duelWinPct:
+          type: ["number", "null"]
+        defensiveActionsPerMatch:
+          type: ["number", "null"]
+        recoveriesPerMatch:
+          type: ["number", "null"]
+        redCardsPerMatch:
+          type: ["number", "null"]
+        yellowCardsPerMatch:
+          type: ["number", "null"]
+        leagueRank:
+          type: ["integer", "null"]
+        leaguePoints:
+          type: ["integer", "null"]
+        goalDifference:
+          type: ["integer", "null"]
+        coachMatches:
+          type: integer
+        coachWinPct:
+          type: ["number", "null"]
+        daysSinceLastMatch:
+          type: ["number", "null"]
+        matchStatSampleCount:
+          type: integer
+        coachName:
+          type: ["string", "null"]
+      required:
+        - expectedGoalsFor
+        - expectedGoalsAgainst
+        - possessionPct
+        - shotsPerMatch
+        - shotsOnTargetPerMatch
+        - shotsInsideBoxPerMatch
+        - boxTouchesPerMatch
+        - bigChancesPerMatch
+        - passCompletionPct
+        - longBallCompletionPct
+        - finalThirdPassCompletionPct
+        - duelWinPct
+        - defensiveActionsPerMatch
+        - recoveriesPerMatch
+        - redCardsPerMatch
+        - yellowCardsPerMatch
+        - leagueRank
+        - leaguePoints
+        - goalDifference
+        - coachMatches
+        - coachWinPct
+        - daysSinceLastMatch
+        - matchStatSampleCount
+        - coachName
+    FootballFairAiSimulationPlayer:
+      type: object
+      properties:
+        playerKey:
+          type: string
+        name:
+          type: string
+        position:
+          type: ["string", "null"]
+        starter:
+          type: boolean
+        appearances:
+          type: integer
+        averageRating:
+          type: ["number", "null"]
+        minutesPerMatch:
+          type: number
+        passCompletionPct:
+          type: ["number", "null"]
+        keyPassesPer90:
+          type: number
+        shotsPer90:
+          type: number
+        expectedGoalsPer90:
+          type: number
+        goalsPer90:
+          type: number
+        assistsPer90:
+          type: number
+        duelsWonPct:
+          type: ["number", "null"]
+        tacklesPer90:
+          type: number
+        interceptionsPer90:
+          type: number
+        savesPer90:
+          type: number
+      required:
+        - playerKey
+        - name
+        - position
+        - starter
+        - appearances
+        - averageRating
+        - minutesPerMatch
+        - passCompletionPct
+        - keyPassesPer90
+        - shotsPer90
+        - expectedGoalsPer90
+        - goalsPer90
+        - assistsPer90
+        - duelsWonPct
+        - tacklesPer90
+        - interceptionsPer90
+        - savesPer90
     FootballFairAiTeamsResponse:
       type: object
       properties:
@@ -1587,6 +1724,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FootballFairAiSimulationScoreline"
+        playerContributions:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFairAiSimulationContribution"
         method:
           type: string
         limitations:
@@ -1602,8 +1743,31 @@ components:
         - outcomes
         - probabilities
         - topScorelines
+        - playerContributions
         - method
         - limitations
+    FootballFairAiSimulationContribution:
+      type: object
+      properties:
+        playerKey:
+          type: string
+        teamName:
+          type: string
+        playerName:
+          type: string
+        simulatedGoals:
+          type: integer
+        simulatedAssists:
+          type: integer
+        contributionScore:
+          type: number
+      required:
+        - playerKey
+        - teamName
+        - playerName
+        - simulatedGoals
+        - simulatedAssists
+        - contributionScore
     FootballFairAiSimulationProbabilities:
       type: object
       properties:
