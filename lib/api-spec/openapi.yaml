@@ -249,6 +249,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballModelTrainingDashboard"
+  /football/fair-ai/data:
+    get:
+      operationId: getFootballFairAiData
+      tags: [fair-ai]
+      summary: Get normalized KickoffScore data coverage for the FAIR AI build
+      responses:
+        "200":
+          description: Source-backed entity counts, import progress, and data limitations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFairAiDataSummary"
+  /football/fair-ai/data/ingest:
+    post:
+      operationId: startFootballFairAiDataIngestion
+      tags: [fair-ai]
+      summary: Start or resume normalized data ingestion from the match archive
+      responses:
+        "202":
+          description: Ingestion is running or resumed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFairAiDataSummary"
   /football/model-training/runs:
     post:
       operationId: startFootballModelTraining
@@ -1360,6 +1384,73 @@ components:
         - outcomeCounts
         - verifiedOddsFixtureCount
         - runs
+    FootballFairAiDataSummary:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [idle, running, completed, failed]
+        sourceFixtureCount:
+          type: integer
+        processedSourceFixtureCount:
+          type: integer
+        skippedSourceFixtureCount:
+          type: integer
+        remainingSourceFixtureCount:
+          type: integer
+        teamCount:
+          type: integer
+        matchCount:
+          type: integer
+        playerCount:
+          type: integer
+        coachCount:
+          type: integer
+        playerMatchCount:
+          type: integer
+        tacticalProfileCount:
+          type: integer
+        standingSnapshotCount:
+          type: integer
+        eventCount:
+          type: integer
+        playerWithStableIdCount:
+          type: integer
+        playerWithRatingCount:
+          type: integer
+        coachWithStableIdCount:
+          type: integer
+        teamWithFormationCount:
+          type: integer
+        lastImportedAt:
+          type: ["string", "null"]
+          format: date-time
+        lastError:
+          type: ["string", "null"]
+        trackingCoordinateRecords:
+          type: integer
+          description: Number of tracked spatial records imported from this source. Aggregate KickoffScore records do not provide tracking coordinates.
+      required:
+        - status
+        - sourceFixtureCount
+        - processedSourceFixtureCount
+        - skippedSourceFixtureCount
+        - remainingSourceFixtureCount
+        - teamCount
+        - matchCount
+        - playerCount
+        - coachCount
+        - playerMatchCount
+        - tacticalProfileCount
+        - standingSnapshotCount
+        - eventCount
+        - playerWithStableIdCount
+        - playerWithRatingCount
+        - coachWithStableIdCount
+        - teamWithFormationCount
+        - lastImportedAt
+        - lastError
+        - trackingCoordinateRecords
     FootballModelResultProbabilities:
       type: object
       properties:
@@ -2189,15 +2280,19 @@ components:
           type: ["string", "null"]
         player:
           type: ["string", "null"]
+        playerId:
+          type: ["integer", "null"]
         assist:
           type: ["string", "null"]
+        assistId:
+          type: ["integer", "null"]
         type:
           type: string
         detail:
           type: ["string", "null"]
         comments:
           type: ["string", "null"]
-      required: [minute, extraMinute, teamId, teamName, player, assist, type, detail, comments]
+      required: [minute, extraMinute, teamId, teamName, player, playerId, assist, assistId, type, detail, comments]
     FootballLastFiveLineupPlayer:
       type: object
       properties:
@@ -2223,6 +2318,8 @@ components:
           type: ["string", "null"]
         coach:
           type: ["string", "null"]
+        coachId:
+          type: ["integer", "null"]
         starters:
           type: array
           items:
@@ -2231,7 +2328,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FootballLastFiveLineupPlayer"
-      required: [teamId, teamName, formation, coach, starters, substitutes]
+      required: [teamId, teamName, formation, coach, coachId, starters, substitutes]
     FootballLastFivePlayer:
       type: object
       properties:

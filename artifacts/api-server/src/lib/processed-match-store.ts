@@ -36,6 +36,7 @@ const databasePath =
 mkdirSync(dirname(databasePath), { recursive: true });
 
 const database = new DatabaseSync(databasePath);
+export { database };
 database.exec(`
   PRAGMA journal_mode = WAL;
   PRAGMA foreign_keys = ON;

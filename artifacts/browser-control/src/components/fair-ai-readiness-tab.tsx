@@ -1,4 +1,5 @@
 import type { FootballModelTrainingDashboard } from '@workspace/api-client-react';
+import FairAiSourceDataPanel from '@/components/fair-ai-source-data-panel';
 import {
   AlertTriangle,
   ArrowRight,
@@ -273,6 +274,8 @@ export default function FairAiReadinessTab({
                 </div>
               </section>
             </div>
+
+            <FairAiSourceDataPanel />
 
             <section className="mt-4 overflow-hidden rounded-xl border border-[#e1dfd7] bg-[#fbfaf6]" aria-labelledby="fair-next-data-title">
               <div className="border-b border-[#e8e6de] bg-[#f5f4ed] px-3 py-3 sm:px-4">

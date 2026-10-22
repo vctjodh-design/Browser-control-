@@ -18,7 +18,11 @@ export interface FootballLastFiveEvent {
   /** @nullable */
   player: string | null;
   /** @nullable */
+  playerId: number | null;
+  /** @nullable */
   assist: string | null;
+  /** @nullable */
+  assistId: number | null;
   type: string;
   /** @nullable */
   detail: string | null;

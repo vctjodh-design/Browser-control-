@@ -202,6 +202,60 @@ export const GetFootballModelTrainingDashboardResponse = zod.object({
 
 
 /**
+ * @summary Get normalized KickoffScore data coverage for the FAIR AI build
+ */
+export const GetFootballFairAiDataResponse = zod.object({
+  "status": zod.enum(['idle', 'running', 'completed', 'failed']),
+  "sourceFixtureCount": zod.number().int(),
+  "processedSourceFixtureCount": zod.number().int(),
+  "skippedSourceFixtureCount": zod.number().int(),
+  "remainingSourceFixtureCount": zod.number().int(),
+  "teamCount": zod.number().int(),
+  "matchCount": zod.number().int(),
+  "playerCount": zod.number().int(),
+  "coachCount": zod.number().int(),
+  "playerMatchCount": zod.number().int(),
+  "tacticalProfileCount": zod.number().int(),
+  "standingSnapshotCount": zod.number().int(),
+  "eventCount": zod.number().int(),
+  "playerWithStableIdCount": zod.number().int(),
+  "playerWithRatingCount": zod.number().int(),
+  "coachWithStableIdCount": zod.number().int(),
+  "teamWithFormationCount": zod.number().int(),
+  "lastImportedAt": zod.coerce.date().nullable(),
+  "lastError": zod.string().nullable(),
+  "trackingCoordinateRecords": zod.number().int().describe('Number of tracked spatial records imported from this source. Aggregate KickoffScore records do not provide tracking coordinates.')
+})
+
+
+/**
+ * @summary Start or resume normalized data ingestion from the match archive
+ */
+export const StartFootballFairAiDataIngestionResponse = zod.object({
+  "status": zod.enum(['idle', 'running', 'completed', 'failed']),
+  "sourceFixtureCount": zod.number().int(),
+  "processedSourceFixtureCount": zod.number().int(),
+  "skippedSourceFixtureCount": zod.number().int(),
+  "remainingSourceFixtureCount": zod.number().int(),
+  "teamCount": zod.number().int(),
+  "matchCount": zod.number().int(),
+  "playerCount": zod.number().int(),
+  "coachCount": zod.number().int(),
+  "playerMatchCount": zod.number().int(),
+  "tacticalProfileCount": zod.number().int(),
+  "standingSnapshotCount": zod.number().int(),
+  "eventCount": zod.number().int(),
+  "playerWithStableIdCount": zod.number().int(),
+  "playerWithRatingCount": zod.number().int(),
+  "coachWithStableIdCount": zod.number().int(),
+  "teamWithFormationCount": zod.number().int(),
+  "lastImportedAt": zod.coerce.date().nullable(),
+  "lastError": zod.string().nullable(),
+  "trackingCoordinateRecords": zod.number().int().describe('Number of tracked spatial records imported from this source. Aggregate KickoffScore records do not provide tracking coordinates.')
+})
+
+
+/**
  * Starts chronological holdout training using only information available before each archived match
  * @summary Train a football outcome model from archived matches
  */
@@ -1189,7 +1243,9 @@ export const GetFootballMatchLastFiveResponse = zod.object({
   "teamId": zod.number().int().nullable(),
   "teamName": zod.string().nullable(),
   "player": zod.string().nullable(),
+  "playerId": zod.number().int().nullable(),
   "assist": zod.string().nullable(),
+  "assistId": zod.number().int().nullable(),
   "type": zod.string(),
   "detail": zod.string().nullable(),
   "comments": zod.string().nullable()
@@ -1199,6 +1255,7 @@ export const GetFootballMatchLastFiveResponse = zod.object({
   "teamName": zod.string(),
   "formation": zod.string().nullable(),
   "coach": zod.string().nullable(),
+  "coachId": zod.number().int().nullable(),
   "starters": zod.array(zod.object({
   "id": zod.number().int().nullable(),
   "name": zod.string(),
@@ -1291,7 +1348,9 @@ export const GetFootballMatchLastFiveResponse = zod.object({
   "teamId": zod.number().int().nullable(),
   "teamName": zod.string().nullable(),
   "player": zod.string().nullable(),
+  "playerId": zod.number().int().nullable(),
   "assist": zod.string().nullable(),
+  "assistId": zod.number().int().nullable(),
   "type": zod.string(),
   "detail": zod.string().nullable(),
   "comments": zod.string().nullable()
@@ -1301,6 +1360,7 @@ export const GetFootballMatchLastFiveResponse = zod.object({
   "teamName": zod.string(),
   "formation": zod.string().nullable(),
   "coach": zod.string().nullable(),
+  "coachId": zod.number().int().nullable(),
   "starters": zod.array(zod.object({
   "id": zod.number().int().nullable(),
   "name": zod.string(),

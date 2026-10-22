@@ -155,6 +155,42 @@ export interface FootballModelTrainingDashboard {
   runs: FootballModelTrainingRun[];
 }
 
+export type FootballFairAiDataSummaryStatus = typeof FootballFairAiDataSummaryStatus[keyof typeof FootballFairAiDataSummaryStatus];
+
+
+export const FootballFairAiDataSummaryStatus = {
+  idle: 'idle',
+  running: 'running',
+  completed: 'completed',
+  failed: 'failed',
+} as const;
+
+export interface FootballFairAiDataSummary {
+  status: FootballFairAiDataSummaryStatus;
+  sourceFixtureCount: number;
+  processedSourceFixtureCount: number;
+  skippedSourceFixtureCount: number;
+  remainingSourceFixtureCount: number;
+  teamCount: number;
+  matchCount: number;
+  playerCount: number;
+  coachCount: number;
+  playerMatchCount: number;
+  tacticalProfileCount: number;
+  standingSnapshotCount: number;
+  eventCount: number;
+  playerWithStableIdCount: number;
+  playerWithRatingCount: number;
+  coachWithStableIdCount: number;
+  teamWithFormationCount: number;
+  /** @nullable */
+  lastImportedAt: string | null;
+  /** @nullable */
+  lastError: string | null;
+  /** Number of tracked spatial records imported from this source. Aggregate KickoffScore records do not provide tracking coordinates. */
+  trackingCoordinateRecords: number;
+}
+
 export interface FootballModelResultProbabilities {
   /**
      * @minimum 0
@@ -544,7 +580,11 @@ export interface FootballLastFiveEvent {
   /** @nullable */
   player: string | null;
   /** @nullable */
+  playerId: number | null;
+  /** @nullable */
   assist: string | null;
+  /** @nullable */
+  assistId: number | null;
   type: string;
   /** @nullable */
   detail: string | null;
@@ -572,6 +612,8 @@ export interface FootballLastFiveLineup {
   formation: string | null;
   /** @nullable */
   coach: string | null;
+  /** @nullable */
+  coachId: number | null;
   starters: FootballLastFiveLineupPlayer[];
   substitutes: FootballLastFiveLineupPlayer[];
 }

@@ -15,6 +15,8 @@ export interface FootballLastFiveLineup {
   formation: string | null;
   /** @nullable */
   coach: string | null;
+  /** @nullable */
+  coachId: number | null;
   starters: FootballLastFiveLineupPlayer[];
   substitutes: FootballLastFiveLineupPlayer[];
 }

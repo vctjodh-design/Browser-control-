@@ -58,6 +58,10 @@ import {
 import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
 import { UpstreamRateLimitError } from "../lib/upstream-rate-limit";
 import { logger } from "../lib/logger";
+import {
+  clearFairAiData,
+  saveFairAiFixture,
+} from "../lib/fair-ai-data-store";
 
 const router: IRouter = Router();
 type Fixture = Awaited<ReturnType<typeof getKickoffScoreFixtures>>["fixtures"][number];
@@ -234,6 +238,7 @@ async function runProcessing(
           totalGoals: (homeScore as number) + (awayScore as number),
         };
         saveProcessedMatch(job.date.toISOString().slice(0, 10), summary, { details, lastFive, tmp });
+        saveFairAiFixture(summary, details, lastFive);
       } else {
         const summary: FootballTesterMatchSummary = commonSummary;
         const prematch = {
@@ -548,11 +553,9 @@ router.delete("/football/processed-matches", (_req, res): void => {
     });
     return;
   }
-  res.json(
-    DeleteAllFootballProcessedMatchesResponse.parse({
-      deletedCount: deleteAllProcessedMatches(),
-    }),
-  );
+  const deletedCount = deleteAllProcessedMatches();
+  clearFairAiData();
+  res.json(DeleteAllFootballProcessedMatchesResponse.parse({ deletedCount }));
 });
 
 router.delete("/football/tester-matches", (_req, res): void => {

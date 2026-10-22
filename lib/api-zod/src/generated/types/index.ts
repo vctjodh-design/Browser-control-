@@ -20,6 +20,8 @@ export * from './deleteFootballProcessedMatchesResponse';
 export * from './deleteFootballTesterMatchesResponse';
 export * from './footballBulkProcessingInput';
 export * from './footballCorrectScorePrediction';
+export * from './footballFairAiDataSummary';
+export * from './footballFairAiDataSummaryStatus';
 export * from './footballFixture';
 export * from './footballFixtureError';
 export * from './footballFixtures';
