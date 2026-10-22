@@ -1,4 +1,7 @@
 import type {
+  FootballFairAiSimulation,
+  FootballFairAiSimulationInput,
+  FootballFairAiTeam,
   FootballMatchDetails,
   FootballMatchLastFive,
   FootballProcessedMatchSummary,
@@ -74,6 +77,10 @@ database.exec(`
   );
   CREATE INDEX IF NOT EXISTS fair_ai_matches_date
     ON fair_ai_matches(match_date DESC);
+  CREATE INDEX IF NOT EXISTS fair_ai_matches_home_team_recent
+    ON fair_ai_matches(home_team_key, match_date DESC, fixture_id DESC);
+  CREATE INDEX IF NOT EXISTS fair_ai_matches_away_team_recent
+    ON fair_ai_matches(away_team_key, match_date DESC, fixture_id DESC);
 
   CREATE TABLE IF NOT EXISTS fair_ai_players (
     player_key TEXT PRIMARY KEY,
@@ -97,6 +104,8 @@ database.exec(`
   );
   CREATE INDEX IF NOT EXISTS fair_ai_player_matches_player
     ON fair_ai_player_matches(player_key, observed_at DESC);
+  CREATE INDEX IF NOT EXISTS fair_ai_player_matches_team_fixture_rating
+    ON fair_ai_player_matches(team_key, fixture_id DESC, rating);
 
   CREATE TABLE IF NOT EXISTS fair_ai_coaches (
     coach_key TEXT PRIMARY KEY,
@@ -117,6 +126,8 @@ database.exec(`
     observed_at TEXT NOT NULL,
     PRIMARY KEY (fixture_id, team_key)
   );
+  CREATE INDEX IF NOT EXISTS fair_ai_team_match_profiles_team_formation
+    ON fair_ai_team_match_profiles(team_key, fixture_id DESC, formation);
   CREATE TABLE IF NOT EXISTS fair_ai_standings_snapshots (
     team_key TEXT NOT NULL,
     league_id INTEGER,
@@ -724,6 +735,161 @@ function count(table: string, where = ""): number {
     .prepare(`SELECT COUNT(*) AS total FROM ${table} ${where}`)
     .get() as SqlRow | undefined;
   return integer(row?.total) ?? 0;
+}
+
+function fairAiTeamRows(search: string, teamKey?: string): FootballFairAiTeam[] {
+  const rows = database
+    .prepare(
+      `WITH team_matches AS (
+         SELECT home_team_key AS team_key, fixture_id, match_date,
+                home_score AS goals_for, away_score AS goals_against
+         FROM fair_ai_matches
+         WHERE home_team_key IS NOT NULL AND home_score IS NOT NULL AND away_score IS NOT NULL
+         UNION ALL
+         SELECT away_team_key AS team_key, fixture_id, match_date,
+                away_score AS goals_for, home_score AS goals_against
+         FROM fair_ai_matches
+         WHERE away_team_key IS NOT NULL AND home_score IS NOT NULL AND away_score IS NOT NULL
+       ),
+       ranked AS (
+         SELECT team_key, fixture_id, match_date, goals_for, goals_against,
+                ROW_NUMBER() OVER (PARTITION BY team_key ORDER BY match_date DESC, fixture_id DESC) AS recent_rank
+         FROM team_matches
+       ),
+       summary AS (
+         SELECT team_key, COUNT(*) AS match_count,
+                SUM(CASE WHEN recent_rank <= 10 THEN 1 ELSE 0 END) AS recent_match_count,
+                AVG(CASE WHEN recent_rank <= 10 THEN goals_for END) AS avg_goals_for,
+                AVG(CASE WHEN recent_rank <= 10 THEN goals_against END) AS avg_goals_against
+         FROM ranked
+         GROUP BY team_key
+       ),
+       ratings AS (
+         SELECT ranked.team_key, AVG(player_matches.rating) AS avg_player_rating
+         FROM ranked
+         JOIN fair_ai_player_matches AS player_matches
+           ON player_matches.fixture_id = ranked.fixture_id
+          AND player_matches.team_key = ranked.team_key
+         WHERE ranked.recent_rank <= 5 AND player_matches.rating IS NOT NULL
+         GROUP BY ranked.team_key
+       ),
+       latest_formation AS (
+         SELECT profiles.team_key, profiles.formation
+         FROM fair_ai_team_match_profiles AS profiles
+         JOIN (
+           SELECT team_key, MAX(fixture_id) AS fixture_id
+           FROM fair_ai_team_match_profiles
+           WHERE formation IS NOT NULL
+           GROUP BY team_key
+         ) AS latest
+           ON latest.team_key = profiles.team_key
+          AND latest.fixture_id = profiles.fixture_id
+       )
+       SELECT teams.team_key, teams.name, summary.match_count, summary.recent_match_count,
+              summary.avg_goals_for, summary.avg_goals_against,
+              ratings.avg_player_rating, latest_formation.formation
+       FROM summary
+       JOIN fair_ai_teams AS teams ON teams.team_key = summary.team_key
+       LEFT JOIN ratings ON ratings.team_key = teams.team_key
+       LEFT JOIN latest_formation ON latest_formation.team_key = teams.team_key
+       WHERE (? = '' OR teams.name LIKE ? COLLATE NOCASE)
+         AND (? IS NULL OR teams.team_key = ?)
+       ORDER BY summary.match_count DESC, teams.name COLLATE NOCASE
+       LIMIT ?`,
+    )
+    .all(
+      search,
+      `%${search}%`,
+      teamKey ?? null,
+      teamKey ?? null,
+      teamKey ? 1 : 40,
+    ) as SqlRow[];
+
+  return rows.map((row) => ({
+    teamKey: String(row.team_key),
+    name: String(row.name),
+    matchCount: integer(row.match_count) ?? 0,
+    recentMatchCount: integer(row.recent_match_count) ?? 0,
+    avgGoalsFor: number(row.avg_goals_for) ?? 0,
+    avgGoalsAgainst: number(row.avg_goals_against) ?? 0,
+    avgPlayerRating: number(row.avg_player_rating),
+    formation: text(row.formation),
+  }));
+}
+
+export function getFairAiTeams(search = ""): { teams: FootballFairAiTeam[] } {
+  return { teams: fairAiTeamRows(search.trim().slice(0, 80)) };
+}
+
+function samplePoisson(lambda: number): number {
+  const threshold = Math.exp(-lambda);
+  let product = 1;
+  let events = 0;
+  do {
+    events += 1;
+    product *= Math.random();
+  } while (product > threshold);
+  return events - 1;
+}
+
+export function runFairAiArchiveSimulation(
+  input: FootballFairAiSimulationInput,
+): FootballFairAiSimulation | null {
+  const home = fairAiTeamRows("", input.homeTeamKey)[0];
+  const away = fairAiTeamRows("", input.awayTeamKey)[0];
+  if (!home || !away) return null;
+
+  const iterations = Math.min(50000, Math.max(1000, input.iterations ?? 10000));
+  const expectedHomeGoals = Math.min(
+    3.8,
+    Math.max(0.15, (home.avgGoalsFor + away.avgGoalsAgainst) / 2 + 0.12),
+  );
+  const expectedAwayGoals = Math.min(
+    3.5,
+    Math.max(0.15, (away.avgGoalsFor + home.avgGoalsAgainst) / 2),
+  );
+  const scorelines = new Map<string, { homeGoals: number; awayGoals: number; count: number }>();
+  const outcomes = { home: 0, draw: 0, away: 0 };
+
+  for (let run = 0; run < iterations; run += 1) {
+    const homeGoals = samplePoisson(expectedHomeGoals);
+    const awayGoals = samplePoisson(expectedAwayGoals);
+    if (homeGoals > awayGoals) outcomes.home += 1;
+    else if (homeGoals === awayGoals) outcomes.draw += 1;
+    else outcomes.away += 1;
+    const key = `${homeGoals}-${awayGoals}`;
+    const scoreline = scorelines.get(key);
+    if (scoreline) scoreline.count += 1;
+    else scorelines.set(key, { homeGoals, awayGoals, count: 1 });
+  }
+
+  return {
+    iterations,
+    home,
+    away,
+    expectedHomeGoals,
+    expectedAwayGoals,
+    outcomes,
+    probabilities: {
+      home: outcomes.home / iterations,
+      draw: outcomes.draw / iterations,
+      away: outcomes.away / iterations,
+    },
+    topScorelines: [...scorelines.values()]
+      .sort((left, right) => right.count - left.count)
+      .slice(0, 6)
+      .map((scoreline) => ({
+        ...scoreline,
+        probability: scoreline.count / iterations,
+      })),
+    method: "Monte Carlo scoreline sampling from each team's last 10 completed archive matches.",
+    limitations: [
+      "This is an archive-based scoreline preview, not the full FAIR AI reinforcement-learning simulator.",
+      "Player ratings and formations are shown as source context; the forecast uses match goals, not player action policies.",
+      "No tracking coordinates, action trajectories, or spatial xT/EVA inputs are available in the imported source.",
+      "Results are experimental and are not betting advice.",
+    ],
+  };
 }
 
 export function getFairAiDataSummary(): FairAiDataSummary {

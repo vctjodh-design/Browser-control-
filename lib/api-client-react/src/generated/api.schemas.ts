@@ -191,6 +191,79 @@ export interface FootballFairAiDataSummary {
   trackingCoordinateRecords: number;
 }
 
+export interface FootballFairAiTeam {
+  teamKey: string;
+  name: string;
+  matchCount: number;
+  recentMatchCount: number;
+  avgGoalsFor: number;
+  avgGoalsAgainst: number;
+  /** @nullable */
+  avgPlayerRating: number | null;
+  /** @nullable */
+  formation: string | null;
+}
+
+export interface FootballFairAiTeamsResponse {
+  teams: FootballFairAiTeam[];
+}
+
+export interface FootballFairAiSimulationInput {
+  /** @minLength 1 */
+  homeTeamKey: string;
+  /** @minLength 1 */
+  awayTeamKey: string;
+  /**
+     * @minimum 1000
+     * @maximum 50000
+     */
+  iterations?: number;
+}
+
+export interface FootballFairAiSimulationOutcome {
+  home: number;
+  draw: number;
+  away: number;
+}
+
+export interface FootballFairAiSimulationScoreline {
+  homeGoals: number;
+  awayGoals: number;
+  count: number;
+  probability: number;
+}
+
+export interface FootballFairAiSimulationProbabilities {
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  home: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  draw: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  away: number;
+}
+
+export interface FootballFairAiSimulation {
+  iterations: number;
+  home: FootballFairAiTeam;
+  away: FootballFairAiTeam;
+  expectedHomeGoals: number;
+  expectedAwayGoals: number;
+  outcomes: FootballFairAiSimulationOutcome;
+  probabilities: FootballFairAiSimulationProbabilities;
+  topScorelines: FootballFairAiSimulationScoreline[];
+  method: string;
+  limitations: string[];
+}
+
 export interface FootballModelResultProbabilities {
   /**
      * @minimum 0
@@ -1051,6 +1124,13 @@ date: string;
 
 export type GetFootballTesterProcessingForDateParams = {
 date: string;
+};
+
+export type GetFootballFairAiTeamsParams = {
+/**
+ * @maxLength 80
+ */
+search?: string;
 };
 
 export type GetFootballProcessedMatchesParams = {

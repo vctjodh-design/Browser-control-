@@ -261,6 +261,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballFairAiDataSummary"
+  /football/fair-ai/teams:
+    get:
+      operationId: getFootballFairAiTeams
+      tags: [fair-ai]
+      summary: Search teams with imported match records for an archive simulation
+      parameters:
+        - in: query
+          name: search
+          schema:
+            type: string
+            maxLength: 80
+      responses:
+        "200":
+          description: Teams with their recent observed match baselines
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFairAiTeamsResponse"
+  /football/fair-ai/simulate:
+    post:
+      operationId: runFootballFairAiSimulation
+      tags: [fair-ai]
+      summary: Run an archive-based Monte Carlo scoreline preview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FootballFairAiSimulationInput"
+      responses:
+        "200":
+          description: Monte Carlo outcome distribution and historical input summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFairAiSimulation"
+        "404":
+          description: One or both teams have no imported match records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
   /football/fair-ai/data/ingest:
     post:
       operationId: startFootballFairAiDataIngestion
@@ -1451,6 +1493,133 @@ components:
         - lastImportedAt
         - lastError
         - trackingCoordinateRecords
+    FootballFairAiTeam:
+      type: object
+      properties:
+        teamKey:
+          type: string
+        name:
+          type: string
+        matchCount:
+          type: integer
+        recentMatchCount:
+          type: integer
+        avgGoalsFor:
+          type: number
+        avgGoalsAgainst:
+          type: number
+        avgPlayerRating:
+          type: ["number", "null"]
+        formation:
+          type: ["string", "null"]
+      required:
+        - teamKey
+        - name
+        - matchCount
+        - recentMatchCount
+        - avgGoalsFor
+        - avgGoalsAgainst
+        - avgPlayerRating
+        - formation
+    FootballFairAiTeamsResponse:
+      type: object
+      properties:
+        teams:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFairAiTeam"
+      required: [teams]
+    FootballFairAiSimulationInput:
+      type: object
+      properties:
+        homeTeamKey:
+          type: string
+          minLength: 1
+        awayTeamKey:
+          type: string
+          minLength: 1
+        iterations:
+          type: integer
+          minimum: 1000
+          maximum: 50000
+          default: 10000
+      required: [homeTeamKey, awayTeamKey]
+    FootballFairAiSimulationOutcome:
+      type: object
+      properties:
+        home:
+          type: integer
+        draw:
+          type: integer
+        away:
+          type: integer
+      required: [home, draw, away]
+    FootballFairAiSimulationScoreline:
+      type: object
+      properties:
+        homeGoals:
+          type: integer
+        awayGoals:
+          type: integer
+        count:
+          type: integer
+        probability:
+          type: number
+      required: [homeGoals, awayGoals, count, probability]
+    FootballFairAiSimulation:
+      type: object
+      properties:
+        iterations:
+          type: integer
+        home:
+          $ref: "#/components/schemas/FootballFairAiTeam"
+        away:
+          $ref: "#/components/schemas/FootballFairAiTeam"
+        expectedHomeGoals:
+          type: number
+        expectedAwayGoals:
+          type: number
+        outcomes:
+          $ref: "#/components/schemas/FootballFairAiSimulationOutcome"
+        probabilities:
+          $ref: "#/components/schemas/FootballFairAiSimulationProbabilities"
+        topScorelines:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFairAiSimulationScoreline"
+        method:
+          type: string
+        limitations:
+          type: array
+          items:
+            type: string
+      required:
+        - iterations
+        - home
+        - away
+        - expectedHomeGoals
+        - expectedAwayGoals
+        - outcomes
+        - probabilities
+        - topScorelines
+        - method
+        - limitations
+    FootballFairAiSimulationProbabilities:
+      type: object
+      properties:
+        home:
+          type: number
+          minimum: 0
+          maximum: 1
+        draw:
+          type: number
+          minimum: 0
+          maximum: 1
+        away:
+          type: number
+          minimum: 0
+          maximum: 1
+      required: [home, draw, away]
     FootballModelResultProbabilities:
       type: object
       properties:

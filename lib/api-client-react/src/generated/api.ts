@@ -29,6 +29,9 @@ import type {
   DeleteFootballTesterMatchesResponse,
   FootballBulkProcessingInput,
   FootballFairAiDataSummary,
+  FootballFairAiSimulation,
+  FootballFairAiSimulationInput,
+  FootballFairAiTeamsResponse,
   FootballFixtureError,
   FootballFixtures,
   FootballMatchDetails,
@@ -48,6 +51,7 @@ import type {
   FootballTesterMatchPredictions,
   FootballTesterMatchSummary,
   FootballTesterMatches,
+  GetFootballFairAiTeamsParams,
   GetFootballFixturesParams,
   GetFootballProcessedMatchPayloadParams,
   GetFootballProcessedMatchesParams,
@@ -827,6 +831,178 @@ export function useGetFootballFairAiData<TData = Awaited<ReturnType<typeof getFo
 
 
 
+
+export const getGetFootballFairAiTeamsUrl = (params?: GetFootballFairAiTeamsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/football/fair-ai/teams?${stringifiedParams}` : `/api/football/fair-ai/teams`
+}
+
+/**
+ * @summary Search teams with imported match records for an archive simulation
+ */
+export const getFootballFairAiTeams = async (params?: GetFootballFairAiTeamsParams, options?: Parameters<typeof customFetch>[1]): Promise<FootballFairAiTeamsResponse> => {
+
+  return customFetch<FootballFairAiTeamsResponse>(getGetFootballFairAiTeamsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballFairAiTeamsQueryKey = (params?: GetFootballFairAiTeamsParams,) => {
+    return [
+    `/api/football/fair-ai/teams`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFootballFairAiTeamsQueryOptions = <TData = Awaited<ReturnType<typeof getFootballFairAiTeams>>, TError = ErrorType<unknown>>(params?: GetFootballFairAiTeamsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballFairAiTeams>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballFairAiTeamsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballFairAiTeams>>> = ({ signal }) => getFootballFairAiTeams(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballFairAiTeams>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballFairAiTeamsQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballFairAiTeams>>>
+export type GetFootballFairAiTeamsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Search teams with imported match records for an archive simulation
+ */
+
+export function useGetFootballFairAiTeams<TData = Awaited<ReturnType<typeof getFootballFairAiTeams>>, TError = ErrorType<unknown>>(
+ params?: GetFootballFairAiTeamsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballFairAiTeams>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballFairAiTeamsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRunFootballFairAiSimulationUrl = () => {
+
+
+
+
+  return `/api/football/fair-ai/simulate`
+}
+
+/**
+ * @summary Run an archive-based Monte Carlo scoreline preview
+ */
+export const runFootballFairAiSimulation = async (footballFairAiSimulationInput: FootballFairAiSimulationInput, options?: Parameters<typeof customFetch>[1]): Promise<FootballFairAiSimulation> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<FootballFairAiSimulation>(getRunFootballFairAiSimulationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(footballFairAiSimulationInput)
+  }
+);}
+
+
+
+
+
+export const getRunFootballFairAiSimulationMutationKey = () => ['runFootballFairAiSimulation'] as const;
+
+export const getRunFootballFairAiSimulationMutationOptions = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runFootballFairAiSimulation>>, TError,RunFootballFairAiSimulationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof runFootballFairAiSimulation>>, TError,RunFootballFairAiSimulationMutationVariables, TContext> => {
+
+const mutationKey = getRunFootballFairAiSimulationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof runFootballFairAiSimulation>>, RunFootballFairAiSimulationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  runFootballFairAiSimulation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RunFootballFairAiSimulationMutationResult = NonNullable<Awaited<ReturnType<typeof runFootballFairAiSimulation>>>
+    export type RunFootballFairAiSimulationMutationBody = BodyType<FootballFairAiSimulationInput>
+    export type RunFootballFairAiSimulationMutationError = ErrorType<FootballFixtureError>
+    export type RunFootballFairAiSimulationMutationVariables = {data: BodyType<FootballFairAiSimulationInput>}
+
+    /**
+ * @summary Run an archive-based Monte Carlo scoreline preview
+ */
+export const useRunFootballFairAiSimulation = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runFootballFairAiSimulation>>, TError,RunFootballFairAiSimulationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof runFootballFairAiSimulation>>,
+        TError,
+        RunFootballFairAiSimulationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRunFootballFairAiSimulationMutationOptions(options));
+    }
 
 export const getStartFootballFairAiDataIngestionUrl = () => {
 

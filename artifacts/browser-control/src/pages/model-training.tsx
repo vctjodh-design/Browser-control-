@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'wouter';
 import FairAiReadinessTab from '@/components/fair-ai-readiness-tab';
+import FairAiSimulationPanel from '@/components/fair-ai-simulation-panel';
 import ModelPredictionsTab from '@/components/model-predictions-tab';
 import {
   getGetFootballModelTrainingDashboardQueryKey,
@@ -141,7 +142,7 @@ function ConfusionMatrix({ matrix }: { matrix: number[][] }) {
 
 export default function ModelTrainingPage() {
   const client = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'training' | 'predictions' | 'fair-ai'>('training');
+  const [activeTab, setActiveTab] = useState<'training' | 'predictions' | 'fair-ai'>('fair-ai');
   const dashboardQuery = useGetFootballModelTrainingDashboard({
     query: { queryKey: getGetFootballModelTrainingDashboardQueryKey() },
   });
@@ -400,6 +401,7 @@ export default function ModelTrainingPage() {
           </div>
         ) : (
           <div id="panel-model-fair-ai" role="tabpanel" aria-labelledby="tab-model-fair-ai">
+            <FairAiSimulationPanel />
             <FairAiReadinessTab
               dashboard={dashboard}
               loading={dashboardQuery.isLoading}

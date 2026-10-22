@@ -229,6 +229,104 @@ export const GetFootballFairAiDataResponse = zod.object({
 
 
 /**
+ * @summary Search teams with imported match records for an archive simulation
+ */
+export const getFootballFairAiTeamsQuerySearchMax = 80;
+
+
+
+export const GetFootballFairAiTeamsQueryParams = zod.object({
+  "search": zod.coerce.string().max(getFootballFairAiTeamsQuerySearchMax).optional()
+})
+
+export const GetFootballFairAiTeamsResponse = zod.object({
+  "teams": zod.array(zod.object({
+  "teamKey": zod.string(),
+  "name": zod.string(),
+  "matchCount": zod.number().int(),
+  "recentMatchCount": zod.number().int(),
+  "avgGoalsFor": zod.number(),
+  "avgGoalsAgainst": zod.number(),
+  "avgPlayerRating": zod.number().nullable(),
+  "formation": zod.string().nullable()
+}))
+})
+
+
+/**
+ * @summary Run an archive-based Monte Carlo scoreline preview
+ */
+
+
+export const runFootballFairAiSimulationBodyIterationsDefault = 10000;
+export const runFootballFairAiSimulationBodyIterationsMin = 1000;
+export const runFootballFairAiSimulationBodyIterationsMax = 50000;
+
+
+
+export const RunFootballFairAiSimulationBody = zod.object({
+  "homeTeamKey": zod.string().min(1),
+  "awayTeamKey": zod.string().min(1),
+  "iterations": zod.number().int().min(runFootballFairAiSimulationBodyIterationsMin).max(runFootballFairAiSimulationBodyIterationsMax).default(runFootballFairAiSimulationBodyIterationsDefault)
+})
+
+export const runFootballFairAiSimulationResponseProbabilitiesHomeMin = 0;
+export const runFootballFairAiSimulationResponseProbabilitiesHomeMax = 1;
+
+export const runFootballFairAiSimulationResponseProbabilitiesDrawMin = 0;
+export const runFootballFairAiSimulationResponseProbabilitiesDrawMax = 1;
+
+export const runFootballFairAiSimulationResponseProbabilitiesAwayMin = 0;
+export const runFootballFairAiSimulationResponseProbabilitiesAwayMax = 1;
+
+
+
+export const RunFootballFairAiSimulationResponse = zod.object({
+  "iterations": zod.number().int(),
+  "home": zod.object({
+  "teamKey": zod.string(),
+  "name": zod.string(),
+  "matchCount": zod.number().int(),
+  "recentMatchCount": zod.number().int(),
+  "avgGoalsFor": zod.number(),
+  "avgGoalsAgainst": zod.number(),
+  "avgPlayerRating": zod.number().nullable(),
+  "formation": zod.string().nullable()
+}),
+  "away": zod.object({
+  "teamKey": zod.string(),
+  "name": zod.string(),
+  "matchCount": zod.number().int(),
+  "recentMatchCount": zod.number().int(),
+  "avgGoalsFor": zod.number(),
+  "avgGoalsAgainst": zod.number(),
+  "avgPlayerRating": zod.number().nullable(),
+  "formation": zod.string().nullable()
+}),
+  "expectedHomeGoals": zod.number(),
+  "expectedAwayGoals": zod.number(),
+  "outcomes": zod.object({
+  "home": zod.number().int(),
+  "draw": zod.number().int(),
+  "away": zod.number().int()
+}),
+  "probabilities": zod.object({
+  "home": zod.number().min(runFootballFairAiSimulationResponseProbabilitiesHomeMin).max(runFootballFairAiSimulationResponseProbabilitiesHomeMax),
+  "draw": zod.number().min(runFootballFairAiSimulationResponseProbabilitiesDrawMin).max(runFootballFairAiSimulationResponseProbabilitiesDrawMax),
+  "away": zod.number().min(runFootballFairAiSimulationResponseProbabilitiesAwayMin).max(runFootballFairAiSimulationResponseProbabilitiesAwayMax)
+}),
+  "topScorelines": zod.array(zod.object({
+  "homeGoals": zod.number().int(),
+  "awayGoals": zod.number().int(),
+  "count": zod.number().int(),
+  "probability": zod.number()
+})),
+  "method": zod.string(),
+  "limitations": zod.array(zod.string())
+})
+
+
+/**
  * @summary Start or resume normalized data ingestion from the match archive
  */
 export const StartFootballFairAiDataIngestionResponse = zod.object({
