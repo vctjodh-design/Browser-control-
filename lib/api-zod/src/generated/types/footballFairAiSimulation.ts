@@ -7,6 +7,7 @@
  */
 import type { FootballFairAiPossessionModel } from './footballFairAiPossessionModel';
 import type { FootballFairAiSimulationContribution } from './footballFairAiSimulationContribution';
+import type { FootballFairAiSimulationDiagnostics } from './footballFairAiSimulationDiagnostics';
 import type { FootballFairAiSimulationOutcome } from './footballFairAiSimulationOutcome';
 import type { FootballFairAiSimulationProbabilities } from './footballFairAiSimulationProbabilities';
 import type { FootballFairAiSimulationScoreline } from './footballFairAiSimulationScoreline';
@@ -20,6 +21,7 @@ export interface FootballFairAiSimulation {
   expectedAwayGoals: number;
   outcomes: FootballFairAiSimulationOutcome;
   probabilities: FootballFairAiSimulationProbabilities;
+  diagnostics: FootballFairAiSimulationDiagnostics;
   topScorelines: FootballFairAiSimulationScoreline[];
   playerContributions: FootballFairAiSimulationContribution[];
   possessionModel: FootballFairAiPossessionModel;

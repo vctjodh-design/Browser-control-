@@ -519,6 +519,21 @@ export const RunFootballFairAiSimulationResponse = zod.object({
   "draw": zod.number().min(runFootballFairAiSimulationResponseProbabilitiesDrawMin).max(runFootballFairAiSimulationResponseProbabilitiesDrawMax),
   "away": zod.number().min(runFootballFairAiSimulationResponseProbabilitiesAwayMin).max(runFootballFairAiSimulationResponseProbabilitiesAwayMax)
 }),
+  "diagnostics": zod.object({
+  "possessions": zod.number().int(),
+  "actions": zod.number().int(),
+  "dangerousAreaEntries": zod.number().int(),
+  "turnovers": zod.number().int(),
+  "shots": zod.number().int(),
+  "shotsOnTarget": zod.number().int(),
+  "goals": zod.number().int(),
+  "terminalStates": zod.object({
+  "goals": zod.number().int(),
+  "shots": zod.number().int(),
+  "turnovers": zod.number().int(),
+  "retained": zod.number().int()
+})
+}),
   "topScorelines": zod.array(zod.object({
   "homeGoals": zod.number().int(),
   "awayGoals": zod.number().int(),

@@ -344,6 +344,24 @@ export interface FootballFairAiSimulationScoreline {
   probability: number;
 }
 
+export interface FootballFairAiSimulationTerminalStates {
+  goals: number;
+  shots: number;
+  turnovers: number;
+  retained: number;
+}
+
+export interface FootballFairAiSimulationDiagnostics {
+  possessions: number;
+  actions: number;
+  dangerousAreaEntries: number;
+  turnovers: number;
+  shots: number;
+  shotsOnTarget: number;
+  goals: number;
+  terminalStates: FootballFairAiSimulationTerminalStates;
+}
+
 export interface FootballFairAiSimulationProbabilities {
   /**
      * @minimum 0
@@ -477,6 +495,7 @@ export interface FootballFairAiSimulation {
   expectedAwayGoals: number;
   outcomes: FootballFairAiSimulationOutcome;
   probabilities: FootballFairAiSimulationProbabilities;
+  diagnostics: FootballFairAiSimulationDiagnostics;
   topScorelines: FootballFairAiSimulationScoreline[];
   playerContributions: FootballFairAiSimulationContribution[];
   possessionModel: FootballFairAiPossessionModel;

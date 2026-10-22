@@ -113,7 +113,11 @@ function pct(value: number | null | undefined, digits = 1) {
 }
 
 function probability(value: number) {
-  return `${(value * 100).toFixed(1)}%`;
+  const percent = value * 100;
+  const digits = percent > 0 && percent < 0.1
+    ? percent < 0.01 ? 3 : 2
+    : percent > 99.9 && percent < 100 ? 2 : 1;
+  return `${percent.toFixed(digits)}%`;
 }
 
 function simulationError(error: unknown) {
@@ -414,6 +418,41 @@ export default function FairAiSimulationPanel() {
                 </div>
               </section>
             </div>
+
+            <section className="rounded-xl border border-[#e2e2d8] bg-white p-3" aria-labelledby="simulation-diagnostics-title" data-testid="fair-ai-simulation-diagnostics">
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <p className="mono text-[7px] uppercase tracking-[.13em] text-[#9b7160]">Run integrity / counters</p>
+                  <h3 id="simulation-diagnostics-title" className="mt-1 text-[10px] font-extrabold text-[#40534b]">Simulation diagnostics</h3>
+                </div>
+                <span className="mono text-[7px] text-[#858982]">{result.iterations.toLocaleString()} simulated matches</span>
+              </div>
+              {result.diagnostics.shots === 0 && (
+                <div className="mt-3 flex items-start gap-1.5 rounded-lg border border-[#e3c3b6] bg-[#fff6f0] p-2 text-[8px] leading-4 text-[#784b3e]" role="alert">
+                  <CircleAlert size={12} className="mt-0.5 shrink-0" />
+                  No shots were generated. Treat the result distribution as invalid.
+                </div>
+              )}
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {[
+                  ['Possessions', result.diagnostics.possessions],
+                  ['Actions', result.diagnostics.actions],
+                  ['Dangerous-area entries', result.diagnostics.dangerousAreaEntries],
+                  ['Turnovers', result.diagnostics.turnovers],
+                  ['Shots', result.diagnostics.shots],
+                  ['On target', result.diagnostics.shotsOnTarget],
+                  ['Goals', result.diagnostics.goals],
+                ].map(([label, count]) => (
+                  <div key={label} className="rounded-lg bg-[#f7f7f1] px-2.5 py-2">
+                    <p className="text-[7px] font-bold text-[#81877e]">{label}</p>
+                    <p className="mono mt-1 text-[10px] font-semibold text-[#4d6555]">{numberFormat.format(Number(count))}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="mono mt-2 text-[7px] leading-4 text-[#858982]">
+                Terminal states: {numberFormat.format(result.diagnostics.terminalStates.goals)} goals · {numberFormat.format(result.diagnostics.terminalStates.shots)} non-goal shots · {numberFormat.format(result.diagnostics.terminalStates.turnovers)} turnovers · {numberFormat.format(result.diagnostics.terminalStates.retained)} retained
+              </p>
+            </section>
 
             {model && (
               <section className="overflow-hidden rounded-xl border border-[#d6e0d4] bg-[#f2f6ee]" aria-labelledby="pitch-grid-title">

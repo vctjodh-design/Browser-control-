@@ -8,6 +8,7 @@ const GRID_ROWS = 8;
 const POSSESSIONS_PER_MATCH = 140;
 const MAX_ACTIONS_PER_POSSESSION = 7;
 const PLAYER_SAMPLE_LIMIT = 22;
+const DANGEROUS_AREA_START_X = 8;
 
 type Player = NonNullable<FootballFairAiTeam["players"]>[number];
 type PossessionModel = FootballFairAiSimulation["possessionModel"];
@@ -52,6 +53,13 @@ type TeamCounter = {
   expectedGoals: number;
   estimatedValueAdded: number;
   cells: MutableCell[];
+};
+
+type TerminalStateCounters = {
+  goals: number;
+  shots: number;
+  turnovers: number;
+  retained: number;
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -531,19 +539,27 @@ export function runFairAiPossessionSimulation(
   const outcomes = { home: 0, draw: 0, away: 0 };
   const samples: SimulatedPossession[] = [];
   const sampledByTeam = new Map<string, number>([[home.teamKey, 0], [away.teamKey, 0]]);
-  const shotBudgets = new Map<string, number>([
-    [
-      home.teamKey,
-      samplePoisson(clamp(home.teamStats?.shotsPerMatch ?? 11.5, 2, 35)),
-    ],
-    [
-      away.teamKey,
-      samplePoisson(clamp(away.teamStats?.shotsPerMatch ?? 11.5, 2, 35)),
-    ],
-  ]);
+  const terminalStates: TerminalStateCounters = {
+    goals: 0,
+    shots: 0,
+    turnovers: 0,
+    retained: 0,
+  };
+  let dangerousAreaEntries = 0;
+  let shotsOnTarget = 0;
   let totalPossessionNumber = 0;
 
   for (let iteration = 0; iteration < iterations; iteration += 1) {
+    const shotBudgets = new Map<string, number>([
+      [
+        home.teamKey,
+        samplePoisson(clamp(home.teamStats?.shotsPerMatch ?? 11.5, 2, 35)),
+      ],
+      [
+        away.teamKey,
+        samplePoisson(clamp(away.teamStats?.shotsPerMatch ?? 11.5, 2, 35)),
+      ],
+    ]);
     let homeGoals = 0;
     let awayGoals = 0;
 
@@ -613,6 +629,7 @@ export function runFairAiPossessionSimulation(
             : clamp(actor.shotAccuracyPct / 100, 0.18, 0.78);
           if (xgRoll < shotXg) {
             outcome = "goal";
+            shotsOnTarget += 1;
             valueAfter = 1;
             possessionOutcome = "goal";
             attackingTotals.goals += 1;
@@ -622,6 +639,7 @@ export function runFairAiPossessionSimulation(
             if (actorCredit) actorCredit.simulatedGoals += 1;
           } else if (xgRoll < accuracy) {
             outcome = "saved";
+            shotsOnTarget += 1;
             valueAfter = 0;
             possessionOutcome = "shot";
           } else if (Math.random() < 0.22) {
@@ -675,6 +693,15 @@ export function runFairAiPossessionSimulation(
           }
         }
 
+        if (
+          action !== "shot" &&
+          !turnover &&
+          startX < DANGEROUS_AREA_START_X &&
+          endX >= DANGEROUS_AREA_START_X
+        ) {
+          dangerousAreaEntries += 1;
+        }
+
         const loggedAction = newAction(
           action,
           actor,
@@ -697,6 +724,11 @@ export function runFairAiPossessionSimulation(
         if (sampleThisPossession) actionLog.push(loggedAction);
         if (action === "shot" || turnover) break;
       }
+
+      if (possessionOutcome === "goal") terminalStates.goals += 1;
+      else if (possessionOutcome === "shot") terminalStates.shots += 1;
+      else if (possessionOutcome === "turnover") terminalStates.turnovers += 1;
+      else terminalStates.retained += 1;
 
       if (goalScorer && lastCreator && goalScorer.playerKey !== lastCreator.playerKey &&
           Math.random() < 0.68) {
@@ -727,8 +759,44 @@ export function runFairAiPossessionSimulation(
 
   const homeTotals = totals.get(home.teamKey) ?? teamCounters();
   const awayTotals = totals.get(away.teamKey) ?? teamCounters();
-  const averageHomeGoals = homeTotals.goals / iterations;
-  const averageAwayGoals = awayTotals.goals / iterations;
+  const diagnostics = {
+    possessions: totalPossessionNumber,
+    actions: homeTotals.actions + awayTotals.actions,
+    dangerousAreaEntries,
+    turnovers: homeTotals.turnovers + awayTotals.turnovers,
+    shots: homeTotals.shots + awayTotals.shots,
+    shotsOnTarget,
+    goals: homeTotals.goals + awayTotals.goals,
+    terminalStates,
+  };
+  const terminalCount = terminalStates.goals + terminalStates.shots +
+    terminalStates.turnovers + terminalStates.retained;
+  const outcomeCount = outcomes.home + outcomes.draw + outcomes.away;
+  const scorelineCount = [...scorelines.values()].reduce(
+    (sum, scoreline) => sum + scoreline.count,
+    0,
+  );
+  const scorelineGoals = [...scorelines.values()].reduce(
+    (sum, scoreline) =>
+      sum + (scoreline.homeGoals + scoreline.awayGoals) * scoreline.count,
+    0,
+  );
+  if (
+    terminalCount !== diagnostics.possessions ||
+    outcomeCount !== iterations ||
+    scorelineCount !== iterations ||
+    diagnostics.shots !== terminalStates.goals + terminalStates.shots ||
+    diagnostics.turnovers !== terminalStates.turnovers ||
+    diagnostics.goals !== terminalStates.goals ||
+    diagnostics.goals !== scorelineGoals ||
+    diagnostics.shotsOnTarget > diagnostics.shots ||
+    diagnostics.goals > diagnostics.shotsOnTarget ||
+    diagnostics.dangerousAreaEntries > diagnostics.actions
+  ) {
+    throw new Error("Simulation counters failed consistency checks.");
+  }
+  const averageHomeGoals = homeTotals.expectedGoals / iterations;
+  const averageAwayGoals = awayTotals.expectedGoals / iterations;
   const contributions: PlayerContribution[] = [...playerTotals.values()]
     .map((player) => ({
       ...player,
@@ -753,6 +821,7 @@ export function runFairAiPossessionSimulation(
       draw: outcomes.draw / iterations,
       away: outcomes.away / iterations,
     },
+    diagnostics,
     topScorelines: [...scorelines.values()]
       .sort((left, right) => right.count - left.count)
       .slice(0, 6)

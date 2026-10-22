@@ -1772,6 +1772,46 @@ components:
         probability:
           type: number
       required: [homeGoals, awayGoals, count, probability]
+    FootballFairAiSimulationTerminalStates:
+      type: object
+      properties:
+        goals:
+          type: integer
+        shots:
+          type: integer
+        turnovers:
+          type: integer
+        retained:
+          type: integer
+      required: [goals, shots, turnovers, retained]
+    FootballFairAiSimulationDiagnostics:
+      type: object
+      properties:
+        possessions:
+          type: integer
+        actions:
+          type: integer
+        dangerousAreaEntries:
+          type: integer
+        turnovers:
+          type: integer
+        shots:
+          type: integer
+        shotsOnTarget:
+          type: integer
+        goals:
+          type: integer
+        terminalStates:
+          $ref: "#/components/schemas/FootballFairAiSimulationTerminalStates"
+      required:
+        - possessions
+        - actions
+        - dangerousAreaEntries
+        - turnovers
+        - shots
+        - shotsOnTarget
+        - goals
+        - terminalStates
     FootballFairAiSimulation:
       type: object
       properties:
@@ -1789,6 +1829,8 @@ components:
           $ref: "#/components/schemas/FootballFairAiSimulationOutcome"
         probabilities:
           $ref: "#/components/schemas/FootballFairAiSimulationProbabilities"
+        diagnostics:
+          $ref: "#/components/schemas/FootballFairAiSimulationDiagnostics"
         topScorelines:
           type: array
           items:
@@ -1813,6 +1855,7 @@ components:
         - expectedAwayGoals
         - outcomes
         - probabilities
+        - diagnostics
         - topScorelines
         - playerContributions
         - possessionModel
