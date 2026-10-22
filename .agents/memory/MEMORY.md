@@ -3,3 +3,4 @@
 - [TMP scoring rules](tmp-scoring-rules.md) — show overall results TMP alongside separate scoring/conceding averages; keep odds TMP distinct.
 - [KickoffScore fixture details](kickoffscore-fixture-data.md) — fixture records bundle events, lineups, player stats, and full/half statistics; completed-match odds may be absent.
 - [SQLite archive constraints](sqlite-deployment-durability.md) — published local files reset, and large archived JSON must be queried through compact projections.
+- [FAIR AI target](fair-ai-scope.md) — the intended product is player-level, spatial decision evaluation; don't label match-result models as RL or xT/EVA.

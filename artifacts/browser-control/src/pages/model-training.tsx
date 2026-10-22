@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'wouter';
+import FairAiReadinessTab from '@/components/fair-ai-readiness-tab';
 import ModelPredictionsTab from '@/components/model-predictions-tab';
 import {
   getGetFootballModelTrainingDashboardQueryKey,
@@ -140,7 +141,7 @@ function ConfusionMatrix({ matrix }: { matrix: number[][] }) {
 
 export default function ModelTrainingPage() {
   const client = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'training' | 'predictions'>('training');
+  const [activeTab, setActiveTab] = useState<'training' | 'predictions' | 'fair-ai'>('training');
   const dashboardQuery = useGetFootballModelTrainingDashboard({
     query: { queryKey: getGetFootballModelTrainingDashboardQueryKey() },
   });
@@ -222,6 +223,7 @@ export default function ModelTrainingPage() {
           {([
             { id: 'training', label: 'Training', icon: Activity },
             { id: 'predictions', label: 'Predictions', icon: BarChart3 },
+            { id: 'fair-ai', label: 'FAIR AI', icon: Sparkles },
           ] as const).map((tab) => {
             const Icon = tab.icon;
             const selected = activeTab === tab.id;
@@ -238,7 +240,10 @@ export default function ModelTrainingPage() {
                 onKeyDown={(event) => {
                   if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
                     event.preventDefault();
-                    const nextTab = activeTab === 'training' ? 'predictions' : 'training';
+                    const tabOrder = ['training', 'predictions', 'fair-ai'] as const;
+                    const currentIndex = tabOrder.indexOf(activeTab);
+                    const step = event.key === 'ArrowRight' ? 1 : -1;
+                    const nextTab = tabOrder[(currentIndex + step + tabOrder.length) % tabOrder.length];
                     setActiveTab(nextTab);
                     document.getElementById(`tab-model-${nextTab}`)?.focus();
                   }
@@ -389,9 +394,19 @@ export default function ModelTrainingPage() {
 
         <footer className="mt-5 flex items-start gap-2 rounded-lg border border-[#e5dcc6] bg-[#f7f0df] px-3.5 py-3 text-[8px] leading-[1.7] text-[#81745e]" role="note" data-testid="notice-experimental-results"><AlertTriangle size={13} className="mt-0.5 shrink-0 text-[#a2814b]" /><p><strong className="text-[#756341]">Research only.</strong> Model outputs are experimental and may be unstable on small or changing datasets. They are not betting advice, and should not be used as a guarantee of match outcomes.</p></footer>
           </div>
-        ) : (
+        ) : activeTab === 'predictions' ? (
           <div id="panel-model-predictions" role="tabpanel" aria-labelledby="tab-model-predictions">
             <ModelPredictionsTab />
+          </div>
+        ) : (
+          <div id="panel-model-fair-ai" role="tabpanel" aria-labelledby="tab-model-fair-ai">
+            <FairAiReadinessTab
+              dashboard={dashboard}
+              loading={dashboardQuery.isLoading}
+              error={dashboardQuery.isError ? errorText(dashboardQuery.error) : null}
+              onRetry={() => void dashboardQuery.refetch()}
+              onViewPredictions={() => setActiveTab('predictions')}
+            />
           </div>
         )}
       </div>
