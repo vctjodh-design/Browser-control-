@@ -115,7 +115,7 @@ database.exec(`
 
   CREATE TABLE IF NOT EXISTS model_training_runs (
     id TEXT PRIMARY KEY,
-    model_type TEXT NOT NULL CHECK (model_type IN ('lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph')),
+    model_type TEXT NOT NULL CHECK (model_type IN ('lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph', 'catboost', 'xgboost')),
     status TEXT NOT NULL CHECK (status IN ('queued', 'training', 'completed', 'failed')),
     epochs INTEGER NOT NULL,
     completed_epochs INTEGER NOT NULL DEFAULT 0,
@@ -167,7 +167,7 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS tester_model_predictions (
     fixture_id INTEGER NOT NULL,
     run_id TEXT NOT NULL,
-    model_type TEXT NOT NULL CHECK (model_type IN ('lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph')),
+    model_type TEXT NOT NULL CHECK (model_type IN ('lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph', 'catboost', 'xgboost')),
     prediction_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (fixture_id, run_id)
@@ -176,6 +176,87 @@ database.exec(`
   CREATE INDEX IF NOT EXISTS tester_model_predictions_fixture_created
     ON tester_model_predictions(fixture_id, created_at DESC);
 `);
+
+const modelRunSchema = database
+  .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+  .get("model_training_runs") as SqlRow | undefined;
+if (!String(modelRunSchema?.sql ?? "").includes("'catboost'")) {
+  database.exec(`
+    BEGIN IMMEDIATE;
+    DROP INDEX IF EXISTS model_training_runs_created;
+    ALTER TABLE model_training_runs RENAME TO model_training_runs_legacy;
+    CREATE TABLE model_training_runs (
+      id TEXT PRIMARY KEY,
+      model_type TEXT NOT NULL CHECK (model_type IN ('lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph', 'catboost', 'xgboost')),
+      status TEXT NOT NULL CHECK (status IN ('queued', 'training', 'completed', 'failed')),
+      epochs INTEGER NOT NULL,
+      completed_epochs INTEGER NOT NULL DEFAULT 0,
+      sequence_length INTEGER NOT NULL,
+      hidden_units INTEGER NOT NULL,
+      sample_count INTEGER NOT NULL DEFAULT 0,
+      training_sample_count INTEGER NOT NULL DEFAULT 0,
+      validation_sample_count INTEGER NOT NULL DEFAULT 0,
+      verified_odds_fixture_count INTEGER NOT NULL DEFAULT 0,
+      accuracy REAL,
+      baseline_accuracy REAL,
+      log_loss REAL,
+      brier_score REAL,
+      confusion_json TEXT NOT NULL DEFAULT '[[0,0,0],[0,0,0],[0,0,0]]',
+      training_loss_json TEXT NOT NULL DEFAULT '[]',
+      validation_loss_json TEXT NOT NULL DEFAULT '[]',
+      weights_json TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO model_training_runs (
+      id, model_type, status, epochs, completed_epochs, sequence_length,
+      hidden_units, sample_count, training_sample_count, validation_sample_count,
+      verified_odds_fixture_count, accuracy, baseline_accuracy, log_loss,
+      brier_score, confusion_json, training_loss_json, validation_loss_json,
+      weights_json, error, created_at, updated_at
+    )
+    SELECT
+      id, model_type, status, epochs, completed_epochs, sequence_length,
+      hidden_units, sample_count, training_sample_count, validation_sample_count,
+      verified_odds_fixture_count, accuracy, baseline_accuracy, log_loss,
+      brier_score, confusion_json, training_loss_json, validation_loss_json,
+      weights_json, error, created_at, updated_at
+    FROM model_training_runs_legacy;
+    DROP TABLE model_training_runs_legacy;
+    CREATE INDEX model_training_runs_created
+      ON model_training_runs(created_at DESC);
+    COMMIT;
+  `);
+}
+
+const predictionSchema = database
+  .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+  .get("tester_model_predictions") as SqlRow | undefined;
+if (!String(predictionSchema?.sql ?? "").includes("'catboost'")) {
+  database.exec(`
+    BEGIN IMMEDIATE;
+    DROP INDEX IF EXISTS tester_model_predictions_fixture_created;
+    ALTER TABLE tester_model_predictions RENAME TO tester_model_predictions_legacy;
+    CREATE TABLE tester_model_predictions (
+      fixture_id INTEGER NOT NULL,
+      run_id TEXT NOT NULL,
+      model_type TEXT NOT NULL CHECK (model_type IN ('lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph', 'catboost', 'xgboost')),
+      prediction_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (fixture_id, run_id)
+    );
+    INSERT INTO tester_model_predictions (
+      fixture_id, run_id, model_type, prediction_json, created_at
+    )
+    SELECT fixture_id, run_id, model_type, prediction_json, created_at
+    FROM tester_model_predictions_legacy;
+    DROP TABLE tester_model_predictions_legacy;
+    CREATE INDEX tester_model_predictions_fixture_created
+      ON tester_model_predictions(fixture_id, created_at DESC);
+    COMMIT;
+  `);
+}
 
 const jobColumns = database
   .prepare("PRAGMA table_info(bulk_processing_jobs)")
@@ -867,12 +948,25 @@ function hasPredictionArtifact(value: SQLOutputValue): boolean {
       version?: unknown;
       weights?: unknown;
       normalization?: { means?: unknown; scales?: unknown; positionsPerSample?: unknown };
+      algorithm?: unknown;
+      featureCount?: unknown;
+      heads?: unknown;
     };
-    return artifact.version === 2 &&
+    const neuralArtifact = artifact.version === 2 &&
       Array.isArray(artifact.weights) &&
       Array.isArray(artifact.normalization?.means) &&
       Array.isArray(artifact.normalization?.scales) &&
       typeof artifact.normalization?.positionsPerSample === "number";
+    const treeArtifact = artifact.version === 3 &&
+      (artifact.algorithm === "catboost" || artifact.algorithm === "xgboost") &&
+      typeof artifact.featureCount === "number" &&
+      Number.isSafeInteger(artifact.featureCount) &&
+      artifact.featureCount > 0 &&
+      !!artifact.heads &&
+      typeof artifact.heads === "object" &&
+      ["result", "bothTeamsToScore", "overUnder25", "overUnder35", "correctScore"]
+        .every((head) => Object.hasOwn(artifact.heads as Record<string, unknown>, head));
+    return neuralArtifact || treeArtifact;
   } catch {
     return false;
   }

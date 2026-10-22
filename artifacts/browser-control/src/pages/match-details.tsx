@@ -11,6 +11,7 @@ import { MatchTmpPanel } from '@/components/match-tmp-panel';
 import { MatchInsightsPanel } from '@/components/match-insights-panel';
 import { MatchupAnalysisPanel } from '@/components/matchup-analysis-panel';
 import { PerformanceGraphsPanel } from '@/components/performance-graphs-panel';
+import { ModelPredictionGraphs } from '@/components/model-predictions-panel';
 import { LastFivePanel } from '@/components/last-five-panel';
 import {
   ArrowLeft,
@@ -25,7 +26,7 @@ import {
   Trophy,
 } from 'lucide-react';
 
-type MatchTab = 'table' | 'odds' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'lastfive';
+type MatchTab = 'table' | 'odds' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
 const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'table', label: 'Table', short: '01' },
   { id: 'odds', label: 'Odds', short: '02' },
@@ -35,6 +36,7 @@ const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'tmp', label: 'TMP', short: '06' },
   { id: 'insights', label: 'Matchup analysis', short: '07' },
   { id: 'graphs', label: 'Graph Representations', short: '08' },
+  { id: 'predictions', label: 'Predictions', short: '09' },
 ];
 
 function readableError(error: unknown) {
@@ -243,10 +245,10 @@ export default function MatchDetailsPage() {
   });
   const [activeTab, setActiveTab] = useState<MatchTab>('table');
   const tmpQuery = useGetFootballMatchTmp(validId ? fixtureId : 0, {
-    query: { enabled: validId && (activeTab === 'tmp' || activeTab === 'insights' || activeTab === 'graphs'), queryKey: ['/api/football/matches', fixtureId, 'tmp'] },
+    query: { enabled: validId && (activeTab === 'tmp' || activeTab === 'insights' || activeTab === 'graphs' || activeTab === 'predictions'), queryKey: ['/api/football/matches', fixtureId, 'tmp'] },
   });
   const lastFiveQuery = useGetFootballMatchLastFive(validId ? fixtureId : 0, {
-    query: { enabled: validId && (activeTab === 'lastfive' || activeTab === 'insights' || activeTab === 'graphs'), queryKey: getGetFootballMatchLastFiveQueryKey(fixtureId) },
+    query: { enabled: validId && (activeTab === 'lastfive' || activeTab === 'insights' || activeTab === 'graphs' || activeTab === 'predictions'), queryKey: getGetFootballMatchLastFiveQueryKey(fixtureId) },
   });
   const details = detailsQuery.data as FootballMatchDetails | undefined;
   const match = details?.match;
@@ -320,7 +322,8 @@ export default function MatchDetailsPage() {
                   <MatchInsightsPanel details={details} lastFive={lastFiveQuery.data} lastFiveLoading={lastFiveQuery.isLoading} lastFiveError={lastFiveQuery.isError} context={tmpQuery.data} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />
                   <MatchupAnalysisPanel data={lastFiveQuery.data} matchDate={match.date} isLoading={lastFiveQuery.isLoading} isError={lastFiveQuery.isError} error={lastFiveQuery.error} onRetry={() => { void lastFiveQuery.refetch(); }} />
                 </div>}
-                {activeTab === 'graphs' && <PerformanceGraphsPanel fixtureId={fixtureId} details={details} lastFive={lastFiveQuery.data as FootballMatchLastFive | undefined} lastFiveLoading={lastFiveQuery.isLoading} context={tmpQuery.data as FootballMatchTmpContext | undefined} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />}
+                {activeTab === 'graphs' && <PerformanceGraphsPanel details={details} context={tmpQuery.data as FootballMatchTmpContext | undefined} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />}
+                {activeTab === 'predictions' && <ModelPredictionGraphs fixtureId={fixtureId} details={details} lastFive={lastFiveQuery.data as FootballMatchLastFive | undefined} context={tmpQuery.data as FootballMatchTmpContext | undefined} contextLoading={tmpQuery.isLoading || lastFiveQuery.isLoading} />}
                 {activeTab === 'lastfive' && <LastFivePanel data={lastFiveQuery.data} isLoading={lastFiveQuery.isLoading} isError={lastFiveQuery.isError} error={lastFiveQuery.error} onRetry={() => { void lastFiveQuery.refetch(); }} />}
               </div>
             </section>

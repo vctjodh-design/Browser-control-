@@ -2,7 +2,6 @@ import type {
   FootballHistoricalMarket,
   FootballHistoricalMarketSelection,
   FootballMatchDetails,
-  FootballMatchLastFive,
   FootballMatchTmpContext,
 } from '@workspace/api-client-react';
 import { AlertCircle, BarChart3, RefreshCw, TrendingUp } from 'lucide-react';
@@ -19,7 +18,6 @@ import {
   YAxis,
 } from 'recharts';
 import { useState } from 'react';
-import { ModelPredictionGraphs } from '@/components/model-predictions-panel';
 
 type Side = 'home' | 'away';
 
@@ -788,20 +786,14 @@ function TeamPerformanceCard({ sample, context }: { sample: TeamSample; context?
 }
 
 export function PerformanceGraphsPanel({
-  fixtureId,
   details,
-  lastFive,
-  lastFiveLoading,
   context,
   isLoading,
   isError,
   error,
   onRetry,
 }: {
-  fixtureId: number;
   details: FootballMatchDetails;
-  lastFive?: FootballMatchLastFive;
-  lastFiveLoading: boolean;
   context?: FootballMatchTmpContext;
   isLoading: boolean;
   isError: boolean;
@@ -820,14 +812,6 @@ export function PerformanceGraphsPanel({
         </div>
         <p className="max-w-[420px] text-[9px] leading-5 text-[#858982]">Results and goals use completed scores. Odds TMP uses only complete historical 1X2 probabilities; standings and current-match odds are not inputs.</p>
       </div>
-
-      <ModelPredictionGraphs
-        fixtureId={fixtureId}
-        details={details}
-        lastFive={lastFive}
-        context={context}
-        contextLoading={isLoading || lastFiveLoading}
-      />
 
       <div className="grid gap-3 rounded-xl border border-[#deddd4] bg-[#f3f2eb] p-3.5 sm:grid-cols-[auto_1fr] sm:items-center sm:p-4" data-testid="performance-method-note">
         <span className="grid size-9 place-items-center rounded-lg bg-[#e6eee8] text-[#537867]"><TrendingUp size={16} /></span>

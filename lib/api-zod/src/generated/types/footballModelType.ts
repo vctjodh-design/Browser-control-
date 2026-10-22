@@ -15,4 +15,6 @@ export const FootballModelType = {
   transformer: 'transformer',
   gnn: 'gnn',
   'dynamic-graph': 'dynamic-graph',
+  catboost: 'catboost',
+  xgboost: 'xgboost',
 } as const;

@@ -1212,7 +1212,7 @@ components:
       required: [job]
     FootballModelType:
       type: string
-      enum: [lstm, gru, transformer, gnn, dynamic-graph]
+      enum: [lstm, gru, transformer, gnn, dynamic-graph, catboost, xgboost]
     FootballModelTrainingInput:
       type: object
       properties:

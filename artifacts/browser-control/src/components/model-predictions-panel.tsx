@@ -25,6 +25,8 @@ const MODEL_NAMES: Record<FootballModelType, string> = {
   transformer: 'Transformer',
   gnn: 'GNN',
   'dynamic-graph': 'Dynamic Graph',
+  catboost: 'CatBoost',
+  xgboost: 'XGBoost',
 };
 
 function errorMessage(error: unknown): string {

@@ -1,0 +1,9 @@
+[project]
+name = "repl-nix-workspace"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+dependencies = [
+    "catboost==1.2.10",
+    "xgboost==3.4.1",
+]

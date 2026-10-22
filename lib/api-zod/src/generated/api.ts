@@ -175,7 +175,7 @@ export const GetFootballModelTrainingDashboardResponse = zod.object({
   "verifiedOddsFixtureCount": zod.number().int(),
   "runs": zod.array(zod.object({
   "id": zod.string().uuid(),
-  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph']),
+  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph', 'catboost', 'xgboost']),
   "status": zod.enum(['queued', 'training', 'completed', 'failed']),
   "epochs": zod.number().int(),
   "completedEpochs": zod.number().int(),
@@ -220,7 +220,7 @@ export const startFootballModelTrainingBodyHiddenUnitsMax = 64;
 
 
 export const StartFootballModelTrainingBody = zod.object({
-  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph']),
+  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph', 'catboost', 'xgboost']),
   "epochs": zod.number().int().min(startFootballModelTrainingBodyEpochsMin).max(startFootballModelTrainingBodyEpochsMax).default(startFootballModelTrainingBodyEpochsDefault),
   "sequenceLength": zod.number().int().min(startFootballModelTrainingBodySequenceLengthMin).max(startFootballModelTrainingBodySequenceLengthMax).default(startFootballModelTrainingBodySequenceLengthDefault),
   "hiddenUnits": zod.number().int().min(startFootballModelTrainingBodyHiddenUnitsMin).max(startFootballModelTrainingBodyHiddenUnitsMax).default(startFootballModelTrainingBodyHiddenUnitsDefault)
@@ -228,7 +228,7 @@ export const StartFootballModelTrainingBody = zod.object({
 
 export const StartFootballModelTrainingResponse = zod.object({
   "id": zod.string().uuid(),
-  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph']),
+  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph', 'catboost', 'xgboost']),
   "status": zod.enum(['queued', 'training', 'completed', 'failed']),
   "epochs": zod.number().int(),
   "completedEpochs": zod.number().int(),
@@ -262,7 +262,7 @@ export const GetFootballModelTrainingRunParams = zod.object({
 
 export const GetFootballModelTrainingRunResponse = zod.object({
   "id": zod.string().uuid(),
-  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph']),
+  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph', 'catboost', 'xgboost']),
   "status": zod.enum(['queued', 'training', 'completed', 'failed']),
   "epochs": zod.number().int(),
   "completedEpochs": zod.number().int(),
@@ -529,7 +529,7 @@ export const GetFootballMatchModelPredictionsResponse = zod.object({
   "predictions": zod.array(zod.object({
   "fixtureId": zod.number().int().min(1),
   "runId": zod.string().uuid(),
-  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph']),
+  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph', 'catboost', 'xgboost']),
   "result": zod.object({
   "home": zod.number().min(getFootballMatchModelPredictionsResponsePredictionsItemResultHomeMin).max(getFootballMatchModelPredictionsResponsePredictionsItemResultHomeMax),
   "draw": zod.number().min(getFootballMatchModelPredictionsResponsePredictionsItemResultDrawMin).max(getFootballMatchModelPredictionsResponsePredictionsItemResultDrawMax),
@@ -716,7 +716,7 @@ export const PredictFootballMatchResponse = zod.object({
   "predictions": zod.array(zod.object({
   "fixtureId": zod.number().int().min(1),
   "runId": zod.string().uuid(),
-  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph']),
+  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph', 'catboost', 'xgboost']),
   "result": zod.object({
   "home": zod.number().min(predictFootballMatchResponsePredictionsItemResultHomeMin).max(predictFootballMatchResponsePredictionsItemResultHomeMax),
   "draw": zod.number().min(predictFootballMatchResponsePredictionsItemResultDrawMin).max(predictFootballMatchResponsePredictionsItemResultDrawMax),
@@ -798,7 +798,7 @@ export const GetFootballTesterMatchModelPredictionsResponse = zod.object({
   "predictions": zod.array(zod.object({
   "fixtureId": zod.number().int().min(1),
   "runId": zod.string().uuid(),
-  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph']),
+  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph', 'catboost', 'xgboost']),
   "result": zod.object({
   "home": zod.number().min(getFootballTesterMatchModelPredictionsResponsePredictionsItemResultHomeMin).max(getFootballTesterMatchModelPredictionsResponsePredictionsItemResultHomeMax),
   "draw": zod.number().min(getFootballTesterMatchModelPredictionsResponsePredictionsItemResultDrawMin).max(getFootballTesterMatchModelPredictionsResponsePredictionsItemResultDrawMax),
@@ -881,7 +881,7 @@ export const PredictFootballTesterMatchResponse = zod.object({
   "predictions": zod.array(zod.object({
   "fixtureId": zod.number().int().min(1),
   "runId": zod.string().uuid(),
-  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph']),
+  "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph', 'catboost', 'xgboost']),
   "result": zod.object({
   "home": zod.number().min(predictFootballTesterMatchResponsePredictionsItemResultHomeMin).max(predictFootballTesterMatchResponsePredictionsItemResultHomeMax),
   "draw": zod.number().min(predictFootballTesterMatchResponsePredictionsItemResultDrawMin).max(predictFootballTesterMatchResponsePredictionsItemResultDrawMax),

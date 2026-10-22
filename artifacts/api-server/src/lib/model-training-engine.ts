@@ -1,3 +1,6 @@
+import { spawn } from "node:child_process";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 import * as tf from "@tensorflow/tfjs";
 import type {
   FootballModelType,
@@ -50,12 +53,13 @@ type TrainingExample = {
   sequence: number[];
   graph: number[];
   graphAdjacency: number[];
+  tabular: number[];
   labels: Record<MarketHeadName, number>;
   hasPriorVerifiedOdds: boolean;
 };
 
 export type TrainingWeights = Array<{ shape: number[]; values: number[] }>;
-export type ModelPredictorArtifact = {
+export type NeuralModelPredictorArtifact = {
   version: 2;
   weights: TrainingWeights;
   normalization: {
@@ -64,6 +68,19 @@ export type ModelPredictorArtifact = {
     positionsPerSample: number;
   };
 };
+type BoostedTreeModelType = "catboost" | "xgboost";
+type BoostedTreeHeadArtifact =
+  | { kind: "constant"; probabilities: number[] }
+  | { kind: "model"; classLabels: number[]; modelJson: string };
+export type BoostedTreePredictorArtifact = {
+  version: 3;
+  algorithm: BoostedTreeModelType;
+  featureCount: number;
+  heads: Record<MarketHeadName, BoostedTreeHeadArtifact>;
+};
+export type ModelPredictorArtifact =
+  | NeuralModelPredictorArtifact
+  | BoostedTreePredictorArtifact;
 
 export type ModelTrainingResult = {
   sampleCount: number;
@@ -534,10 +551,12 @@ function buildTrainingExamples(
         sequenceLength,
         modelType === "dynamic-graph",
       );
+      const sequence = sequenceFeatures(homeHistory, awayHistory, sequenceLength, match);
       examples.push({
-        sequence: sequenceFeatures(homeHistory, awayHistory, sequenceLength, match),
+        sequence,
         graph: graph.nodes,
         graphAdjacency: graph.adjacency,
+        tabular: [...sequence, ...graph.nodes, ...graph.adjacency],
         labels: labelsFor(match),
         hasPriorVerifiedOdds: oddsInPriorForm,
       });
@@ -574,7 +593,7 @@ function fitNormalization(
   trainingSampleCount: number,
   featureCount: number,
   positionsPerSample: number,
-): ModelPredictorArtifact["normalization"] {
+): NeuralModelPredictorArtifact["normalization"] {
   const means = Array(featureCount).fill(0) as number[];
   const squares = Array(featureCount).fill(0) as number[];
   const divisor = Math.max(1, trainingSampleCount * positionsPerSample);
@@ -595,7 +614,7 @@ function fitNormalization(
 
 function normalizeRows(
   rows: number[][],
-  normalization: ModelPredictorArtifact["normalization"],
+  normalization: NeuralModelPredictorArtifact["normalization"],
 ): number[][] {
   const featureCount = normalization.means.length;
   return rows.map((row) => {
@@ -750,14 +769,116 @@ function metricsFor(
   };
 }
 
+type BoostedTreeTrainRequest = {
+  mode: "train";
+  algorithm: BoostedTreeModelType;
+  rounds: number;
+  trainingSampleCount: number;
+  features: number[][];
+  labels: Record<MarketHeadName, number[]>;
+};
+
+type BoostedTreePredictRequest = {
+  mode: "predict";
+  algorithm: BoostedTreeModelType;
+  artifact: BoostedTreePredictorArtifact;
+  features: number[];
+  historyMatchCount: number;
+  verifiedOddsHistoryCount: number;
+};
+
+type BoostedTreeWorkerRequest =
+  | BoostedTreeTrainRequest
+  | BoostedTreePredictRequest;
+
+type BoostedTreeWorkerMessage =
+  | {
+      type: "progress";
+      completedEpochs: number;
+      trainingLoss: number[];
+      validationLoss: number[];
+    }
+  | { type: "result"; result: unknown }
+  | { type: "error"; error: string };
+
+function isBoostedTreeModelType(
+  modelType: FootballModelType,
+): modelType is BoostedTreeModelType {
+  return modelType === "catboost" || modelType === "xgboost";
+}
+
+function runBoostedTreeWorker<Result>(
+  request: BoostedTreeWorkerRequest,
+  onEpoch?: EpochProgress,
+): Promise<Result> {
+  return new Promise((resolve, reject) => {
+    const workerPath = fileURLToPath(
+      new URL("./boosted-tree-worker.py", import.meta.url),
+    );
+    const child = spawn(process.env.PYTHON ?? "python3", [workerPath], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const output = createInterface({ input: child.stdout, crlfDelay: Infinity });
+    let stderr = "";
+    let result: unknown;
+    let workerError: Error | null = null;
+    let spawnError: Error | null = null;
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr = `${stderr}${chunk}`.slice(-4000);
+    });
+    output.on("line", (line) => {
+      let message: BoostedTreeWorkerMessage;
+      try {
+        message = JSON.parse(line) as BoostedTreeWorkerMessage;
+      } catch {
+        workerError = new Error("The boosted-tree worker returned invalid output.");
+        child.kill();
+        return;
+      }
+      if (message.type === "progress") {
+        onEpoch?.(
+          message.completedEpochs,
+          message.trainingLoss,
+          message.validationLoss,
+        );
+      } else if (message.type === "result") {
+        result = message.result;
+      } else if (message.type === "error") {
+        workerError = new Error(message.error);
+        child.kill();
+      }
+    });
+    child.on("error", (error) => {
+      spawnError = error;
+    });
+    child.on("close", (code) => {
+      if (spawnError) {
+        reject(new Error(`Could not start the Python model worker: ${spawnError.message}`));
+      } else if (workerError) {
+        reject(workerError);
+      } else if (code !== 0) {
+        reject(new Error(`The boosted-tree worker exited with code ${code}.${stderr ? ` ${stderr.trim().slice(-1500)}` : ""}`));
+      } else if (result === undefined) {
+        reject(new Error("The boosted-tree worker finished without returning a model result."));
+      } else {
+        resolve(result as Result);
+      }
+    });
+    child.stdin.on("error", (error) => {
+      workerError ??= error;
+    });
+    child.stdin.end(JSON.stringify(request));
+  });
+}
+
 export async function trainArchivedModel(
   modelType: FootballModelType,
   input: FootballModelTrainingInput,
   matches: ModelTrainingMatch[],
   onEpoch: EpochProgress,
 ): Promise<ModelTrainingResult> {
-  await tf.setBackend("cpu");
-  await tf.ready();
   const sequenceLength = input.sequenceLength ?? 10;
   const hiddenUnits = input.hiddenUnits ?? 16;
   const epochs = input.epochs ?? 24;
@@ -768,6 +889,30 @@ export async function trainArchivedModel(
 
   const trainingSampleCount = Math.floor(examples.length * 0.8);
   const validationSampleCount = examples.length - trainingSampleCount;
+  if (isBoostedTreeModelType(modelType)) {
+    const labels: Record<MarketHeadName, number[]> = {
+      result: examples.map((example) => example.labels.result),
+      bothTeamsToScore: examples.map((example) => example.labels.bothTeamsToScore),
+      overUnder25: examples.map((example) => example.labels.overUnder25),
+      overUnder35: examples.map((example) => example.labels.overUnder35),
+      correctScore: examples.map((example) => example.labels.correctScore),
+    };
+    const result = await runBoostedTreeWorker<ModelTrainingResult>({
+      mode: "train",
+      algorithm: modelType,
+      rounds: epochs,
+      trainingSampleCount,
+      features: examples.map((example) => example.tabular),
+      labels,
+    }, onEpoch);
+    return {
+      ...result,
+      verifiedOddsFixtureCount: examples.filter((example) => example.hasPriorVerifiedOdds).length,
+    };
+  }
+
+  await tf.setBackend("cpu");
+  await tf.ready();
   const sequenceModel = modelType === "lstm" || modelType === "gru" || modelType === "transformer";
   const graphModel = modelType === "gnn" || modelType === "dynamic-graph";
   const featureCount = sequenceModel ? SEQUENCE_FEATURES : TEAM_EVENT_FEATURES;
@@ -892,11 +1037,11 @@ export async function trainArchivedModel(
   }
 }
 
-export function isModelPredictorArtifact(
+function isNeuralModelPredictorArtifact(
   value: unknown,
-): value is ModelPredictorArtifact {
+): value is NeuralModelPredictorArtifact {
   if (!value || typeof value !== "object") return false;
-  const artifact = value as Partial<ModelPredictorArtifact>;
+  const artifact = value as Partial<NeuralModelPredictorArtifact>;
   return artifact.version === 2 &&
     Array.isArray(artifact.weights) &&
     artifact.weights.every((weight) =>
@@ -916,6 +1061,48 @@ export function isModelPredictorArtifact(
     artifact.normalization.positionsPerSample > 0;
 }
 
+function isBoostedTreePredictorArtifact(
+  value: unknown,
+): value is BoostedTreePredictorArtifact {
+  if (!value || typeof value !== "object") return false;
+  const artifact = value as Partial<BoostedTreePredictorArtifact>;
+  if (
+    artifact.version !== 3 ||
+    (artifact.algorithm !== "catboost" && artifact.algorithm !== "xgboost") ||
+    !Number.isSafeInteger(artifact.featureCount) ||
+    (artifact.featureCount ?? 0) < 1 ||
+    !artifact.heads
+  ) {
+    return false;
+  }
+  return MARKET_HEADS.every(({ name, classes }) => {
+    const head = artifact.heads?.[name];
+    if (!head || typeof head !== "object") return false;
+    if (head.kind === "constant") {
+      return Array.isArray(head.probabilities) &&
+        head.probabilities.length === classes &&
+        head.probabilities.every((probability) => Number.isFinite(probability) && probability >= 0) &&
+        head.probabilities.some((probability) => probability > 0);
+    }
+    if (head.kind === "model") {
+      return typeof head.modelJson === "string" &&
+        head.modelJson.length > 0 &&
+        Array.isArray(head.classLabels) &&
+        head.classLabels.length >= 2 &&
+        new Set(head.classLabels).size === head.classLabels.length &&
+        head.classLabels.every((label) => Number.isSafeInteger(label) && label >= 0 && label < classes);
+    }
+    return false;
+  });
+}
+
+export function isModelPredictorArtifact(
+  value: unknown,
+): value is ModelPredictorArtifact {
+  return isNeuralModelPredictorArtifact(value) ||
+    isBoostedTreePredictorArtifact(value);
+}
+
 export async function predictArchivedFixture(input: {
   modelType: FootballModelType;
   sequenceLength: number;
@@ -927,8 +1114,6 @@ export async function predictArchivedFixture(input: {
   if (!isModelPredictorArtifact(input.artifact)) {
     throw new Error("This run has no compatible prediction artifact. Train a new model run before predicting.");
   }
-  await tf.setBackend("cpu");
-  await tf.ready();
   const artifact = input.artifact;
   const historyMatches = input.matches.filter(
     (match) =>
@@ -963,6 +1148,28 @@ export async function predictArchivedFixture(input: {
     throw new Error("The tester fixture does not contain enough information to build model inputs.");
   }
 
+  if (isBoostedTreeModelType(input.modelType)) {
+    if (
+      !isBoostedTreePredictorArtifact(artifact) ||
+      artifact.algorithm !== input.modelType
+    ) {
+      throw new Error("The saved boosted-tree artifact does not match this model architecture.");
+    }
+    return runBoostedTreeWorker<ArchivedModelPrediction>({
+      mode: "predict",
+      algorithm: input.modelType,
+      artifact,
+      features: example.tabular,
+      historyMatchCount: historyMatches.length,
+      verifiedOddsHistoryCount: parseVerifiedOdds(historyMatches).size,
+    });
+  }
+
+  if (!isNeuralModelPredictorArtifact(artifact)) {
+    throw new Error("This model architecture requires a neural-network prediction artifact.");
+  }
+  await tf.setBackend("cpu");
+  await tf.ready();
   const sequenceModel =
     input.modelType === "lstm" ||
     input.modelType === "gru" ||

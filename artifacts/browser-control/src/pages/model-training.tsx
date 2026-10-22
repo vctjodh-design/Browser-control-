@@ -44,6 +44,8 @@ const MODELS: Array<{
   { id: 'transformer', name: 'Transformer', method: 'Temporal attention', detail: 'Weights earlier and later signals by relevance.', icon: ScanLine },
   { id: 'gnn', name: 'GNN', method: 'Team relationships', detail: 'Learns links between teams and shared fixtures.', icon: Network },
   { id: 'dynamic-graph', name: 'Dynamic Graph', method: 'Chronological graph', detail: 'Tracks relationships as they change over time.', icon: GitBranch },
+  { id: 'catboost', name: 'CatBoost', method: 'Boosted decision trees', detail: 'Learns nonlinear patterns from the shared sequence, league-context, and graph feature vector.', icon: Layers3 },
+  { id: 'xgboost', name: 'XGBoost', method: 'Gradient-boosted trees', detail: 'Builds an independent tree ensemble over the same time-ordered match features as CatBoost.', icon: Network },
 ];
 
 function errorText(error: unknown) {
@@ -160,6 +162,7 @@ export default function ModelTrainingPage() {
   });
   const run = runQuery.data;
   const canTrain = (dashboard?.matchCount ?? 0) >= 30;
+  const boostedTreeModel = modelType === 'catboost' || modelType === 'xgboost';
   const activeTraining = dashboard?.runs.find(
     (item) => item.status === 'queued' || item.status === 'training',
   );
@@ -170,7 +173,7 @@ export default function ModelTrainingPage() {
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canTrain || activeTraining || startTraining.isPending) return;
-    startTraining.mutate({ data: { modelType, epochs, sequenceLength, hiddenUnits } }, {
+    startTraining.mutate({ data: { modelType, epochs, sequenceLength, hiddenUnits: boostedTreeModel ? 16 : hiddenUnits } }, {
       onSuccess: (created) => {
         setActiveRunId(created.id);
         client.setQueryData(getGetFootballModelTrainingRunQueryKey(created.id), created);
@@ -266,10 +269,10 @@ export default function ModelTrainingPage() {
                   })}
                 </div>
               </fieldset>
-              <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <label className="block"><span className="mb-1.5 block text-[9px] font-extrabold text-[#5f6e69]">Epochs</span><input type="number" min={5} max={100} step={1} value={epochs} onChange={(event) => setEpochs(Number(event.target.value))} disabled={!canTrain || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending} className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[11px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none disabled:opacity-50" aria-label="Training epochs, from 5 to 100" data-testid="input-training-epochs" /><span className="mt-1 block text-[7px] text-[#92948b]">5–100</span></label>
-                <label className="block"><span className="mb-1.5 block text-[9px] font-extrabold text-[#5f6e69]">Sequence length</span><input type="number" min={3} max={15} step={1} value={sequenceLength} onChange={(event) => setSequenceLength(Number(event.target.value))} disabled={!canTrain || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending} className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[11px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none disabled:opacity-50" aria-label="Sequence length, from 3 to 15" data-testid="input-sequence-length" /><span className="mt-1 block text-[7px] text-[#92948b]">3–15 matches</span></label>
-                <label className="block"><span className="mb-1.5 block text-[9px] font-extrabold text-[#5f6e69]">Hidden units</span><input type="number" min={4} max={64} step={1} value={hiddenUnits} onChange={(event) => setHiddenUnits(Number(event.target.value))} disabled={!canTrain || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending} className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[11px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none disabled:opacity-50" aria-label="Hidden units, from 4 to 64" data-testid="input-hidden-units" /><span className="mt-1 block text-[7px] text-[#92948b]">4–64</span></label>
+              <div className={`mt-5 grid grid-cols-1 gap-3 ${boostedTreeModel ? 'sm:grid-cols-2' : 'sm:grid-cols-3'}`}>
+                <label className="block"><span className="mb-1.5 block text-[9px] font-extrabold text-[#5f6e69]">{boostedTreeModel ? 'Boosting rounds' : 'Epochs'}</span><input type="number" min={5} max={100} step={1} value={epochs} onChange={(event) => setEpochs(Number(event.target.value))} disabled={!canTrain || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending} className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[11px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none disabled:opacity-50" aria-label={boostedTreeModel ? 'Boosting rounds, from 5 to 100' : 'Training epochs, from 5 to 100'} data-testid="input-training-epochs" /><span className="mt-1 block text-[7px] text-[#92948b]">{boostedTreeModel ? '5–100 tree rounds' : '5–100 epochs'}</span></label>
+                <label className="block"><span className="mb-1.5 block text-[9px] font-extrabold text-[#5f6e69]">{boostedTreeModel ? 'Feature history length' : 'Sequence length'}</span><input type="number" min={3} max={15} step={1} value={sequenceLength} onChange={(event) => setSequenceLength(Number(event.target.value))} disabled={!canTrain || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending} className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[11px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none disabled:opacity-50" aria-label={boostedTreeModel ? 'Feature history length, from 3 to 15' : 'Sequence length, from 3 to 15'} data-testid="input-sequence-length" /><span className="mt-1 block text-[7px] text-[#92948b]">{boostedTreeModel ? '3–15 recent matches in features' : '3–15 matches'}</span></label>
+                {!boostedTreeModel && <label className="block"><span className="mb-1.5 block text-[9px] font-extrabold text-[#5f6e69]">Hidden units</span><input type="number" min={4} max={64} step={1} value={hiddenUnits} onChange={(event) => setHiddenUnits(Number(event.target.value))} disabled={!canTrain || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending} className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[11px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none disabled:opacity-50" aria-label="Hidden units, from 4 to 64" data-testid="input-hidden-units" /><span className="mt-1 block text-[7px] text-[#92948b]">4–64</span></label>}
               </div>
               <div className="mt-4 flex items-start gap-2 rounded-lg border border-[#d9e0d6] bg-[#f0f4ed] px-3 py-2.5 text-[8px] leading-[1.65] text-[#6f7e70]"><ShieldCheck size={13} className="mt-0.5 shrink-0 text-[#5d806a]" /><p><strong className="text-[#4f6e5a]">No future peeking.</strong> For each target match, features are restricted to archived information dated before that match. Odds coverage is reported separately; missing odds are not treated as verified.</p></div>
                 <button type="submit" disabled={!canTrain || Boolean(activeTraining) || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending} className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#d96f51] px-4 text-[10px] font-extrabold text-white shadow-[0_5px_12px_rgba(173,79,52,.13)] transition hover:bg-[#c95f43] disabled:cursor-not-allowed disabled:opacity-45" data-testid="button-start-training">
