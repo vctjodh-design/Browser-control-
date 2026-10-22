@@ -205,7 +205,7 @@ export function TesterModelPredictionsPanel({ fixtureId }: { fixtureId: number }
       </div>
       <div className="space-y-3 p-3 sm:p-4">
         <p className="text-[8px] leading-4 text-[#81877f]">
-          Uses pre-match team form and graph features from archive matches before this fixture. Outputs include 1X2, both teams to score, over/under 2.5 and 3.5, and top correct scores. These are experimental estimates.
+          Uses saved pre-match form, standings and league context, plus earlier archive matches for sequence and graph features. Outputs include 1X2, both teams to score, over/under 2.5 and 3.5, and top correct scores. These are experimental estimates.
         </p>
         {dashboardQuery.isError && <p className="rounded-lg border border-[#e3c3b6] bg-[#fff6f0] px-3 py-2 text-[9px] text-[#8c6b5e]" role="alert" data-testid="error-prediction-model-list">{errorMessage(dashboardQuery.error)}</p>}
         {!dashboardQuery.isLoading && availableModels.size === 0 && (

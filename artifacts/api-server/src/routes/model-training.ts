@@ -20,12 +20,15 @@ import {
   findActiveModelTrainingRun,
   getModelTrainingArtifact,
   getModelTrainingRun,
+  getTesterMatchPayload,
   getTesterPredictionTarget,
   listModelTrainingMatches,
   listModelPredictionsForFixture,
   listModelTrainingRuns,
   saveModelPrediction,
+  type ModelFormMatch,
   type ModelTrainingContext,
+  type ModelTrainingMatch,
   type TesterPredictionTarget,
   updateModelTrainingRun,
 } from "../lib/processed-match-store";
@@ -39,6 +42,220 @@ import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 const MINIMUM_MATCH_COUNT = 30;
+
+function testerRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function testerNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizedTeamName(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function savedFormMatch(value: unknown): ModelFormMatch | null {
+  const wrapper = testerRecord(value);
+  const match = testerRecord(wrapper?.match) ?? wrapper;
+  if (!match) return null;
+  const fixtureId = testerNumber(match.fixtureId);
+  const timestamp = Date.parse(String(match.date ?? ""));
+  const homeTeam = testerRecord(match.homeTeam);
+  const awayTeam = testerRecord(match.awayTeam);
+  const homeTeamName = typeof match.homeTeamName === "string"
+    ? match.homeTeamName
+    : typeof homeTeam?.name === "string" ? homeTeam.name : null;
+  const awayTeamName = typeof match.awayTeamName === "string"
+    ? match.awayTeamName
+    : typeof awayTeam?.name === "string" ? awayTeam.name : null;
+  const homeScore = testerNumber(match.homeScore);
+  const awayScore = testerNumber(match.awayScore);
+  if (
+    fixtureId === null ||
+    !Number.isFinite(timestamp) ||
+    !homeTeamName ||
+    !awayTeamName ||
+    homeScore === null ||
+    awayScore === null
+  ) {
+    return null;
+  }
+  return {
+    fixtureId,
+    date: new Date(timestamp).toISOString(),
+    homeTeamName,
+    awayTeamName,
+    homeScore,
+    awayScore,
+  };
+}
+
+function testerSideLastFive(
+  payload: unknown,
+  side: "home" | "away",
+): ModelFormMatch[] {
+  const sidePayload = testerRecord(testerRecord(payload)?.[side]);
+  const rows = Array.isArray(sidePayload?.matches) ? sidePayload.matches : [];
+  return rows
+    .map(savedFormMatch)
+    .filter((match): match is ModelFormMatch => match !== null);
+}
+
+function priorMatchesForTeam(
+  teamName: string,
+  target: TesterPredictionTarget,
+  archivedMatches: ModelTrainingMatch[],
+  savedLastFive: ModelFormMatch[],
+): ModelFormMatch[] {
+  const teamKey = normalizedTeamName(teamName);
+  const targetTime = Date.parse(target.matchDate);
+  const byFixture = new Map<number, ModelFormMatch>();
+  const candidates: ModelFormMatch[] = [
+    ...archivedMatches
+      .filter((match) => {
+        const isTeamMatch =
+          normalizedTeamName(match.homeTeamName) === teamKey ||
+          normalizedTeamName(match.awayTeamName) === teamKey;
+        return isTeamMatch && Date.parse(match.matchDate) < targetTime;
+      })
+      .map((match) => ({
+        fixtureId: match.fixtureId,
+        date: match.matchDate,
+        homeTeamName: match.homeTeamName,
+        awayTeamName: match.awayTeamName,
+        homeScore: match.homeScore,
+        awayScore: match.awayScore,
+      })),
+    ...savedLastFive,
+  ];
+
+  for (const match of candidates) {
+    if (
+      match.fixtureId !== target.fixtureId &&
+      Date.parse(match.date) < targetTime &&
+      match.homeScore !== null &&
+      match.awayScore !== null
+    ) {
+      byFixture.set(match.fixtureId, match);
+    }
+  }
+
+  return [...byFixture.values()]
+    .sort((first, second) => Date.parse(second.date) - Date.parse(first.date))
+    .slice(0, 15);
+}
+
+function savedStanding(
+  rows: unknown[],
+  teamId: number | null,
+  teamName: string,
+): ModelTrainingContext["homeStanding"] {
+  const matchingRow = rows
+    .map(testerRecord)
+    .find((row) => {
+      if (!row) return false;
+      const rowTeamId = testerNumber(row.teamId);
+      const rowTeamName =
+        typeof row.teamName === "string" ? row.teamName : "";
+      return (teamId !== null && rowTeamId === teamId) ||
+        normalizedTeamName(rowTeamName) === normalizedTeamName(teamName);
+    });
+  if (!matchingRow) return null;
+  const rank = testerNumber(matchingRow.rank);
+  const played = testerNumber(matchingRow.played);
+  const points = testerNumber(matchingRow.points);
+  const goalDifference = testerNumber(matchingRow.goalDifference);
+  if (rank === null || played === null || points === null || goalDifference === null) {
+    return null;
+  }
+  return { rank, played, points, goalDifference };
+}
+
+function testerTargetWithSavedContext(
+  target: TesterPredictionTarget,
+  archivedMatches: ModelTrainingMatch[],
+): TesterPredictionTarget {
+  if (target.trainingContext) return target;
+
+  const prematch = testerRecord(getTesterMatchPayload(target.fixtureId, "details"));
+  const prematchMatch = testerRecord(prematch?.match);
+  const prematchHome = testerRecord(prematchMatch?.home);
+  const prematchAway = testerRecord(prematchMatch?.away);
+  const lastFive = getTesterMatchPayload(target.fixtureId, "lastFive");
+  const tmp = testerRecord(getTesterMatchPayload(target.fixtureId, "tmp"));
+  const leagueId = testerNumber(prematchMatch?.leagueId);
+  const season = testerNumber(prematchMatch?.season) ?? target.season;
+  const tmpStandings = Array.isArray(tmp?.seasonStandings)
+    ? tmp.seasonStandings.map(testerRecord).filter((row) => row !== null)
+    : [];
+  const scopedStandings = tmpStandings.filter((row) =>
+    (leagueId === null || testerNumber(row.leagueId) === leagueId) &&
+    (season === null || testerNumber(row.season) === season),
+  );
+  const savedStandings = Array.isArray(prematch?.latestAvailableStandings)
+    ? prematch.latestAvailableStandings
+    : [];
+  const standings = scopedStandings.length ? scopedStandings : savedStandings;
+  const homeLastFive = testerSideLastFive(lastFive, "home")
+    .filter((match) => Date.parse(match.date) < Date.parse(target.matchDate))
+    .sort((first, second) => Date.parse(second.date) - Date.parse(first.date))
+    .slice(0, 5);
+  const awayLastFive = testerSideLastFive(lastFive, "away")
+    .filter((match) => Date.parse(match.date) < Date.parse(target.matchDate))
+    .sort((first, second) => Date.parse(second.date) - Date.parse(first.date))
+    .slice(0, 5);
+  const homeRecent = priorMatchesForTeam(
+    target.homeTeamName,
+    target,
+    archivedMatches,
+    homeLastFive,
+  );
+  const awayRecent = priorMatchesForTeam(
+    target.awayTeamName,
+    target,
+    archivedMatches,
+    awayLastFive,
+  );
+  const homeStanding = savedStanding(
+    standings,
+    testerNumber(prematchHome?.id),
+    target.homeTeamName,
+  );
+  const awayStanding = savedStanding(
+    standings,
+    testerNumber(prematchAway?.id),
+    target.awayTeamName,
+  );
+  const trainingContext: ModelTrainingContext = {
+    homeTeamName: target.homeTeamName,
+    awayTeamName: target.awayTeamName,
+    homeRecent,
+    awayRecent,
+    homeLastFive: homeLastFive.length ? homeLastFive : homeRecent.slice(0, 5),
+    awayLastFive: awayLastFive.length ? awayLastFive : awayRecent.slice(0, 5),
+    homeStanding,
+    awayStanding,
+    standingTeamCount: standings.length,
+  };
+
+  return {
+    ...target,
+    leagueAverageGoals:
+      testerNumber(prematch?.leagueAverageGoals) ??
+      testerNumber(tmp?.leagueAverageGoals) ??
+      target.leagueAverageGoals ??
+      null,
+    trainingContext,
+  };
+}
 
 function trainingDatasetSummary(matches: ReturnType<typeof listModelTrainingMatches>) {
   const teams = new Set<string>();
@@ -139,6 +356,7 @@ async function generateModelPredictions(
   if (!runs.length) return [];
 
   const matches = listModelTrainingMatches();
+  const predictionTarget = testerTargetWithSavedContext(target, matches);
   for (const run of runs) {
     const artifact = getModelTrainingArtifact(run.id);
     if (!isModelPredictorArtifact(artifact)) continue;
@@ -148,7 +366,7 @@ async function generateModelPredictions(
         sequenceLength: run.sequenceLength,
         hiddenUnits: run.hiddenUnits,
         artifact,
-        target,
+          target: predictionTarget,
         matches,
       });
       const prediction = PredictFootballMatchResponse.parse({
