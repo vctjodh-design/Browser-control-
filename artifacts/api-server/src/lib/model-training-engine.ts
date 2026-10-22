@@ -384,7 +384,7 @@ function neighborSummary(
       latestByOpponent.set(edge.opponent, edge.calendarDate);
     }
   }
-  if (!latestByOpponent.size) return Array(TEAM_EVENT_FEATURES).fill(0);
+  if (!latestByOpponent.size) return Array(BASE_TEAM_EVENT_FEATURES).fill(0);
 
   const samples: Array<{ values: number[]; weight: number }> = [];
   const targetTime = Date.parse(`${targetDate}T00:00:00.000Z`);
