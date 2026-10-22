@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runFairAiPossessionSimulation } from "../src/lib/fair-ai-possession-simulator.ts";
+import {
+  evaluateStandingsPerformance,
+  runFairAiPossessionSimulation,
+} from "../src/lib/fair-ai-possession-simulator.ts";
 
 function seededRandom(seed) {
   let state = seed >>> 0;
@@ -85,4 +88,111 @@ test("each simulated match gets a shot budget and shot-to-goal counters reconcil
   assert.ok(Math.abs(
     result.probabilities.home + result.probabilities.draw + result.probabilities.away - 1,
   ) < 1e-12);
+  assert.equal(result.standingsContext.adjustmentsApplied, false);
+  assert.equal(result.standingsContext.home.status, "missing");
+});
+
+test("standings strength uses fresh inputs and excludes stale, future, or invalid snapshots", () => {
+  const asOf = Date.parse("2026-10-22T12:00:00.000Z");
+  const strong = team("strong", "Strong", 54);
+  Object.assign(strong.teamStats, {
+    leagueId: 1,
+    leagueSeason: 2026,
+    leagueRank: 1,
+    leaguePlayed: 9,
+    leaguePoints: 25,
+    goalDifference: 17,
+    leagueForm: "WWDWW",
+    leagueTeamCount: 12,
+    leagueStandingObservedAt: new Date(asOf - 2 * 86_400_000).toISOString(),
+  });
+  const weak = team("weak", "Weak", 46);
+  Object.assign(weak.teamStats, {
+    leagueId: 1,
+    leagueSeason: 2026,
+    leagueRank: 12,
+    leaguePlayed: 9,
+    leaguePoints: 3,
+    goalDifference: -14,
+    leagueForm: "LLLDL",
+    leagueTeamCount: 12,
+    leagueStandingObservedAt: new Date(asOf - 2 * 86_400_000).toISOString(),
+  });
+
+  const strongSignal = evaluateStandingsPerformance(strong, asOf);
+  const weakSignal = evaluateStandingsPerformance(weak, asOf);
+  assert.equal(strongSignal.status, "applied");
+  assert.ok(strongSignal.strengthScore > weakSignal.strengthScore);
+
+  const stale = team("stale", "Stale", 50);
+  Object.assign(stale.teamStats, {
+    leaguePlayed: 9,
+    leaguePoints: 18,
+    leagueStandingObservedAt: new Date(asOf - 31 * 86_400_000).toISOString(),
+  });
+  assert.equal(evaluateStandingsPerformance(stale, asOf).status, "stale");
+  assert.equal(evaluateStandingsPerformance(stale, asOf).strengthScore, null);
+
+  const future = team("future", "Future", 50);
+  Object.assign(future.teamStats, {
+    leaguePlayed: 9,
+    leaguePoints: 18,
+    leagueStandingObservedAt: new Date(asOf + 60_000).toISOString(),
+  });
+  assert.equal(evaluateStandingsPerformance(future, asOf).status, "future");
+  assert.equal(evaluateStandingsPerformance(future, asOf).strengthScore, null);
+
+  const invalid = team("invalid", "Invalid", 50);
+  Object.assign(invalid.teamStats, { leagueStandingObservedAt: "not-a-timestamp" });
+  assert.equal(evaluateStandingsPerformance(invalid, asOf).status, "invalid");
+});
+
+test("simulation reports when both teams have valid standings adjustments", () => {
+  const home = team("home-standing", "Celtic", 54);
+  Object.assign(home.teamStats, {
+    leagueId: 1,
+    leagueSeason: 2026,
+    leagueRank: 1,
+    leaguePlayed: 9,
+    leaguePoints: 25,
+    goalDifference: 17,
+    leagueForm: "WWDWW",
+    leagueTeamCount: 12,
+    leagueStandingObservedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+  });
+  const away = team("away-standing", "Celta Vigo", 46);
+  Object.assign(away.teamStats, {
+    leagueId: 2,
+    leagueSeason: 2026,
+    leagueRank: 8,
+    leaguePlayed: 10,
+    leaguePoints: 11,
+    goalDifference: -2,
+    leagueForm: "LDWLD",
+    leagueTeamCount: 20,
+    leagueStandingObservedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+  });
+
+  const baselineHome = team("home-neutral", "Celtic", 54);
+  const baselineAway = team("away-neutral", "Celta Vigo", 46);
+  const originalRandom = Math.random;
+  let baseline;
+  let result;
+  try {
+    Math.random = seededRandom(0x51A7D1);
+    baseline = runFairAiPossessionSimulation(baselineHome, baselineAway, 1_000);
+    Math.random = seededRandom(0x51A7D1);
+    result = runFairAiPossessionSimulation(home, away, 1_000);
+  } finally {
+    Math.random = originalRandom;
+  }
+  assert.equal(result.standingsContext.adjustmentsApplied, true);
+  assert.equal(result.standingsContext.home.status, "applied");
+  assert.equal(result.standingsContext.away.status, "applied");
+  assert.ok(
+    result.standingsContext.home.strengthScore >
+      result.standingsContext.away.strengthScore,
+  );
+  assert.notDeepEqual(result.outcomes, baseline.outcomes);
+  assert.notEqual(result.expectedHomeGoals, baseline.expectedHomeGoals);
 });

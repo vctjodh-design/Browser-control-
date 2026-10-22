@@ -1566,6 +1566,10 @@ components:
           type: ["number", "null"]
         yellowCardsPerMatch:
           type: ["number", "null"]
+        leagueId:
+          type: ["integer", "null"]
+        leagueSeason:
+          type: ["integer", "null"]
         leagueRank:
           type: ["integer", "null"]
         leaguePlayed:
@@ -1575,6 +1579,10 @@ components:
         goalDifference:
           type: ["integer", "null"]
         leagueForm:
+          type: ["string", "null"]
+        leagueTeamCount:
+          type: integer
+        leagueStandingObservedAt:
           type: ["string", "null"]
         coachMatches:
           type: integer
@@ -1611,11 +1619,15 @@ components:
         - recoveriesPerMatch
         - redCardsPerMatch
         - yellowCardsPerMatch
+        - leagueId
+        - leagueSeason
         - leagueRank
         - leaguePlayed
         - leaguePoints
         - goalDifference
         - leagueForm
+        - leagueTeamCount
+        - leagueStandingObservedAt
         - coachMatches
         - coachWins
         - coachDraws
@@ -1812,6 +1824,54 @@ components:
         - shotsOnTarget
         - goals
         - terminalStates
+    FootballFairAiSimulationStandingsTeam:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [applied, missing, stale, future, invalid, insufficient]
+        observedAt:
+          type: ["string", "null"]
+        leagueId:
+          type: ["integer", "null"]
+        season:
+          type: ["integer", "null"]
+        rank:
+          type: ["integer", "null"]
+        played:
+          type: ["integer", "null"]
+        points:
+          type: ["integer", "null"]
+        goalDifference:
+          type: ["integer", "null"]
+        form:
+          type: ["string", "null"]
+        teamCount:
+          type: integer
+        strengthScore:
+          type: ["number", "null"]
+      required:
+        - status
+        - observedAt
+        - leagueId
+        - season
+        - rank
+        - played
+        - points
+        - goalDifference
+        - form
+        - teamCount
+        - strengthScore
+    FootballFairAiSimulationStandingsContext:
+      type: object
+      properties:
+        adjustmentsApplied:
+          type: boolean
+        home:
+          $ref: "#/components/schemas/FootballFairAiSimulationStandingsTeam"
+        away:
+          $ref: "#/components/schemas/FootballFairAiSimulationStandingsTeam"
+      required: [adjustmentsApplied, home, away]
     FootballFairAiSimulation:
       type: object
       properties:
@@ -1831,6 +1891,8 @@ components:
           $ref: "#/components/schemas/FootballFairAiSimulationProbabilities"
         diagnostics:
           $ref: "#/components/schemas/FootballFairAiSimulationDiagnostics"
+        standingsContext:
+          $ref: "#/components/schemas/FootballFairAiSimulationStandingsContext"
         topScorelines:
           type: array
           items:
@@ -1856,6 +1918,7 @@ components:
         - outcomes
         - probabilities
         - diagnostics
+        - standingsContext
         - topScorelines
         - playerContributions
         - possessionModel

@@ -9,6 +9,7 @@ const POSSESSIONS_PER_MATCH = 140;
 const MAX_ACTIONS_PER_POSSESSION = 7;
 const PLAYER_SAMPLE_LIMIT = 22;
 const DANGEROUS_AREA_START_X = 8;
+const MAX_STANDINGS_SNAPSHOT_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
 
 type Player = NonNullable<FootballFairAiTeam["players"]>[number];
 type PossessionModel = FootballFairAiSimulation["possessionModel"];
@@ -19,6 +20,7 @@ type PlayerContribution = FootballFairAiSimulation["playerContributions"][number
 type SimAction = SimulatedAction["action"];
 type SimActionOutcome = SimulatedAction["outcome"];
 type SimPossessionOutcome = SimulatedPossession["outcome"];
+type StandingsEvaluation = FootballFairAiSimulation["standingsContext"]["home"];
 
 type MutableCell = {
   touches: number;
@@ -64,6 +66,92 @@ type TerminalStateCounters = {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+export function evaluateStandingsPerformance(
+  team: FootballFairAiTeam,
+  asOfMs = Date.now(),
+): StandingsEvaluation {
+  const stats = team.teamStats;
+  const observedAt = stats?.leagueStandingObservedAt ?? null;
+  const evaluation: StandingsEvaluation = {
+    status: "missing",
+    observedAt,
+    leagueId: stats?.leagueId ?? null,
+    season: stats?.leagueSeason ?? null,
+    rank: stats?.leagueRank ?? null,
+    played: stats?.leaguePlayed ?? null,
+    points: stats?.leaguePoints ?? null,
+    goalDifference: stats?.goalDifference ?? null,
+    form: stats?.leagueForm ?? null,
+    teamCount: stats?.leagueTeamCount ?? 0,
+    strengthScore: null,
+  };
+  if (!observedAt) return evaluation;
+
+  const observedAtMs = Date.parse(observedAt);
+  if (!Number.isFinite(observedAtMs)) return { ...evaluation, status: "invalid" };
+  if (observedAtMs > asOfMs) return { ...evaluation, status: "future" };
+  if (asOfMs - observedAtMs > MAX_STANDINGS_SNAPSHOT_AGE_MS) {
+    return { ...evaluation, status: "stale" };
+  }
+
+  const weightedScores: Array<{ score: number; weight: number }> = [];
+  const include = (score: number | null, weight: number) => {
+    if (score !== null && Number.isFinite(score)) weightedScores.push({ score, weight });
+  };
+  if (
+    stats?.leagueRank !== null &&
+    stats?.leagueRank !== undefined &&
+    stats.leagueTeamCount > 1 &&
+    stats.leagueRank >= 1 &&
+    stats.leagueRank <= stats.leagueTeamCount
+  ) {
+    include(
+      1 - 2 * (stats.leagueRank - 1) / (stats.leagueTeamCount - 1),
+      0.25,
+    );
+  }
+  if (
+    stats?.leaguePoints !== null &&
+    stats?.leaguePoints !== undefined &&
+    stats.leaguePlayed !== null &&
+    stats.leaguePlayed !== undefined &&
+    stats.leaguePlayed > 0
+  ) {
+    include(
+      clamp((stats.leaguePoints / (stats.leaguePlayed * 3)) * 2 - 1, -1, 1),
+      0.35,
+    );
+  }
+  if (
+    stats?.goalDifference !== null &&
+    stats?.goalDifference !== undefined &&
+    stats.leaguePlayed !== null &&
+    stats.leaguePlayed !== undefined &&
+    stats.leaguePlayed > 0
+  ) {
+    include(
+      clamp(stats.goalDifference / (stats.leaguePlayed * 1.5), -1, 1),
+      0.2,
+    );
+  }
+  const formResults = stats?.leagueForm?.match(/[WDL]/gi)?.slice(-5) ?? [];
+  if (formResults.length) {
+    const formScore = formResults.reduce(
+      (sum, result) => sum + (result.toUpperCase() === "W" ? 1 : result.toUpperCase() === "L" ? -1 : 0),
+      0,
+    ) / formResults.length;
+    include(formScore, 0.2);
+  }
+  const totalWeight = weightedScores.reduce((sum, item) => sum + item.weight, 0);
+  if (!totalWeight) return { ...evaluation, status: "insufficient" };
+
+  const strengthScore = weightedScores.reduce(
+    (sum, item) => sum + item.score * item.weight,
+    0,
+  ) / totalWeight;
+  return { ...evaluation, status: "applied", strengthScore: clamp(strengthScore, -1, 1) };
 }
 
 function randomInteger(maxExclusive: number): number {
@@ -252,7 +340,10 @@ function possessionShare(home: FootballFairAiTeam, away: FootballFairAiTeam): nu
   return clamp(estimate, 25, 75);
 }
 
-function defensivePressure(team: FootballFairAiTeam): number {
+function defensivePressure(
+  team: FootballFairAiTeam,
+  standingsStrength: number,
+): number {
   const stats = team.teamStats;
   const playerActivity = average(
     availablePlayers(team)
@@ -261,7 +352,8 @@ function defensivePressure(team: FootballFairAiTeam): number {
   );
   const teamActivity = stats?.defensiveActionsPerMatch;
   return clamp(
-    (playerActivity ?? 4) * 0.55 + (teamActivity ?? 90) * 0.01,
+    (playerActivity ?? 4) * 0.55 + (teamActivity ?? 90) * 0.01 +
+      standingsStrength * 0.25,
     3,
     14,
   );
@@ -304,6 +396,8 @@ function passCompletionProbability(
   opponent: FootballFairAiTeam,
   player: Player | null,
   x: number,
+  teamStandingsStrength: number,
+  opponentStandingsStrength: number,
 ): number {
   const playerAccuracy = player?.passCompletionPct === null || player?.passCompletionPct === undefined
     ? teamPassAccuracy(team)
@@ -320,7 +414,7 @@ function passCompletionProbability(
   const fatigue = team.teamStats?.daysSinceLastMatch !== null && team.teamStats?.daysSinceLastMatch !== undefined
     ? clamp((team.teamStats.daysSinceLastMatch - 3) * 0.0008, -0.01, 0.008)
     : 0;
-  const opponentPressure = defensivePressure(opponent);
+  const opponentPressure = defensivePressure(opponent, opponentStandingsStrength);
   const pressurePenalty = (opponentPressure - 7) * 0.002;
   const cardDisciplinePenalty =
     (team.teamStats?.redCardsPerMatch ?? 0) * 0.018 +
@@ -329,7 +423,8 @@ function passCompletionProbability(
     ? 0
     : (longBallSkill - 50) * 0.0002;
   return clamp(
-    playerAccuracy + progressionSkill + coachEdge + fatigue + longBallBonus -
+    playerAccuracy + progressionSkill + coachEdge + fatigue + longBallBonus +
+      teamStandingsStrength * 0.012 -
       pressurePenalty - cardDisciplinePenalty,
     0.54,
     0.97,
@@ -340,11 +435,13 @@ function carryCompletionProbability(
   team: FootballFairAiTeam,
   opponent: FootballFairAiTeam,
   player: Player | null,
+  teamStandingsStrength: number,
+  opponentStandingsStrength: number,
 ): number {
   const duels = player?.duelsWonPct ?? average(
     availablePlayers(team).map((candidate) => candidate.duelsWonPct),
   ) ?? 50;
-  const opponentPressure = defensivePressure(opponent);
+  const opponentPressure = defensivePressure(opponent, opponentStandingsStrength);
   const coachEdge = (team.teamStats?.coachMatches ?? 0) >= 10 &&
       team.teamStats?.coachWinPct !== null && team.teamStats?.coachWinPct !== undefined
     ? (team.teamStats.coachWinPct - 50) * 0.00015
@@ -354,7 +451,7 @@ function carryCompletionProbability(
     (team.teamStats?.yellowCardsPerMatch ?? 0) * 0.001;
   return clamp(
     0.69 + (duels - 50) * 0.002 - (opponentPressure - 7) * 0.004 +
-      coachEdge - cardDisciplinePenalty,
+      coachEdge - cardDisciplinePenalty + teamStandingsStrength * 0.012,
     0.48,
     0.9,
   );
@@ -366,6 +463,8 @@ function shotExpectedGoals(
   player: Player | null,
   x: number,
   y: number,
+  attackingStandingsStrength: number,
+  defendingStandingsStrength: number,
 ): number {
   const playerBase = player && player.shotsPer90 > 0 && player.expectedGoalsPer90 > 0
     ? player.expectedGoalsPer90 / player.shotsPer90
@@ -408,7 +507,8 @@ function shotExpectedGoals(
     : clamp(1 + (player.averageRating - 6.5) * 0.028, 0.88, 1.12);
   return clamp(
     base * locationFactor * insideBoxFactor * bigChanceFactor *
-      missedChanceFactor * keeperFactor * ratingFactor,
+      missedChanceFactor * keeperFactor * ratingFactor +
+      (attackingStandingsStrength - defendingStandingsStrength) * 0.012,
     0.015,
     0.48,
   );
@@ -537,6 +637,14 @@ export function runFairAiPossessionSimulation(
   const playerTotals = new Map<string, PlayerCounter>();
   const scorelines = new Map<string, { homeGoals: number; awayGoals: number; count: number }>();
   const outcomes = { home: 0, draw: 0, away: 0 };
+  const homeStandings = evaluateStandingsPerformance(home);
+  const awayStandings = evaluateStandingsPerformance(away);
+  const adjustmentsApplied =
+    homeStandings.status === "applied" && awayStandings.status === "applied";
+  const standingsStrengths = new Map<string, number>([
+    [home.teamKey, adjustmentsApplied ? homeStandings.strengthScore ?? 0 : 0],
+    [away.teamKey, adjustmentsApplied ? awayStandings.strengthScore ?? 0 : 0],
+  ]);
   const samples: SimulatedPossession[] = [];
   const sampledByTeam = new Map<string, number>([[home.teamKey, 0], [away.teamKey, 0]]);
   const terminalStates: TerminalStateCounters = {
@@ -566,6 +674,8 @@ export function runFairAiPossessionSimulation(
     for (let index = 0; index < POSSESSIONS_PER_MATCH; index += 1) {
       const attacking = Math.random() * 100 < homeShare ? home : away;
       const defending = attacking.teamKey === home.teamKey ? away : home;
+      const attackingStandingsStrength = standingsStrengths.get(attacking.teamKey) ?? 0;
+      const defendingStandingsStrength = standingsStrengths.get(defending.teamKey) ?? 0;
       const attackingTotals = totals.get(attacking.teamKey);
       const defendingTotals = totals.get(defending.teamKey);
       if (!attackingTotals || !defendingTotals) continue;
@@ -613,7 +723,15 @@ export function runFairAiPossessionSimulation(
            shotBudgets.set(attacking.teamKey, Math.max(0, shotBudget - 1));
           attackingTotals.shots += 1;
           if (actorCredit) actorCredit.simulatedShots += 1;
-          const shotXg = shotExpectedGoals(attacking, defending, actor, x, y);
+          const shotXg = shotExpectedGoals(
+            attacking,
+            defending,
+            actor,
+            x,
+            y,
+            attackingStandingsStrength,
+            defendingStandingsStrength,
+          );
           attackingTotals.expectedGoals += shotXg;
           const xgRoll = Math.random();
           const accuracy = actor?.shotAccuracyPct == null
@@ -653,8 +771,21 @@ export function runFairAiPossessionSimulation(
           valueAfter = outcome === "goal" ? 1 : 0;
         } else {
           const successProbability = action === "pass"
-            ? passCompletionProbability(attacking, defending, actor, x)
-            : carryCompletionProbability(attacking, defending, actor);
+            ? passCompletionProbability(
+                attacking,
+                defending,
+                actor,
+                x,
+                attackingStandingsStrength,
+                defendingStandingsStrength,
+              )
+            : carryCompletionProbability(
+                attacking,
+                defending,
+                actor,
+                attackingStandingsStrength,
+                defendingStandingsStrength,
+              );
           const successful = Math.random() < successProbability;
           if (successful) {
             const advancement = action === "pass"
@@ -822,6 +953,11 @@ export function runFairAiPossessionSimulation(
       away: outcomes.away / iterations,
     },
     diagnostics,
+    standingsContext: {
+      adjustmentsApplied,
+      home: homeStandings,
+      away: awayStandings,
+    },
     topScorelines: [...scorelines.values()]
       .sort((left, right) => right.count - left.count)
       .slice(0, 6)
@@ -838,12 +974,12 @@ export function runFairAiPossessionSimulation(
       away: possessionSummary(away, awayShare, awayTotals, iterations),
       sampledPossessions: samples,
     },
-    method: `Possession-by-possession Monte Carlo over ${iterations.toLocaleString()} simulated matches. Player rates, recent formations, match xG/shot/possession metrics, big-chance outcomes, card trends, defensive actions and available coach records shape action selection and outcomes.`,
+    method: `Possession-by-possession Monte Carlo over ${iterations.toLocaleString()} simulated matches. Player rates, recent formations, match xG/shot/possession metrics, big-chance outcomes, card trends, defensive actions and available coach records shape action selection and outcomes. When both teams have fresh standings snapshots, normalized rank, points-per-game, goal difference and form add small bounded execution and shot-quality adjustments.`,
     limitations: [
       "Player roles and action profiles are aggregated from recent archived lineups and match statistics; the latest observed starting XI is not a confirmed future lineup.",
       "The 12 × 8 pitch path, action locations, and estimated value-added deltas are generated from tactical roles and aggregate rates. They are model proxies, not observed coordinates, measured spatial xT/EVA, or a trained reinforcement-learning policy.",
       "Player age, height, preferred foot, contract, market value, full season histories, club average age/squad value/founding year, and manager biography are not part of these archived fixture records and are not inferred.",
-      "Standings are retained as captured context and are not used as match-time features because historical as-of snapshots are not guaranteed.",
+      "Standings adjustments use snapshots observed no more than 30 days before the simulation and reject future-dated or invalid timestamps. The observation time is when the source snapshot was fetched, not a guaranteed effective date; standings are not used in historical training, and comparisons across different leagues are approximate.",
       "Results are experimental and are not betting advice.",
     ],
   };

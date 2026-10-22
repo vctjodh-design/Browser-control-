@@ -44,6 +44,10 @@ export interface FootballFairAiTeamStats {
   /** @nullable */
   yellowCardsPerMatch: number | null;
   /** @nullable */
+  leagueId: number | null;
+  /** @nullable */
+  leagueSeason: number | null;
+  /** @nullable */
   leagueRank: number | null;
   /** @nullable */
   leaguePlayed: number | null;
@@ -53,6 +57,9 @@ export interface FootballFairAiTeamStats {
   goalDifference: number | null;
   /** @nullable */
   leagueForm: string | null;
+  leagueTeamCount: number;
+  /** @nullable */
+  leagueStandingObservedAt: string | null;
   coachMatches: number;
   coachWins: number;
   coachDraws: number;

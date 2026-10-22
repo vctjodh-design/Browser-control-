@@ -120,6 +120,18 @@ function probability(value: number) {
   return `${percent.toFixed(digits)}%`;
 }
 
+function standingsStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    applied: 'Fresh snapshot',
+    missing: 'No snapshot',
+    stale: 'Snapshot too old',
+    future: 'Future-dated snapshot',
+    invalid: 'Invalid snapshot time',
+    insufficient: 'Incomplete standings',
+  };
+  return labels[status] ?? status;
+}
+
 function simulationError(error: unknown) {
   if (error && typeof error === 'object' && 'message' in error) return String(error.message);
   return 'The simulation could not be completed. Try again.';
@@ -451,6 +463,44 @@ export default function FairAiSimulationPanel() {
               </div>
               <p className="mono mt-2 text-[7px] leading-4 text-[#858982]">
                 Terminal states: {numberFormat.format(result.diagnostics.terminalStates.goals)} goals · {numberFormat.format(result.diagnostics.terminalStates.shots)} non-goal shots · {numberFormat.format(result.diagnostics.terminalStates.turnovers)} turnovers · {numberFormat.format(result.diagnostics.terminalStates.retained)} retained
+              </p>
+            </section>
+
+            <section className="rounded-xl border border-[#e2e2d8] bg-white p-3" aria-labelledby="simulation-standings-title" data-testid="fair-ai-simulation-standings">
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <p className="mono text-[7px] uppercase tracking-[.13em] text-[#9b7160]">Current table / recent form</p>
+                  <h3 id="simulation-standings-title" className="mt-1 text-[10px] font-extrabold text-[#40534b]">Standings context</h3>
+                </div>
+                <span className={`rounded-full px-2 py-1 text-[7px] font-extrabold uppercase tracking-[.08em] ${
+                  result.standingsContext.adjustmentsApplied
+                    ? 'bg-[#eaf1e9] text-[#4e755c]'
+                    : 'bg-[#f7f0df] text-[#927447]'
+                }`}>
+                  {result.standingsContext.adjustmentsApplied ? 'Applied' : 'Not applied'}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {[
+                  { team: result.home, context: result.standingsContext.home },
+                  { team: result.away, context: result.standingsContext.away },
+                ].map(({ team, context }) => (
+                  <div key={team.teamKey} className="rounded-lg bg-[#f7f7f1] px-2.5 py-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="truncate text-[8px] font-extrabold text-[#52615e]">{team.name}</span>
+                      <span className="mono shrink-0 text-[7px] text-[#7c847c]">{standingsStatusLabel(context.status)}</span>
+                    </div>
+                    <p className="mono mt-2 text-[8px] leading-4 text-[#66746b]">
+                      Rank {metricValue(context.rank, 0)} · {metricValue(context.points, 0)} pts · GD {metricValue(context.goalDifference, 0)} · Form {context.form ?? '—'}
+                    </p>
+                    <p className="mono mt-1 text-[7px] text-[#858982]">
+                      Index {context.strengthScore === null ? '—' : context.strengthScore.toFixed(2)} · observed {context.observedAt ? new Date(context.observedAt).toLocaleDateString() : '—'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-2 text-[7px] leading-4 text-[#858982]">
+                Both teams need valid snapshots observed within 30 days. Their normalized rank, points-per-game, goal difference and form make small heuristic adjustments to execution and shot quality. Observation time is not a guaranteed table-effective date; cross-league comparisons are approximate.
               </p>
             </section>
 

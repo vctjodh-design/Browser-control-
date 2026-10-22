@@ -11,6 +11,7 @@ import type { FootballFairAiSimulationDiagnostics } from './footballFairAiSimula
 import type { FootballFairAiSimulationOutcome } from './footballFairAiSimulationOutcome';
 import type { FootballFairAiSimulationProbabilities } from './footballFairAiSimulationProbabilities';
 import type { FootballFairAiSimulationScoreline } from './footballFairAiSimulationScoreline';
+import type { FootballFairAiSimulationStandingsContext } from './footballFairAiSimulationStandingsContext';
 import type { FootballFairAiTeam } from './footballFairAiTeam';
 
 export interface FootballFairAiSimulation {
@@ -22,6 +23,7 @@ export interface FootballFairAiSimulation {
   outcomes: FootballFairAiSimulationOutcome;
   probabilities: FootballFairAiSimulationProbabilities;
   diagnostics: FootballFairAiSimulationDiagnostics;
+  standingsContext: FootballFairAiSimulationStandingsContext;
   topScorelines: FootballFairAiSimulationScoreline[];
   playerContributions: FootballFairAiSimulationContribution[];
   possessionModel: FootballFairAiPossessionModel;

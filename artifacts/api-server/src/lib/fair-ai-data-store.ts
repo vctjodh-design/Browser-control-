@@ -1322,7 +1322,8 @@ function summarizeTeamStats(teamKey: string): FootballFairAiTeamStats {
   const rows = database
     .prepare(
       `SELECT profiles.fixture_id, profiles.coach_key, profiles.team_statistics_json,
-              matches.home_team_key, matches.away_team_key, matches.match_date
+              matches.home_team_key, matches.away_team_key, matches.match_date,
+              matches.league_id, matches.season
        FROM fair_ai_team_match_profiles AS profiles
        JOIN fair_ai_matches AS matches ON matches.fixture_id = profiles.fixture_id
        WHERE profiles.team_key = ?
@@ -1410,15 +1411,47 @@ function summarizeTeamStats(teamKey: string): FootballFairAiTeamStats {
         )
         .get(coachKey) as SqlRow | undefined
     : undefined;
-  const latestStanding = database
-    .prepare(
-      `SELECT rank, played, points, goal_difference, form
-       FROM fair_ai_standings_snapshots
-       WHERE team_key = ?
-       ORDER BY observed_at DESC
-       LIMIT 1`,
-    )
-    .get(teamKey) as SqlRow | undefined;
+  const competitionCounts = new Map<
+    string,
+    { leagueId: number; season: number; count: number; firstRowIndex: number }
+  >();
+  rows.forEach((row, index) => {
+    const leagueId = integer(row.league_id);
+    const season = integer(row.season);
+    if (leagueId === null || season === null) return;
+    const key = `${leagueId}:${season}`;
+    const current = competitionCounts.get(key);
+    if (current) current.count += 1;
+    else competitionCounts.set(key, { leagueId, season, count: 1, firstRowIndex: index });
+  });
+  const primaryCompetition = [...competitionCounts.values()].sort(
+    (left, right) =>
+      right.count - left.count || left.firstRowIndex - right.firstRowIndex,
+  )[0];
+  const latestStanding = primaryCompetition
+    ? database
+        .prepare(
+          `SELECT standing.league_id, standing.season, standing.rank, standing.played,
+                  standing.points, standing.goal_difference, standing.form,
+                  standing.observed_at,
+                  (
+                    SELECT COUNT(DISTINCT peer.team_key)
+                    FROM fair_ai_standings_snapshots AS peer
+                    WHERE peer.league_id = standing.league_id
+                      AND peer.season = standing.season
+                      AND peer.observed_at = standing.observed_at
+                  ) AS team_count
+           FROM fair_ai_standings_snapshots AS standing
+           WHERE standing.team_key = ?
+             AND standing.league_id = ?
+             AND standing.season = ?
+           ORDER BY standing.observed_at DESC
+           LIMIT 1`,
+        )
+        .get(teamKey, primaryCompetition.leagueId, primaryCompetition.season) as
+        | SqlRow
+        | undefined
+    : undefined;
   const fixtureIds = rows
     .map((row) => integer(row.fixture_id))
     .filter((fixtureId): fixtureId is number => fixtureId !== null);
@@ -1515,11 +1548,15 @@ function summarizeTeamStats(teamKey: string): FootballFairAiTeamStats {
     recoveriesPerMatch: average(recoveries),
     redCardsPerMatch: eventMatchCount ? cardCounts.red / eventMatchCount : null,
     yellowCardsPerMatch: eventMatchCount ? cardCounts.yellow / eventMatchCount : null,
+    leagueId: integer(latestStanding?.league_id),
+    leagueSeason: integer(latestStanding?.season),
     leagueRank: integer(latestStanding?.rank),
     leaguePlayed: integer(latestStanding?.played),
     leaguePoints: integer(latestStanding?.points),
     goalDifference: integer(latestStanding?.goal_difference),
     leagueForm: text(latestStanding?.form),
+    leagueTeamCount: integer(latestStanding?.team_count) ?? 0,
+    leagueStandingObservedAt: text(latestStanding?.observed_at),
     coachMatches,
     coachWins,
     coachDraws,

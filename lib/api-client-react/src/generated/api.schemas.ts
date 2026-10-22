@@ -229,6 +229,10 @@ export interface FootballFairAiTeamStats {
   /** @nullable */
   yellowCardsPerMatch: number | null;
   /** @nullable */
+  leagueId: number | null;
+  /** @nullable */
+  leagueSeason: number | null;
+  /** @nullable */
   leagueRank: number | null;
   /** @nullable */
   leaguePlayed: number | null;
@@ -238,6 +242,9 @@ export interface FootballFairAiTeamStats {
   goalDifference: number | null;
   /** @nullable */
   leagueForm: string | null;
+  leagueTeamCount: number;
+  /** @nullable */
+  leagueStandingObservedAt: string | null;
   coachMatches: number;
   coachWins: number;
   coachDraws: number;
@@ -360,6 +367,47 @@ export interface FootballFairAiSimulationDiagnostics {
   shotsOnTarget: number;
   goals: number;
   terminalStates: FootballFairAiSimulationTerminalStates;
+}
+
+export type FootballFairAiSimulationStandingsTeamStatus = typeof FootballFairAiSimulationStandingsTeamStatus[keyof typeof FootballFairAiSimulationStandingsTeamStatus];
+
+
+export const FootballFairAiSimulationStandingsTeamStatus = {
+  applied: 'applied',
+  missing: 'missing',
+  stale: 'stale',
+  future: 'future',
+  invalid: 'invalid',
+  insufficient: 'insufficient',
+} as const;
+
+export interface FootballFairAiSimulationStandingsTeam {
+  status: FootballFairAiSimulationStandingsTeamStatus;
+  /** @nullable */
+  observedAt: string | null;
+  /** @nullable */
+  leagueId: number | null;
+  /** @nullable */
+  season: number | null;
+  /** @nullable */
+  rank: number | null;
+  /** @nullable */
+  played: number | null;
+  /** @nullable */
+  points: number | null;
+  /** @nullable */
+  goalDifference: number | null;
+  /** @nullable */
+  form: string | null;
+  teamCount: number;
+  /** @nullable */
+  strengthScore: number | null;
+}
+
+export interface FootballFairAiSimulationStandingsContext {
+  adjustmentsApplied: boolean;
+  home: FootballFairAiSimulationStandingsTeam;
+  away: FootballFairAiSimulationStandingsTeam;
 }
 
 export interface FootballFairAiSimulationProbabilities {
@@ -496,6 +544,7 @@ export interface FootballFairAiSimulation {
   outcomes: FootballFairAiSimulationOutcome;
   probabilities: FootballFairAiSimulationProbabilities;
   diagnostics: FootballFairAiSimulationDiagnostics;
+  standingsContext: FootballFairAiSimulationStandingsContext;
   topScorelines: FootballFairAiSimulationScoreline[];
   playerContributions: FootballFairAiSimulationContribution[];
   possessionModel: FootballFairAiPossessionModel;
