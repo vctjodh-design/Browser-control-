@@ -32,8 +32,11 @@ import {
   MousePointer2,
   Plus,
   RefreshCw,
+  Search,
   ShieldCheck,
   StopCircle,
+  ZoomIn,
+  ZoomOut,
   X,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -63,7 +66,9 @@ type BrowserPoint = { x: number; y: number };
 function normalizeUrl(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return '';
-  return /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed) ? trimmed : `https://${trimmed}`;
+  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed)) return trimmed;
+  if (/^[^\s.]+\.[^\s]+$/.test(trimmed)) return `https://${trimmed}`;
+  return `https://www.bing.com/search?q=${encodeURIComponent(trimmed)}`;
 }
 
 function SyncTabsOption({
@@ -533,7 +538,7 @@ function BrowserConsole() {
                   <label htmlFor="start-url" className="block text-[11px] font-bold text-[#56605e]">Starting address <span className="font-medium text-[#969993]">(optional)</span></label>
                   <div className="relative">
                     <ArrowUpRight size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#89918b]" />
-                    <input id="start-url" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="example.com" autoComplete="url" className="h-12 w-full rounded-lg border border-[#d5d5cc] bg-[#fbfaf6] pl-10 pr-3 text-[13px] text-[#263746] placeholder:text-[#aaa99f] focus:border-[#d97b5c] focus:outline-none focus:ring-2 focus:ring-[#d97b5c]/15" data-testid="input-start-url" />
+                   <input id="start-url" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Search or enter a web address" autoComplete="url" className="h-12 w-full rounded-lg border border-[#d5d5cc] bg-[#fbfaf6] pl-10 pr-3 text-[13px] text-[#263746] placeholder:text-[#aaa99f] focus:border-[#d97b5c] focus:outline-none focus:ring-2 focus:ring-[#d97b5c]/15" data-testid="input-start-url" />
                   </div>
                   <SyncTabsOption
                     checked={syncTabs}
@@ -541,7 +546,7 @@ function BrowserConsole() {
                     disabled={busy}
                     testId="toggle-sync-tabs-start"
                   />
-                  <p className="text-[10px] leading-[1.65] text-[#858982]">You can enter a domain or a complete URL. Sites may block automated browsing.</p>
+                   <p className="text-[10px] leading-[1.65] text-[#858982]">Search for something or enter a domain or complete web address. Sites may block automated browsing.</p>
                   <button type="submit" disabled={busy} className="mt-2 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#d96f51] px-4 text-[12px] font-extrabold text-white shadow-[0_5px_12px_rgba(173,79,52,.16)] transition hover:bg-[#c95f43] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-start-session">
                     {createSession.isPending ? <><LoaderCircle size={15} className="animate-spin" /> {syncTabs ? 'Opening 25 synced tabs…' : 'Opening browser…'}</> : <>Start browser session <ArrowRight size={15} /></>}
                   </button>
@@ -589,7 +594,8 @@ function BrowserConsole() {
               <form onSubmit={onNavigate} className="flex min-w-[200px] flex-1 items-center">
                 <div className="relative w-full">
                   <LockKeyhole size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#7e8d82]" aria-hidden="true" />
-                  <input aria-label="Address" value={address} onChange={(event) => setAddress(event.target.value)} className="h-9 w-full rounded-lg border border-[#d5d6ce] bg-[#eeede7] pl-9 pr-[78px] text-[11px] text-[#3b4d56] placeholder:text-[#8d9690] focus:border-[#d97b5c] focus:bg-[#fbfaf6] focus:outline-none" placeholder="Enter a web address" data-testid="input-address" />
+                   <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#7e8d82]" aria-hidden="true" />
+                   <input aria-label="Search or enter a web address" value={address} onChange={(event) => setAddress(event.target.value)} className="h-9 w-full rounded-lg border border-[#d5d6ce] bg-[#eeede7] pl-9 pr-[78px] text-[11px] text-[#3b4d56] placeholder:text-[#8d9690] focus:border-[#d97b5c] focus:bg-[#fbfaf6] focus:outline-none" placeholder="Search or enter a web address" data-testid="input-address" />
                   <button type="submit" disabled={busy || !address.trim()} className="absolute right-1 top-1/2 h-7 -translate-y-1/2 rounded-md bg-[#dfe8e1] px-2.5 text-[10px] font-extrabold text-[#416a5d] hover:bg-[#d2e0d5] disabled:opacity-40" data-testid="button-navigate">Go</button>
                 </div>
               </form>
@@ -610,9 +616,48 @@ function BrowserConsole() {
 
             <div className="grid min-h-[500px] lg:grid-cols-[minmax(0,1fr)_270px]">
               <div className="flex min-h-[380px] flex-col border-b border-[#d1d1c9] lg:border-b-0 lg:border-r">
-                <div className="flex min-h-10 items-center justify-between gap-3 border-b border-[#d2d2ca] px-3 sm:px-5">
-                  <div className="min-w-0 truncate text-[10px] font-semibold text-[#67716d]" data-testid="text-page-title">{state.title || activeTab?.title || 'Untitled page'}</div>
-                  <div className="mono shrink-0 text-[9px] text-[#91968e]" data-testid="text-viewport-size">{state.viewportWidth} × {state.viewportHeight}</div>
+                 <div className="flex min-h-10 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-[#d2d2ca] px-3 py-2 sm:px-5">
+                   <div className="min-w-0 flex-1 truncate text-[10px] font-semibold text-[#67716d]" data-testid="text-page-title">{state.title || activeTab?.title || 'Untitled page'}</div>
+                   <div className="flex items-center gap-2.5">
+                     <label htmlFor="browser-zoom" className="sr-only">Page zoom</label>
+                     <button
+                       type="button"
+                       onClick={() => sendAction({ action: 'zoom', zoomLevel: Math.max(50, state.zoomLevel - 10) })}
+                       disabled={busy || state.zoomLevel <= 50}
+                       className="grid size-6 place-items-center rounded text-[#596663] hover:bg-[#e8e8e1] disabled:opacity-35"
+                       aria-label="Zoom out"
+                       title="Zoom out"
+                       data-testid="button-zoom-out"
+                     >
+                       <ZoomOut size={14} />
+                     </button>
+                     <input
+                       id="browser-zoom"
+                       type="range"
+                       min="50"
+                       max="200"
+                       step="10"
+                       value={state.zoomLevel}
+                       onChange={(event) => sendAction({ action: 'zoom', zoomLevel: Number(event.target.value) })}
+                       disabled={busy}
+                       className="w-[88px] accent-[#d96f51]"
+                       aria-valuetext={`${state.zoomLevel}%`}
+                       data-testid="input-browser-zoom"
+                     />
+                     <button
+                       type="button"
+                       onClick={() => sendAction({ action: 'zoom', zoomLevel: Math.min(200, state.zoomLevel + 10) })}
+                       disabled={busy || state.zoomLevel >= 200}
+                       className="grid size-6 place-items-center rounded text-[#596663] hover:bg-[#e8e8e1] disabled:opacity-35"
+                       aria-label="Zoom in"
+                       title="Zoom in"
+                       data-testid="button-zoom-in"
+                     >
+                       <ZoomIn size={14} />
+                     </button>
+                     <span className="mono w-10 text-right text-[9px] text-[#67716d]" data-testid="text-browser-zoom">{state.zoomLevel}%</span>
+                   </div>
+                   <div className="mono shrink-0 text-[9px] text-[#91968e]" data-testid="text-viewport-size">{state.viewportWidth} × {state.viewportHeight}</div>
                 </div>
                 <div className="flex min-h-11 items-center justify-between gap-2 border-b border-[#d2d2ca] bg-[#f4f3ed] px-2 sm:px-4">
                   <div role="tablist" aria-label="Page output format" className="flex min-w-0 items-center gap-1 overflow-x-auto py-1">

@@ -1399,6 +1399,11 @@ export interface BrowserState {
   tabs: BrowserTab[];
   /** Screenshot as a PNG data URL */
   screenshot: string;
+  /**
+     * @minimum 50
+     * @maximum 200
+     */
+  zoomLevel: number;
   currentUrl: string;
   title: string;
   pageContent: BrowserPageContent;
@@ -1452,6 +1457,7 @@ export const BrowserActionInputAction = {
   back: 'back',
   forward: 'forward',
   reload: 'reload',
+  zoom: 'zoom',
 } as const;
 
 export interface BrowserActionInput {
@@ -1469,6 +1475,11 @@ export interface BrowserActionInput {
      * @maximum 5000
      */
   deltaY?: number;
+  /**
+     * @minimum 50
+     * @maximum 200
+     */
+  zoomLevel?: number;
   /** Apply this browser action to every open tab */
   syncTabs?: boolean;
 }

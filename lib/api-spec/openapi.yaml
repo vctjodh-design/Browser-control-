@@ -3381,6 +3381,10 @@ components:
         screenshot:
           type: string
           description: Screenshot as a PNG data URL
+        zoomLevel:
+          type: integer
+          minimum: 50
+          maximum: 200
         currentUrl:
           type: string
         title:
@@ -3396,6 +3400,7 @@ components:
         - activeTabId
         - tabs
         - screenshot
+        - zoomLevel
         - currentUrl
         - title
         - pageContent
@@ -3441,7 +3446,7 @@ components:
       properties:
         action:
           type: string
-          enum: [click, type, key, scroll, back, forward, reload]
+          enum: [click, type, key, scroll, back, forward, reload, zoom]
         x:
           type: number
           minimum: 0
@@ -3458,6 +3463,10 @@ components:
           type: number
           minimum: -5000
           maximum: 5000
+        zoomLevel:
+          type: integer
+          minimum: 50
+          maximum: 200
         syncTabs:
           type: boolean
           description: Apply this browser action to every open tab

@@ -14,6 +14,11 @@ export interface BrowserState {
   tabs: BrowserTab[];
   /** Screenshot as a PNG data URL */
   screenshot: string;
+  /**
+     * @minimum 50
+     * @maximum 200
+     */
+  zoomLevel: number;
   currentUrl: string;
   title: string;
   pageContent: BrowserPageContent;

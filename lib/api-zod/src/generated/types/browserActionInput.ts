@@ -22,6 +22,11 @@ export interface BrowserActionInput {
      * @maximum 5000
      */
   deltaY?: number;
+  /**
+     * @minimum 50
+     * @maximum 200
+     */
+  zoomLevel?: number;
   /** Apply this browser action to every open tab */
   syncTabs?: boolean;
 }

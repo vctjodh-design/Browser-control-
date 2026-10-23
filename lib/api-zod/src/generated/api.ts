@@ -1952,6 +1952,9 @@ export const CreateBrowserSessionBody = zod.object({
   "tabCount": zod.number().int().min(1).max(createBrowserSessionBodyTabCountMax).optional().describe('Number of tabs to open with the starting URL')
 })
 
+export const createBrowserSessionResponseZoomLevelMin = 50;
+export const createBrowserSessionResponseZoomLevelMax = 200;
+
 export const createBrowserSessionResponsePageContentHeadingsItemLevelMax = 6;
 
 
@@ -1966,6 +1969,7 @@ export const CreateBrowserSessionResponse = zod.object({
   "active": zod.boolean()
 })),
   "screenshot": zod.string().describe('Screenshot as a PNG data URL'),
+  "zoomLevel": zod.number().int().min(createBrowserSessionResponseZoomLevelMin).max(createBrowserSessionResponseZoomLevelMax),
   "currentUrl": zod.string(),
   "title": zod.string(),
   "pageContent": zod.object({
@@ -1993,6 +1997,9 @@ export const GetBrowserSessionParams = zod.object({
   "sessionId": zod.coerce.string()
 })
 
+export const getBrowserSessionResponseZoomLevelMin = 50;
+export const getBrowserSessionResponseZoomLevelMax = 200;
+
 export const getBrowserSessionResponsePageContentHeadingsItemLevelMax = 6;
 
 
@@ -2007,6 +2014,7 @@ export const GetBrowserSessionResponse = zod.object({
   "active": zod.boolean()
 })),
   "screenshot": zod.string().describe('Screenshot as a PNG data URL'),
+  "zoomLevel": zod.number().int().min(getBrowserSessionResponseZoomLevelMin).max(getBrowserSessionResponseZoomLevelMax),
   "currentUrl": zod.string(),
   "title": zod.string(),
   "pageContent": zod.object({
@@ -2056,6 +2064,9 @@ export const NavigateBrowserBody = zod.object({
   "tabCount": zod.number().int().min(1).max(navigateBrowserBodyTabCountMax).optional().describe('Target number of tabs when syncTabs is enabled')
 })
 
+export const navigateBrowserResponseZoomLevelMin = 50;
+export const navigateBrowserResponseZoomLevelMax = 200;
+
 export const navigateBrowserResponsePageContentHeadingsItemLevelMax = 6;
 
 
@@ -2070,6 +2081,7 @@ export const NavigateBrowserResponse = zod.object({
   "active": zod.boolean()
 })),
   "screenshot": zod.string().describe('Screenshot as a PNG data URL'),
+  "zoomLevel": zod.number().int().min(navigateBrowserResponseZoomLevelMin).max(navigateBrowserResponseZoomLevelMax),
   "currentUrl": zod.string(),
   "title": zod.string(),
   "pageContent": zod.object({
@@ -2108,17 +2120,24 @@ export const performBrowserActionBodyKeyMax = 50;
 export const performBrowserActionBodyDeltaYMin = -5000;
 export const performBrowserActionBodyDeltaYMax = 5000;
 
+export const performBrowserActionBodyZoomLevelMin = 50;
+export const performBrowserActionBodyZoomLevelMax = 200;
+
 
 
 export const PerformBrowserActionBody = zod.object({
-  "action": zod.enum(['click', 'type', 'key', 'scroll', 'back', 'forward', 'reload']),
+  "action": zod.enum(['click', 'type', 'key', 'scroll', 'back', 'forward', 'reload', 'zoom']),
   "x": zod.number().min(performBrowserActionBodyXMin).optional(),
   "y": zod.number().min(performBrowserActionBodyYMin).optional(),
   "text": zod.string().max(performBrowserActionBodyTextMax).optional(),
   "key": zod.string().max(performBrowserActionBodyKeyMax).optional(),
   "deltaY": zod.number().min(performBrowserActionBodyDeltaYMin).max(performBrowserActionBodyDeltaYMax).optional(),
+  "zoomLevel": zod.number().int().min(performBrowserActionBodyZoomLevelMin).max(performBrowserActionBodyZoomLevelMax).optional(),
   "syncTabs": zod.boolean().optional().describe('Apply this browser action to every open tab')
 })
+
+export const performBrowserActionResponseZoomLevelMin = 50;
+export const performBrowserActionResponseZoomLevelMax = 200;
 
 export const performBrowserActionResponsePageContentHeadingsItemLevelMax = 6;
 
@@ -2134,6 +2153,7 @@ export const PerformBrowserActionResponse = zod.object({
   "active": zod.boolean()
 })),
   "screenshot": zod.string().describe('Screenshot as a PNG data URL'),
+  "zoomLevel": zod.number().int().min(performBrowserActionResponseZoomLevelMin).max(performBrowserActionResponseZoomLevelMax),
   "currentUrl": zod.string(),
   "title": zod.string(),
   "pageContent": zod.object({
@@ -2195,6 +2215,9 @@ export const CreateBrowserTabBody = zod.object({
   "url": zod.string().max(createBrowserTabBodyUrlMax)
 })
 
+export const createBrowserTabResponseZoomLevelMin = 50;
+export const createBrowserTabResponseZoomLevelMax = 200;
+
 export const createBrowserTabResponsePageContentHeadingsItemLevelMax = 6;
 
 
@@ -2209,6 +2232,7 @@ export const CreateBrowserTabResponse = zod.object({
   "active": zod.boolean()
 })),
   "screenshot": zod.string().describe('Screenshot as a PNG data URL'),
+  "zoomLevel": zod.number().int().min(createBrowserTabResponseZoomLevelMin).max(createBrowserTabResponseZoomLevelMax),
   "currentUrl": zod.string(),
   "title": zod.string(),
   "pageContent": zod.object({
@@ -2237,6 +2261,9 @@ export const ActivateBrowserTabParams = zod.object({
   "tabId": zod.coerce.string()
 })
 
+export const activateBrowserTabResponseZoomLevelMin = 50;
+export const activateBrowserTabResponseZoomLevelMax = 200;
+
 export const activateBrowserTabResponsePageContentHeadingsItemLevelMax = 6;
 
 
@@ -2251,6 +2278,7 @@ export const ActivateBrowserTabResponse = zod.object({
   "active": zod.boolean()
 })),
   "screenshot": zod.string().describe('Screenshot as a PNG data URL'),
+  "zoomLevel": zod.number().int().min(activateBrowserTabResponseZoomLevelMin).max(activateBrowserTabResponseZoomLevelMax),
   "currentUrl": zod.string(),
   "title": zod.string(),
   "pageContent": zod.object({
@@ -2279,6 +2307,9 @@ export const CloseBrowserTabParams = zod.object({
   "tabId": zod.coerce.string()
 })
 
+export const closeBrowserTabResponseZoomLevelMin = 50;
+export const closeBrowserTabResponseZoomLevelMax = 200;
+
 export const closeBrowserTabResponsePageContentHeadingsItemLevelMax = 6;
 
 
@@ -2293,6 +2324,7 @@ export const CloseBrowserTabResponse = zod.object({
   "active": zod.boolean()
 })),
   "screenshot": zod.string().describe('Screenshot as a PNG data URL'),
+  "zoomLevel": zod.number().int().min(closeBrowserTabResponseZoomLevelMin).max(closeBrowserTabResponseZoomLevelMax),
   "currentUrl": zod.string(),
   "title": zod.string(),
   "pageContent": zod.object({

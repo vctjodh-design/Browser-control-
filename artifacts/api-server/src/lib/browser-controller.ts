@@ -33,12 +33,14 @@ type BrowserAction = (
   | { action: "back" }
   | { action: "forward" }
   | { action: "reload" }
+  | { action: "zoom"; zoomLevel?: number }
 ) & { syncTabs?: boolean };
 
 type BrowserSession = {
   id: string;
   context: BrowserContext;
   tabs: Map<string, Page>;
+  zoomLevels: Map<string, number>;
   activeTabId: string;
   lastUsedAt: number;
 };
@@ -46,6 +48,17 @@ type BrowserSession = {
 let browser: Browser | undefined;
 let proxy: Awaited<ReturnType<typeof startSecureBrowserProxy>> | undefined;
 const sessions = new Map<string, BrowserSession>();
+
+async function applyPageZoom(page: Page, zoomLevel: number): Promise<void> {
+  if (page.isClosed()) return;
+  await page.evaluate((level) => {
+    const documentElement = (
+      globalThis as unknown as { document: any }
+    ).document.documentElement;
+    documentElement.style.zoom = `${level}%`;
+    documentElement.dataset.browserControlZoom = String(level);
+  }, zoomLevel);
+}
 
 async function ensureBrowser(): Promise<Browser> {
   if (browser?.isConnected()) return browser;
@@ -83,8 +96,14 @@ function registerPage(
 ): string {
   const tabId = randomUUID();
   session.tabs.set(tabId, page);
+  session.zoomLevels.set(tabId, 100);
   if (activate) session.activeTabId = tabId;
 
+  page.on("domcontentloaded", () => {
+    void applyPageZoom(page, session.zoomLevels.get(tabId) ?? 100).catch(
+      () => undefined,
+    );
+  });
   page.on("popup", (popup) => {
     if (session.tabs.size >= MAX_TABS_PER_SESSION) {
       void popup.close().catch(() => undefined);
@@ -94,6 +113,7 @@ function registerPage(
   });
   page.on("close", () => {
     session.tabs.delete(tabId);
+    session.zoomLevels.delete(tabId);
     if (session.activeTabId === tabId) {
       session.activeTabId = session.tabs.keys().next().value ?? "";
     }
@@ -343,12 +363,14 @@ export async function getBrowserState(sessionId: string) {
     }),
     activePage.title().catch(() => ""),
   ]);
+  const zoomLevel = session.zoomLevels.get(session.activeTabId) ?? 100;
 
   return {
     sessionId,
     activeTabId: session.activeTabId,
     tabs: tabs.filter((tab) => session.tabs.has(tab.id)),
     screenshot: `data:image/png;base64,${screenshot.toString("base64")}`,
+    zoomLevel,
     currentUrl: activePage.url(),
     title,
     pageContent,
@@ -382,6 +404,7 @@ export async function createBrowserSession(
     id: sessionId,
     context,
     tabs: new Map(),
+    zoomLevels: new Map(),
     activeTabId: "",
     lastUsedAt: Date.now(),
   };
@@ -392,12 +415,19 @@ export async function createBrowserSession(
     if (url) {
       const safeUrl = await validatePublicWebUrl(url);
       const pages = await ensureTabCount(session, tabCount);
-      await runAcrossPages(pages, "Opening the page", (targetPage) =>
-        targetPage.goto(safeUrl, {
+      await runAcrossPages(pages, "Opening the page", async (targetPage) => {
+        await targetPage.goto(safeUrl, {
           waitUntil: "domcontentloaded",
           timeout: 30_000,
-        }),
-      );
+        });
+        const tabId = Array.from(session.tabs.entries()).find(
+          ([, candidate]) => candidate === targetPage,
+        )?.[0];
+        await applyPageZoom(
+          targetPage,
+          tabId ? (session.zoomLevels.get(tabId) ?? 100) : 100,
+        );
+      });
     }
     return await getBrowserState(sessionId);
   } catch (error) {
@@ -448,9 +478,16 @@ export async function navigateBrowser(
           tabCount ?? MAX_TABS_PER_SESSION,
         )
       : [getActivePage(session)];
-    await runAcrossPages(pages, "Navigation", (page) =>
-      page.goto(safeUrl, { waitUntil: "domcontentloaded", timeout: 30_000 }),
-    );
+    await runAcrossPages(pages, "Navigation", async (page) => {
+      await page.goto(safeUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+      const tabId = Array.from(session.tabs.entries()).find(
+        ([, candidate]) => candidate === page,
+      )?.[0];
+      await applyPageZoom(page, tabId ? (session.zoomLevels.get(tabId) ?? 100) : 100);
+    });
     return await getBrowserState(sessionId);
   } catch (error) {
     if (error instanceof BrowserOperationError) throw error;
@@ -486,6 +523,17 @@ export async function performBrowserAction(
     if (action.action === "key" && (!action.key || action.key.length === 0)) {
       throw new BrowserOperationError("Choose a key to press.", 400);
     }
+    if (
+      action.action === "zoom" &&
+      (!Number.isInteger(action.zoomLevel) ||
+        action.zoomLevel! < 50 ||
+        action.zoomLevel! > 200)
+    ) {
+      throw new BrowserOperationError(
+        "Choose a zoom level between 50% and 200%.",
+        400,
+      );
+    }
     if (action.action === "scroll") {
       if (action.x !== undefined || action.y !== undefined) {
         if (typeof action.x !== "number" || typeof action.y !== "number") {
@@ -520,14 +568,48 @@ export async function performBrowserAction(
           await page
             .goBack({ waitUntil: "domcontentloaded", timeout: 10_000 })
             .catch(() => null);
+          await applyPageZoom(
+            page,
+            session.zoomLevels.get(
+              Array.from(session.tabs.entries()).find(
+                ([, candidate]) => candidate === page,
+              )?.[0] ?? "",
+            ) ?? 100,
+          );
           break;
         case "forward":
           await page
             .goForward({ waitUntil: "domcontentloaded", timeout: 10_000 })
             .catch(() => null);
+          await applyPageZoom(
+            page,
+            session.zoomLevels.get(
+              Array.from(session.tabs.entries()).find(
+                ([, candidate]) => candidate === page,
+              )?.[0] ?? "",
+            ) ?? 100,
+          );
           break;
         case "reload":
           await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
+          await applyPageZoom(
+            page,
+            session.zoomLevels.get(
+              Array.from(session.tabs.entries()).find(
+                ([, candidate]) => candidate === page,
+              )?.[0] ?? "",
+            ) ?? 100,
+          );
+          break;
+        case "zoom":
+          {
+            const tabId = Array.from(session.tabs.entries()).find(
+              ([, candidate]) => candidate === page,
+            )?.[0];
+            if (tabId) session.zoomLevels.set(tabId, action.zoomLevel!);
+            await applyPageZoom(page, action.zoomLevel!);
+          }
+          await page.waitForTimeout(200);
           break;
       }
     });

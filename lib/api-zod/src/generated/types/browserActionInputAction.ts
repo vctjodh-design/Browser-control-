@@ -17,4 +17,5 @@ export const BrowserActionInputAction = {
   back: 'back',
   forward: 'forward',
   reload: 'reload',
+  zoom: 'zoom',
 } as const;
