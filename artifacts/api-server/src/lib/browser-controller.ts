@@ -60,6 +60,29 @@ async function applyPageZoom(page: Page, zoomLevel: number): Promise<void> {
   }, zoomLevel);
 }
 
+async function settleAfterNavigationAction(
+  page: Page,
+  previousUrl: string,
+): Promise<void> {
+  await page.waitForTimeout(200);
+  if (page.isClosed()) return;
+
+  const urlChanged = page.url() !== previousUrl;
+  const documentLoading = await page
+    .evaluate(
+      () =>
+        (globalThis as unknown as { document: any }).document.readyState ===
+        "loading",
+    )
+    .catch(() => true);
+
+  if (urlChanged || documentLoading) {
+    await page
+      .waitForLoadState("domcontentloaded", { timeout: 8_000 })
+      .catch(() => undefined);
+  }
+}
+
 async function ensureBrowser(): Promise<Browser> {
   if (browser?.isConnected()) return browser;
 
@@ -503,6 +526,9 @@ export async function performBrowserAction(
   action: BrowserAction,
 ) {
   const session = getSession(sessionId);
+  const initialTabId = session.activeTabId;
+  const initialPage = getActivePage(session);
+  const initialUrl = initialPage.url();
   const pages = action.syncTabs
     ? Array.from(session.tabs.values()).filter((page) => !page.isClosed())
     : [getActivePage(session)];
@@ -549,14 +575,29 @@ export async function performBrowserAction(
     await runAcrossPages(pages, "The browser action", async (page) => {
       switch (action.action) {
         case "click":
-          await page.mouse.click(action.x!, action.y!);
-          await page.waitForTimeout(200);
+          {
+            const previousUrl = page.url();
+            await page.mouse.click(action.x!, action.y!);
+            await settleAfterNavigationAction(page, previousUrl);
+            const activePage = getActivePage(session);
+            if (activePage !== page) {
+              await activePage
+                .waitForLoadState("domcontentloaded", { timeout: 8_000 })
+                .catch(() => undefined);
+            }
+          }
           break;
         case "type":
           await page.keyboard.type(action.text!);
           break;
         case "key":
-          await page.keyboard.press(action.key!);
+          {
+            const previousUrl = page.url();
+            await page.keyboard.press(action.key!);
+            if (action.key === "Enter") {
+              await settleAfterNavigationAction(page, previousUrl);
+            }
+          }
           break;
         case "scroll":
           if (action.x !== undefined && action.y !== undefined) {
@@ -616,7 +657,37 @@ export async function performBrowserAction(
 
     return await getBrowserState(sessionId);
   } catch (error) {
+    const mayHaveNavigated =
+      !action.syncTabs &&
+      (action.action === "click" ||
+        (action.action === "key" && action.key === "Enter"));
+    if (mayHaveNavigated) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const activePage = session.tabs.get(session.activeTabId);
+      const navigationOccurred =
+        session.activeTabId !== initialTabId ||
+        (activePage && !activePage.isClosed() && activePage.url() !== initialUrl);
+      if (navigationOccurred && activePage && !activePage.isClosed()) {
+        await activePage
+          .waitForLoadState("domcontentloaded", { timeout: 8_000 })
+          .catch(() => undefined);
+        try {
+          return await getBrowserState(sessionId);
+        } catch {
+          // The failure below reports the action error if the new page is still unavailable.
+        }
+      }
+    }
+
     if (error instanceof BrowserOperationError) throw error;
+
+    logger.warn(
+      {
+        action: action.action,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      },
+      "A browser action failed",
+    );
     throw new BrowserOperationError(
       "That browser action could not be completed.",
       502,

@@ -71,6 +71,18 @@ function normalizeUrl(value: string) {
   return `https://www.bing.com/search?q=${encodeURIComponent(trimmed)}`;
 }
 
+function isGoogleBlockedPage(value: string) {
+  try {
+    const url = new URL(value);
+    return (
+      (url.hostname === 'google.com' || url.hostname.endsWith('.google.com')) &&
+      url.pathname.startsWith('/sorry/')
+    );
+  } catch {
+    return false;
+  }
+}
+
 function SyncTabsOption({
   checked,
   onChange,
@@ -505,6 +517,15 @@ function BrowserConsole() {
               </div>
             </div>
             {sessionId && <button className="shrink-0 rounded-md px-2 py-1 text-xs font-bold text-[#855542] hover:bg-[#f6e8df]" onClick={() => sessionQuery.refetch()} data-testid="button-retry-session">Retry state</button>}
+          </section>
+        )}
+
+        {state && isGoogleBlockedPage(state.currentUrl) && (
+          <section className="mb-5 flex items-start gap-3 rounded-xl border border-[#e7d4ae] bg-[#fff9e9] px-4 py-3 text-[11px] leading-5 text-[#766342]" role="status" data-testid="status-google-blocked">
+            <Globe2 size={15} className="mt-0.5 shrink-0 text-[#ae8644]" />
+            <p>
+              Google has blocked automated browsing in this session. Use the browser address field to search with Bing, or enter the website address directly.
+            </p>
           </section>
         )}
 
