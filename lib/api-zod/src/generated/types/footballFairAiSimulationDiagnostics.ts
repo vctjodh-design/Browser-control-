@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { FootballFairAiSimulationTerminalStates } from './footballFairAiSimulationTerminalStates';
+import type { FootballFairAiSimulationPossessionResolutions } from './footballFairAiSimulationPossessionResolutions';
 
 export interface FootballFairAiSimulationDiagnostics {
   possessions: number;
@@ -15,5 +15,5 @@ export interface FootballFairAiSimulationDiagnostics {
   shots: number;
   shotsOnTarget: number;
   goals: number;
-  terminalStates: FootballFairAiSimulationTerminalStates;
+  possessionResolutions: FootballFairAiSimulationPossessionResolutions;
 }

@@ -45,9 +45,69 @@ function team(teamKey, name, possessionPct) {
       coachMatches: 0,
       coachWinPct: null,
       daysSinceLastMatch: 6,
+      matchStatSampleCount: 5,
     },
     players: [],
   };
+}
+
+function sparseTeam(teamKey, name, avgGoalsFor, avgGoalsAgainst) {
+  const value = team(teamKey, name, 50);
+  value.avgGoalsFor = avgGoalsFor;
+  value.avgGoalsAgainst = avgGoalsAgainst;
+  value.recentMatchCount = 6;
+  value.teamStats = {
+    expectedGoalsFor: null,
+    expectedGoalsAgainst: null,
+    possessionPct: 50,
+    shotsPerMatch: null,
+    shotsOnTargetPerMatch: null,
+    shotsInsideBoxPerMatch: null,
+    bigChancesPerMatch: null,
+    bigChancesMissedPerMatch: null,
+    passCompletionPct: null,
+    longBallCompletionPct: null,
+    finalThirdPassCompletionPct: null,
+    defensiveActionsPerMatch: null,
+    redCardsPerMatch: null,
+    yellowCardsPerMatch: null,
+    matchStatSampleCount: 0,
+    coachMatches: 0,
+  };
+  value.players = [];
+  return value;
+}
+
+function goalkeeper(savesPer90) {
+  return {
+    playerKey: `keeper-${savesPer90}`,
+    name: "Test Keeper",
+    position: "Goalkeeper",
+    starter: true,
+    appearances: 10,
+    ratedAppearances: 10,
+    shotsPer90: 0,
+    expectedGoalsPer90: 0,
+    goalsPer90: 0,
+    savesPer90,
+    passCompletionPct: 70,
+    shotAccuracyPct: null,
+    averageRating: 6.5,
+    keyPassesPer90: 0,
+    duelsWonPct: 50,
+    tacklesPer90: 0,
+    interceptionsPer90: 0,
+  };
+}
+
+function simulateWithSeed(home, away, seed, iterations = 1_000) {
+  const originalRandom = Math.random;
+  try {
+    Math.random = seededRandom(seed);
+    return runFairAiPossessionSimulation(home, away, iterations);
+  } finally {
+    Math.random = originalRandom;
+  }
 }
 
 test("each simulated match gets a shot budget and shot-to-goal counters reconcile", () => {
@@ -65,31 +125,167 @@ test("each simulated match gets a shot budget and shot-to-goal counters reconcil
   }
 
   const diagnostics = result.diagnostics;
-  const terminalStates = diagnostics.terminalStates;
+  const possessionResolutions = diagnostics.possessionResolutions;
 
   assert.ok(diagnostics.shots > result.iterations, "shots should be generated across the match batch");
   assert.ok(diagnostics.goals > 0, "some shots should reach the score update");
   assert.ok(diagnostics.shotsOnTarget >= diagnostics.goals);
-  assert.equal(diagnostics.shots, terminalStates.goals + terminalStates.shots);
-  assert.equal(diagnostics.goals, terminalStates.goals);
-  assert.equal(diagnostics.turnovers, terminalStates.turnovers);
   assert.equal(
-    terminalStates.goals + terminalStates.shots + terminalStates.turnovers + terminalStates.retained,
+    diagnostics.shots,
+    possessionResolutions.goals + possessionResolutions.nonGoalShots,
+  );
+  assert.equal(diagnostics.goals, possessionResolutions.goals);
+  assert.equal(diagnostics.turnovers, possessionResolutions.turnovers);
+  assert.equal(
+    possessionResolutions.goals + possessionResolutions.nonGoalShots +
+      possessionResolutions.turnovers + possessionResolutions.actionLimitRetentions,
     diagnostics.possessions,
   );
   assert.equal(
     result.outcomes.home + result.outcomes.draw + result.outcomes.away,
     result.iterations,
   );
-  assert.equal(result.expectedHomeGoals, result.possessionModel.home.expectedGoalsPerMatch);
-  assert.equal(result.expectedAwayGoals, result.possessionModel.away.expectedGoalsPerMatch);
+  assert.equal(result.expectedHomeXg, result.possessionModel.home.expectedGoalsPerMatch);
+  assert.equal(result.expectedAwayXg, result.possessionModel.away.expectedGoalsPerMatch);
   assert.ok(result.expectedHomeGoals >= 0);
   assert.ok(result.expectedAwayGoals >= 0);
+  assert.ok(result.expectedHomeXg >= 0);
+  assert.ok(result.expectedAwayXg >= 0);
   assert.ok(Math.abs(
     result.probabilities.home + result.probabilities.draw + result.probabilities.away - 1,
   ) < 1e-12);
   assert.equal(result.standingsContext.adjustmentsApplied, false);
   assert.equal(result.standingsContext.home.status, "missing");
+  assert.equal(result.sampleMatchAudit.scorelineReconciled, true);
+  assert.equal(
+    result.goalMarkets.bttsYesCount + result.goalMarkets.bttsNoCount,
+    result.iterations,
+  );
+  assert.equal(
+    result.scorelineDistribution.reduce((sum, scoreline) => sum + scoreline.count, 0),
+    result.iterations,
+  );
+  assert.equal(
+    result.inputAudit.home.shotXgSources.teamStatistics +
+      result.inputAudit.home.shotXgSources.playerProfile +
+      result.inputAudit.home.shotXgSources.recentResults +
+      result.inputAudit.home.shotXgSources.neutralPrior +
+      result.inputAudit.away.shotXgSources.teamStatistics +
+      result.inputAudit.away.shotXgSources.playerProfile +
+      result.inputAudit.away.shotXgSources.recentResults +
+      result.inputAudit.away.shotXgSources.neutralPrior,
+    diagnostics.shots,
+  );
+});
+
+test("recent score fallback differentiates teams when detailed statistics are missing", () => {
+  const home = sparseTeam("home", "Everton U21", 1.17, 0.83);
+  const away = sparseTeam("away", "Wolves U21", 0.67, 2.33);
+  const actual = simulateWithSeed(home, away, 0xFA1701);
+  const neutralHome = sparseTeam("neutral-home", "Home", 1.3, 1.3);
+  const neutralAway = sparseTeam("neutral-away", "Away", 1.3, 1.3);
+  const neutral = simulateWithSeed(neutralHome, neutralAway, 0xFA1701);
+
+  assert.equal(actual.inputAudit.home.detailedMatchStatSamples, 0);
+  assert.equal(actual.inputAudit.home.archivePlayerProfiles, 0);
+  assert.equal(actual.inputAudit.home.coverage, "limited");
+  assert.ok(actual.inputAudit.home.warnings.some((warning) => warning.includes("No detailed team match-stat")));
+  assert.ok(actual.inputAudit.home.shotXgSources.recentResults > 0);
+  assert.equal(actual.inputAudit.home.shotXgSources.neutralPrior, 0);
+  assert.ok(actual.expectedHomeXg > actual.expectedAwayXg);
+  assert.ok(actual.probabilities.home > actual.probabilities.away);
+  assert.notEqual(actual.expectedHomeXg, neutral.expectedHomeXg);
+  assert.notEqual(actual.expectedAwayXg, neutral.expectedAwayXg);
+  assert.equal(actual.uncertainty.modelStatus, "not-quantified");
+});
+
+test("independent attack and defensive-weakness changes alter shot output", () => {
+  const baseHome = sparseTeam("home", "Home", 1.2, 1.1);
+  const baseAway = sparseTeam("away", "Away", 1.1, 1.2);
+  const baseline = simulateWithSeed(baseHome, baseAway, 0xA77AC1);
+
+  const strongerHome = sparseTeam("home", "Home", 2.6, 1.1);
+  const strongerAttack = simulateWithSeed(
+    strongerHome,
+    sparseTeam("away", "Away", 1.1, 1.2),
+    0xA77AC1,
+  );
+  assert.ok(strongerAttack.expectedHomeXg > baseline.expectedHomeXg);
+  assert.ok(strongerAttack.probabilities.home > baseline.probabilities.home);
+
+  const weakerDefense = simulateWithSeed(
+    sparseTeam("home", "Home", 1.2, 1.1),
+    sparseTeam("away", "Away", 1.1, 3.0),
+    0xA77AC1,
+  );
+  assert.ok(weakerDefense.expectedHomeXg > baseline.expectedHomeXg);
+  assert.ok(weakerDefense.probabilities.home > baseline.probabilities.home);
+});
+
+test("finishing quality changes simulated goals separately from shot xG", () => {
+  const lowFinishingHome = team("home", "Home", 50);
+  lowFinishingHome.recentMatchCount = 8;
+  lowFinishingHome.avgGoalsFor = 1.1;
+  lowFinishingHome.teamStats.matchStatSampleCount = 8;
+  lowFinishingHome.teamStats.expectedGoalsFor = 1.5;
+  const highFinishingHome = team("home", "Home", 50);
+  highFinishingHome.recentMatchCount = 8;
+  highFinishingHome.avgGoalsFor = 2.1;
+  highFinishingHome.teamStats.matchStatSampleCount = 8;
+  highFinishingHome.teamStats.expectedGoalsFor = 1.5;
+  const low = simulateWithSeed(
+    lowFinishingHome,
+    team("away", "Away", 50),
+    0xF1A15,
+  );
+  const high = simulateWithSeed(
+    highFinishingHome,
+    team("away", "Away", 50),
+    0xF1A15,
+  );
+
+  assert.equal(high.expectedHomeXg, low.expectedHomeXg);
+  assert.ok(high.expectedHomeGoals > low.expectedHomeGoals);
+  assert.ok(high.probabilities.home > low.probabilities.home);
+});
+
+test("goalkeeper saves reduce goals without rewriting shot xG", () => {
+  const home = team("home", "Home", 50);
+  const awayWithWeakKeeper = team("away", "Away", 50);
+  const awayWithStrongKeeper = team("away", "Away", 50);
+  awayWithWeakKeeper.players = [goalkeeper(0)];
+  awayWithStrongKeeper.players = [goalkeeper(5)];
+
+  const weakKeeperResult = simulateWithSeed(home, awayWithWeakKeeper, 0x6A0A1);
+  const strongKeeperResult = simulateWithSeed(
+    team("home", "Home", 50),
+    awayWithStrongKeeper,
+    0x6A0A1,
+  );
+
+  assert.equal(strongKeeperResult.expectedHomeXg, weakKeeperResult.expectedHomeXg);
+  assert.ok(strongKeeperResult.expectedHomeGoals < weakKeeperResult.expectedHomeGoals);
+  assert.ok(strongKeeperResult.probabilities.home < weakKeeperResult.probabilities.home);
+});
+
+test("possession-style inputs change the possession distribution", () => {
+  const balanced = simulateWithSeed(
+    team("home", "Home", 50),
+    team("away", "Away", 50),
+    0x905E5510,
+  );
+  const possessionHome = simulateWithSeed(
+    team("home", "Home", 65),
+    team("away", "Away", 35),
+    0x905E5510,
+  );
+
+  assert.equal(balanced.possessionModel.home.possessionSharePct, 50);
+  assert.equal(possessionHome.possessionModel.home.possessionSharePct, 65);
+  assert.notEqual(
+    possessionHome.possessionModel.home.possessionsPerMatch,
+    balanced.possessionModel.home.possessionsPerMatch,
+  );
 });
 
 test("standings strength uses fresh inputs and excludes stale, future, or invalid snapshots", () => {

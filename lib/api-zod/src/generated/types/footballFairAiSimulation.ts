@@ -8,10 +8,14 @@
 import type { FootballFairAiPossessionModel } from './footballFairAiPossessionModel';
 import type { FootballFairAiSimulationContribution } from './footballFairAiSimulationContribution';
 import type { FootballFairAiSimulationDiagnostics } from './footballFairAiSimulationDiagnostics';
+import type { FootballFairAiSimulationGoalMarkets } from './footballFairAiSimulationGoalMarkets';
+import type { FootballFairAiSimulationInputAudit } from './footballFairAiSimulationInputAudit';
 import type { FootballFairAiSimulationOutcome } from './footballFairAiSimulationOutcome';
 import type { FootballFairAiSimulationProbabilities } from './footballFairAiSimulationProbabilities';
+import type { FootballFairAiSimulationSampleMatchAudit } from './footballFairAiSimulationSampleMatchAudit';
 import type { FootballFairAiSimulationScoreline } from './footballFairAiSimulationScoreline';
 import type { FootballFairAiSimulationStandingsContext } from './footballFairAiSimulationStandingsContext';
+import type { FootballFairAiSimulationUncertainty } from './footballFairAiSimulationUncertainty';
 import type { FootballFairAiTeam } from './footballFairAiTeam';
 
 export interface FootballFairAiSimulation {
@@ -20,9 +24,16 @@ export interface FootballFairAiSimulation {
   away: FootballFairAiTeam;
   expectedHomeGoals: number;
   expectedAwayGoals: number;
+  expectedHomeXg: number;
+  expectedAwayXg: number;
   outcomes: FootballFairAiSimulationOutcome;
   probabilities: FootballFairAiSimulationProbabilities;
   diagnostics: FootballFairAiSimulationDiagnostics;
+  goalMarkets: FootballFairAiSimulationGoalMarkets;
+  scorelineDistribution: FootballFairAiSimulationScoreline[];
+  inputAudit: FootballFairAiSimulationInputAudit;
+  uncertainty: FootballFairAiSimulationUncertainty;
+  sampleMatchAudit: FootballFairAiSimulationSampleMatchAudit;
   standingsContext: FootballFairAiSimulationStandingsContext;
   topScorelines: FootballFairAiSimulationScoreline[];
   playerContributions: FootballFairAiSimulationContribution[];

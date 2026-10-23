@@ -236,7 +236,9 @@ function SampledPossession({
           <p className="truncate text-[9px] font-extrabold text-[#465a52]">{possession.teamName}</p>
           <p className="mono mt-1 text-[7px] text-[#858982]">Possession {possession.possessionNumber} · {possession.minute}&apos;</p>
         </div>
-        <span className={`shrink-0 rounded-full px-2 py-1 text-[7px] font-extrabold uppercase tracking-[.08em] ${tone}`}>{possession.outcome.replace('_', ' ')}</span>
+        <span className={`shrink-0 rounded-full px-2 py-1 text-[7px] font-extrabold uppercase tracking-[.08em] ${tone}`}>
+          {possession.outcome === 'retained' ? 'action-cap retention' : possession.outcome === 'shot' ? 'non-goal shot' : possession.outcome}
+        </span>
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="text-[8px] text-[#7c847c]">{possession.actions.length} actions</span>
@@ -328,6 +330,7 @@ export default function FairAiSimulationPanel({
   ] : [];
   const teams = result ? [result.home, result.away] : [];
   const possessionTeams = model ? [model.home, model.away] : [];
+  const overTwoGoalsMarket = result?.goalMarkets.totals.find((market) => market.line === 2.5);
 
   return (
     <section
@@ -415,7 +418,11 @@ export default function FairAiSimulationPanel({
                     <p className="mono text-[7px] uppercase tracking-[.13em] text-[#9b7160]">Match flow / simulated averages</p>
                     <h3 id="possession-summary-title" className="mt-1 text-[11px] font-extrabold text-[#40534b]">Possession profile</h3>
                   </div>
-                  <div className="mono text-[8px] text-[#81877e]">xG {result.expectedHomeGoals.toFixed(2)} — {result.expectedAwayGoals.toFixed(2)} · {result.iterations.toLocaleString()} iterations</div>
+                  <div className="mono text-[8px] text-[#81877e]">
+                    xG {result.expectedHomeXg.toFixed(2)} — {result.expectedAwayXg.toFixed(2)}
+                    {' · '}goals {result.expectedHomeGoals.toFixed(2)} — {result.expectedAwayGoals.toFixed(2)}
+                    {' · '}{result.iterations.toLocaleString()} iterations
+                  </div>
                 </div>
                 {model ? (
                   <div className="p-3">
@@ -500,6 +507,22 @@ export default function FairAiSimulationPanel({
                     {!result.topScorelines.length && <span className="text-[8px] text-[#858982]">No scorelines reported.</span>}
                   </div>
                 </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 border-t border-[#ecebe3] pt-2.5">
+                    <div className="rounded-lg bg-[#f7f7f1] px-2.5 py-2">
+                      <p className="text-[7px] font-extrabold uppercase tracking-[.08em] text-[#858982]">Both teams to score</p>
+                      <p className="mono mt-1 text-[9px] font-semibold text-[#4d6555]">
+                        Yes {probability(result.goalMarkets.bttsYesProbability)} · No {probability(result.goalMarkets.bttsNoProbability)}
+                      </p>
+                    </div>
+                    {overTwoGoalsMarket && (
+                      <div className="rounded-lg bg-[#f7f7f1] px-2.5 py-2">
+                        <p className="text-[7px] font-extrabold uppercase tracking-[.08em] text-[#858982]">Total goals · 2.5</p>
+                        <p className="mono mt-1 text-[9px] font-semibold text-[#4d6555]">
+                          Over {probability(overTwoGoalsMarket.overProbability)} · Under {probability(overTwoGoalsMarket.underProbability)}
+                        </p>
+                      </div>
+                    )}
+                  </div>
               </section>
             </div>
 
@@ -534,8 +557,69 @@ export default function FairAiSimulationPanel({
                 ))}
               </div>
               <p className="mono mt-2 text-[7px] leading-4 text-[#858982]">
-                Terminal states: {numberFormat.format(result.diagnostics.terminalStates.goals)} goals · {numberFormat.format(result.diagnostics.terminalStates.shots)} non-goal shots · {numberFormat.format(result.diagnostics.terminalStates.turnovers)} turnovers · {numberFormat.format(result.diagnostics.terminalStates.retained)} retained
+                Shot events: {numberFormat.format(result.diagnostics.shots)} (goals are included). Possession resolutions: {numberFormat.format(result.diagnostics.possessionResolutions.goals)} goals · {numberFormat.format(result.diagnostics.possessionResolutions.nonGoalShots)} non-goal shots · {numberFormat.format(result.diagnostics.possessionResolutions.turnovers)} turnovers · {numberFormat.format(result.diagnostics.possessionResolutions.actionLimitRetentions)} reached the action limit with possession retained.
               </p>
+              <p className="mt-2 rounded-lg bg-[#f7f7f1] px-2.5 py-2 text-[7px] leading-4 text-[#68766e]" data-testid="fair-ai-sample-match-audit">
+                First-match audit: {result.sampleMatchAudit.homeGoals}–{result.sampleMatchAudit.awayGoals} · {result.sampleMatchAudit.shots} shots = {result.sampleMatchAudit.goals} goals + {result.sampleMatchAudit.nonGoalShots} non-goal shots · {result.sampleMatchAudit.scorelineReconciled ? 'possession counts reconcile' : 'audit mismatch'}.
+              </p>
+            </section>
+
+            <section className="rounded-xl border border-[#e2e2d8] bg-white p-3" aria-labelledby="simulation-input-audit-title" data-testid="fair-ai-input-audit">
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <p className="mono text-[7px] uppercase tracking-[.13em] text-[#9b7160]">Source coverage / model uncertainty</p>
+                  <h3 id="simulation-input-audit-title" className="mt-1 text-[10px] font-extrabold text-[#40534b]">Input provenance &amp; uncertainty</h3>
+                </div>
+                <span className="rounded-full bg-[#f7f0df] px-2 py-1 text-[7px] font-extrabold uppercase tracking-[.08em] text-[#927447]">
+                  Model error not quantified
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {[
+                  { team: result.home, audit: result.inputAudit.home },
+                  { team: result.away, audit: result.inputAudit.away },
+                ].map(({ team, audit }) => (
+                  <div key={team.teamKey} className="rounded-lg bg-[#f7f7f1] px-2.5 py-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-[8px] font-extrabold text-[#52615e]">{team.name}</span>
+                      <span className="mono shrink-0 text-[7px] uppercase text-[#927447]">{audit.coverage} coverage</span>
+                    </div>
+                    <p className="mono mt-2 text-[7px] leading-4 text-[#66746b]">
+                      Recent matches {audit.recentMatches} · detailed stat samples {audit.detailedMatchStatSamples} · archived players {audit.archivePlayerProfiles} · keepers {audit.goalkeeperProfiles}
+                    </p>
+                    <p className="mono mt-1 text-[7px] leading-4 text-[#66746b]">
+                      Shot xG bases — player {audit.shotXgSources.playerProfile} · team stats {audit.shotXgSources.teamStatistics} · recent results {audit.shotXgSources.recentResults} · neutral prior {audit.shotXgSources.neutralPrior}
+                    </p>
+                    {audit.warnings.length > 0 && (
+                      <ul className="mt-2 list-disc space-y-1 pl-3 text-[7px] leading-4 text-[#7d6c4d]">
+                        {audit.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 border-t border-[#ecebe3] pt-2.5">
+                <p className="text-[7px] font-extrabold uppercase tracking-[.1em] text-[#858982]">
+                  {result.uncertainty.samplingMethod}
+                </p>
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  {[
+                    { label: 'Home win', interval: result.uncertainty.homeWin },
+                    { label: 'Draw', interval: result.uncertainty.draw },
+                    { label: 'Away win', interval: result.uncertainty.awayWin },
+                  ].map(({ label, interval }) => (
+                    <div key={label} className="rounded-lg bg-[#f7f7f1] px-2 py-2">
+                      <p className="text-[7px] font-bold text-[#81877e]">{label}</p>
+                      <p className="mono mt-1 text-[7px] text-[#4d6555]">
+                        {probability(interval.lower)}–{probability(interval.upper)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-[7px] leading-4 text-[#858982]">
+                  These intervals cover finite-run sampling only, not predictive accuracy. {result.uncertainty.modelNotes.join(' ')}
+                </p>
+              </div>
             </section>
 
             <section className="rounded-xl border border-[#e2e2d8] bg-white p-3" aria-labelledby="simulation-standings-title" data-testid="fair-ai-simulation-standings">
@@ -621,7 +705,7 @@ export default function FairAiSimulationPanel({
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
                             <p className="text-[9px] font-extrabold text-[#4d5f58]">{activeSample.teamName} possession</p>
-                            <p className="mono mt-1 text-[7px] text-[#858982]">Sequence {activeSample.possessionNumber} · {activeSample.minute}&apos; · {activeSample.outcome.replace('_', ' ')}</p>
+                            <p className="mono mt-1 text-[7px] text-[#858982]">Sequence {activeSample.possessionNumber} · {activeSample.minute}&apos; · {activeSample.outcome === 'retained' ? 'action-limit retention' : activeSample.outcome === 'shot' ? 'non-goal shot' : activeSample.outcome}</p>
                           </div>
                           <span className="mono rounded-md bg-[#eaf1e9] px-2 py-1 text-[8px] font-bold text-[#567d69]">EVA-style proxy {activeSample.estimatedValueAdded >= 0 ? '+' : ''}{metricValue(activeSample.estimatedValueAdded, 3)}</span>
                         </div>

@@ -358,6 +358,13 @@ export interface FootballFairAiSimulationTerminalStates {
   retained: number;
 }
 
+export interface FootballFairAiSimulationPossessionResolutions {
+  goals: number;
+  nonGoalShots: number;
+  turnovers: number;
+  actionLimitRetentions: number;
+}
+
 export interface FootballFairAiSimulationDiagnostics {
   possessions: number;
   actions: number;
@@ -366,7 +373,86 @@ export interface FootballFairAiSimulationDiagnostics {
   shots: number;
   shotsOnTarget: number;
   goals: number;
-  terminalStates: FootballFairAiSimulationTerminalStates;
+  possessionResolutions: FootballFairAiSimulationPossessionResolutions;
+}
+
+export interface FootballFairAiSimulationShotXgSources {
+  playerProfile: number;
+  teamStatistics: number;
+  recentResults: number;
+  neutralPrior: number;
+}
+
+export type FootballFairAiSimulationInputAuditTeamCoverage = typeof FootballFairAiSimulationInputAuditTeamCoverage[keyof typeof FootballFairAiSimulationInputAuditTeamCoverage];
+
+
+export const FootballFairAiSimulationInputAuditTeamCoverage = {
+  limited: 'limited',
+  partial: 'partial',
+  broad: 'broad',
+} as const;
+
+export interface FootballFairAiSimulationInputAuditTeam {
+  recentMatches: number;
+  detailedMatchStatSamples: number;
+  archivePlayerProfiles: number;
+  goalkeeperProfiles: number;
+  shotXgSources: FootballFairAiSimulationShotXgSources;
+  coverage: FootballFairAiSimulationInputAuditTeamCoverage;
+  warnings: string[];
+}
+
+export interface FootballFairAiSimulationInputAudit {
+  home: FootballFairAiSimulationInputAuditTeam;
+  away: FootballFairAiSimulationInputAuditTeam;
+}
+
+export interface FootballFairAiSimulationSamplingInterval {
+  lower: number;
+  upper: number;
+}
+
+export type FootballFairAiSimulationUncertaintyModelStatus = typeof FootballFairAiSimulationUncertaintyModelStatus[keyof typeof FootballFairAiSimulationUncertaintyModelStatus];
+
+
+export const FootballFairAiSimulationUncertaintyModelStatus = {
+  'not-quantified': 'not-quantified',
+} as const;
+
+export interface FootballFairAiSimulationUncertainty {
+  samplingMethod: string;
+  homeWin: FootballFairAiSimulationSamplingInterval;
+  draw: FootballFairAiSimulationSamplingInterval;
+  awayWin: FootballFairAiSimulationSamplingInterval;
+  modelStatus: FootballFairAiSimulationUncertaintyModelStatus;
+  modelNotes: string[];
+}
+
+export interface FootballFairAiSimulationGoalMarket {
+  line: number;
+  overCount: number;
+  underCount: number;
+  overProbability: number;
+  underProbability: number;
+}
+
+export interface FootballFairAiSimulationGoalMarkets {
+  bttsYesCount: number;
+  bttsNoCount: number;
+  bttsYesProbability: number;
+  bttsNoProbability: number;
+  totals: FootballFairAiSimulationGoalMarket[];
+}
+
+export interface FootballFairAiSimulationSampleMatchAudit {
+  homeGoals: number;
+  awayGoals: number;
+  shots: number;
+  goals: number;
+  nonGoalShots: number;
+  turnovers: number;
+  actionLimitRetentions: number;
+  scorelineReconciled: boolean;
 }
 
 export type FootballFairAiSimulationStandingsTeamStatus = typeof FootballFairAiSimulationStandingsTeamStatus[keyof typeof FootballFairAiSimulationStandingsTeamStatus];
@@ -541,9 +627,16 @@ export interface FootballFairAiSimulation {
   away: FootballFairAiTeam;
   expectedHomeGoals: number;
   expectedAwayGoals: number;
+  expectedHomeXg: number;
+  expectedAwayXg: number;
   outcomes: FootballFairAiSimulationOutcome;
   probabilities: FootballFairAiSimulationProbabilities;
   diagnostics: FootballFairAiSimulationDiagnostics;
+  goalMarkets: FootballFairAiSimulationGoalMarkets;
+  scorelineDistribution: FootballFairAiSimulationScoreline[];
+  inputAudit: FootballFairAiSimulationInputAudit;
+  uncertainty: FootballFairAiSimulationUncertainty;
+  sampleMatchAudit: FootballFairAiSimulationSampleMatchAudit;
   standingsContext: FootballFairAiSimulationStandingsContext;
   topScorelines: FootballFairAiSimulationScoreline[];
   playerContributions: FootballFairAiSimulationContribution[];

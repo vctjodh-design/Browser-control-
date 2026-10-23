@@ -521,6 +521,8 @@ export const RunFootballFairAiSimulationResponse = zod.object({
 }),
   "expectedHomeGoals": zod.number(),
   "expectedAwayGoals": zod.number(),
+  "expectedHomeXg": zod.number(),
+  "expectedAwayXg": zod.number(),
   "outcomes": zod.object({
   "home": zod.number().int(),
   "draw": zod.number().int(),
@@ -539,12 +541,88 @@ export const RunFootballFairAiSimulationResponse = zod.object({
   "shots": zod.number().int(),
   "shotsOnTarget": zod.number().int(),
   "goals": zod.number().int(),
-  "terminalStates": zod.object({
+  "possessionResolutions": zod.object({
   "goals": zod.number().int(),
-  "shots": zod.number().int(),
+  "nonGoalShots": zod.number().int(),
   "turnovers": zod.number().int(),
-  "retained": zod.number().int()
+  "actionLimitRetentions": zod.number().int()
 })
+}),
+  "goalMarkets": zod.object({
+  "bttsYesCount": zod.number().int(),
+  "bttsNoCount": zod.number().int(),
+  "bttsYesProbability": zod.number(),
+  "bttsNoProbability": zod.number(),
+  "totals": zod.array(zod.object({
+  "line": zod.number(),
+  "overCount": zod.number().int(),
+  "underCount": zod.number().int(),
+  "overProbability": zod.number(),
+  "underProbability": zod.number()
+}))
+}),
+  "scorelineDistribution": zod.array(zod.object({
+  "homeGoals": zod.number().int(),
+  "awayGoals": zod.number().int(),
+  "count": zod.number().int(),
+  "probability": zod.number()
+})),
+  "inputAudit": zod.object({
+  "home": zod.object({
+  "recentMatches": zod.number().int(),
+  "detailedMatchStatSamples": zod.number().int(),
+  "archivePlayerProfiles": zod.number().int(),
+  "goalkeeperProfiles": zod.number().int(),
+  "shotXgSources": zod.object({
+  "playerProfile": zod.number().int(),
+  "teamStatistics": zod.number().int(),
+  "recentResults": zod.number().int(),
+  "neutralPrior": zod.number().int()
+}),
+  "coverage": zod.enum(['limited', 'partial', 'broad']),
+  "warnings": zod.array(zod.string())
+}),
+  "away": zod.object({
+  "recentMatches": zod.number().int(),
+  "detailedMatchStatSamples": zod.number().int(),
+  "archivePlayerProfiles": zod.number().int(),
+  "goalkeeperProfiles": zod.number().int(),
+  "shotXgSources": zod.object({
+  "playerProfile": zod.number().int(),
+  "teamStatistics": zod.number().int(),
+  "recentResults": zod.number().int(),
+  "neutralPrior": zod.number().int()
+}),
+  "coverage": zod.enum(['limited', 'partial', 'broad']),
+  "warnings": zod.array(zod.string())
+})
+}),
+  "uncertainty": zod.object({
+  "samplingMethod": zod.string(),
+  "homeWin": zod.object({
+  "lower": zod.number(),
+  "upper": zod.number()
+}),
+  "draw": zod.object({
+  "lower": zod.number(),
+  "upper": zod.number()
+}),
+  "awayWin": zod.object({
+  "lower": zod.number(),
+  "upper": zod.number()
+}),
+  "modelStatus": zod.enum(['not-quantified']),
+  "modelNotes": zod.array(zod.string())
+}),
+  "sampleMatchAudit": zod.object({
+  "homeGoals": zod.number().int(),
+  "awayGoals": zod.number().int(),
+  "shots": zod.number().int(),
+  "goals": zod.number().int(),
+  "nonGoalShots": zod.number().int(),
+  "turnovers": zod.number().int(),
+  "actionLimitRetentions": zod.number().int(),
+  "scorelineReconciled": zod.boolean()
 }),
   "standingsContext": zod.object({
   "adjustmentsApplied": zod.boolean(),
