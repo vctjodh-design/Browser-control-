@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   getGetFootballFairAiDataQueryKey,
@@ -139,6 +139,16 @@ function simulationError(error: unknown) {
 
 const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
 
+type MatchFixture = {
+  fixtureId: number;
+  homeTeamId: number;
+  awayTeamId: number;
+  homeTeamName: string;
+  awayTeamName: string;
+};
+
+type TeamSelection = Pick<FootballFairAiTeam, 'teamKey' | 'name' | 'recentMatchCount'>;
+
 function PitchGrid({
   team,
   columns,
@@ -236,21 +246,37 @@ function SampledPossession({
   );
 }
 
-export default function FairAiSimulationPanel() {
+export default function FairAiSimulationPanel({
+  fixture,
+  autoRunOnOpen = false,
+  allowSimulation = true,
+}: {
+  fixture?: MatchFixture;
+  autoRunOnOpen?: boolean;
+  allowSimulation?: boolean;
+} = {}) {
   const queryClient = useQueryClient();
   const [homeSearch, setHomeSearch] = useState('');
   const [awaySearch, setAwaySearch] = useState('');
-  const [home, setHome] = useState<FootballFairAiTeam | null>(null);
-  const [away, setAway] = useState<FootballFairAiTeam | null>(null);
+  const [manualHome, setManualHome] = useState<FootballFairAiTeam | null>(null);
+  const [manualAway, setManualAway] = useState<FootballFairAiTeam | null>(null);
   const [selectedPossession, setSelectedPossession] = useState(0);
   const simulation = useRunFootballFairAiSimulation();
-  const canRun = Boolean(home && away && home.teamKey !== away.teamKey && !simulation.isPending);
+  const home: TeamSelection | null = fixture
+    ? { teamKey: `id:${fixture.homeTeamId}`, name: fixture.homeTeamName, recentMatchCount: 0 }
+    : manualHome;
+  const away: TeamSelection | null = fixture
+    ? { teamKey: `id:${fixture.awayTeamId}`, name: fixture.awayTeamName, recentMatchCount: 0 }
+    : manualAway;
+  const autoRunKey = useRef<string | null>(null);
 
-  const runSimulation = () => {
-    if (!home || !away || home.teamKey === away.teamKey || simulation.isPending) return;
+  const runSimulation = (selectedHome: TeamSelection | null = home, selectedAway: TeamSelection | null = away) => {
+    if (!allowSimulation) return;
+    if (!selectedHome || !selectedAway || selectedHome.teamKey === selectedAway.teamKey) return;
+    if (simulation.isPending) return;
     setSelectedPossession(0);
     simulation.mutate(
-      { data: { homeTeamKey: home.teamKey, awayTeamKey: away.teamKey, iterations: 10_000 } },
+      { data: { homeTeamKey: selectedHome.teamKey, awayTeamKey: selectedAway.teamKey, iterations: 10_000 } },
       {
         onSuccess: () => {
           void queryClient.invalidateQueries({
@@ -263,6 +289,33 @@ export default function FairAiSimulationPanel() {
       },
     );
   };
+
+  useEffect(() => {
+    if (
+      !fixture ||
+      !autoRunOnOpen ||
+      !allowSimulation ||
+      !home ||
+      !away ||
+      home.teamKey === away.teamKey ||
+      simulation.isPending
+    ) {
+      return;
+    }
+    const key = `${fixture.fixtureId}:${home.teamKey}:${away.teamKey}`;
+    if (autoRunKey.current === key) return;
+    autoRunKey.current = key;
+    runSimulation(home, away);
+  }, [
+    fixture?.fixtureId,
+    fixture?.homeTeamId,
+    fixture?.awayTeamId,
+    autoRunOnOpen,
+    allowSimulation,
+    home?.teamKey,
+    away?.teamKey,
+    simulation.isPending,
+  ]);
 
   const result = simulation.data;
   const model = result?.possessionModel;
@@ -303,21 +356,40 @@ export default function FairAiSimulationPanel() {
         <p className="max-w-[820px] text-[9px] leading-[1.7] text-[#737c73]">
           Each run first fetches the selected teams&apos; five latest completed match records directly from KickoffScore. It then estimates match outcomes and shows example possession sequences, player actions and a model-generated pitch activity grid. If fresh source data is unavailable, the run stops rather than using stale records.
         </p>
-        <div className="grid gap-3 md:grid-cols-2">
-          <TeamPicker side="home" search={homeSearch} onSearch={setHomeSearch} selected={home} onSelect={setHome} />
-          <TeamPicker side="away" search={awaySearch} onSearch={setAwaySearch} selected={away} onSelect={setAway} />
-        </div>
+        {fixture ? (
+          <div className="rounded-xl border border-[#e2e2d8] bg-white px-3.5 py-3" data-testid="fair-ai-match-fixture">
+            <p className="mono text-[7px] uppercase tracking-[.12em] text-[#9b7160]">Match details · fixture {fixture.fixtureId}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[9px] font-extrabold text-[#4d5f58]">
+              <span>{fixture.homeTeamName}</span><span className="text-[#9a9a90]">vs</span><span>{fixture.awayTeamName}</span>
+            </div>
+            <p className="mt-2 text-[8px] text-[#788078]">
+              Using the team IDs from this KickoffScore fixture; the simulation refreshes both teams&apos; latest completed match records before running.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            <TeamPicker side="home" search={homeSearch} onSearch={setHomeSearch} selected={manualHome} onSelect={setManualHome} />
+            <TeamPicker side="away" search={awaySearch} onSearch={setAwaySearch} selected={manualAway} onSelect={setManualAway} />
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={runSimulation}
-            disabled={!canRun}
+            onClick={() => runSimulation()}
+            disabled={!allowSimulation || !home || !away || home.teamKey === away.teamKey || simulation.isPending}
             className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#253746] px-4 text-[9px] font-extrabold text-[#f8f2e7] transition hover:bg-[#344b5a] disabled:cursor-not-allowed disabled:opacity-45"
             data-testid="button-run-fair-ai-simulation"
           >
-            {simulation.isPending ? <><RefreshCw size={12} className="animate-spin" /> Refreshing source &amp; running…</> : <><Play size={12} /> Run simulation</>}
+            {simulation.isPending
+              ? <><RefreshCw size={12} className="animate-spin" /> Refreshing source &amp; running…</>
+              : <><Play size={12} /> {fixture ? 'Refresh and rerun' : 'Run simulation'}</>}
           </button>
-          {home && away && home.teamKey === away.teamKey && (
+          {fixture && !allowSimulation && (
+            <span className="text-[8px] text-[#8b7157]" role="status" data-testid="status-fair-ai-not-prematch">
+              Automatic pre-match simulation is unavailable for live, completed, or non-upcoming fixtures.
+            </span>
+          )}
+          {!fixture && home && away && home.teamKey === away.teamKey && (
             <span className="text-[8px] text-[#a35f4d]" role="status">Select two different teams.</span>
           )}
         </div>

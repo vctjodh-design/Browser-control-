@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'wouter';
 import {
   getGetFootballMatchLastFiveQueryKey,
@@ -14,6 +14,7 @@ import { PerformanceGraphsPanel } from '@/components/performance-graphs-panel';
 import { ModelPredictionGraphs } from '@/components/model-predictions-panel';
 import { LastFivePanel } from '@/components/last-five-panel';
 import FairAiSourceDataPanel from '@/components/fair-ai-source-data-panel';
+import FairAiSimulationPanel from '@/components/fair-ai-simulation-panel';
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -245,7 +246,10 @@ export default function MatchDetailsPage() {
   const detailsQuery = useGetFootballMatchDetails(validId ? fixtureId : 0, {
     query: { enabled: validId, queryKey: ['/api/football/matches', fixtureId, 'details'] },
   });
-  const [activeTab, setActiveTab] = useState<MatchTab>('table');
+  const [activeTab, setActiveTab] = useState<MatchTab>('fair-ai');
+  useEffect(() => {
+    setActiveTab('fair-ai');
+  }, [fixtureId]);
   const tmpQuery = useGetFootballMatchTmp(validId ? fixtureId : 0, {
     query: { enabled: validId && (activeTab === 'tmp' || activeTab === 'insights' || activeTab === 'graphs' || activeTab === 'predictions'), queryKey: ['/api/football/matches', fixtureId, 'tmp'] },
   });
@@ -254,8 +258,18 @@ export default function MatchDetailsPage() {
   });
   const details = detailsQuery.data as FootballMatchDetails | undefined;
   const match = details?.match;
-  const isLive = match?.status.toLowerCase().includes('live') || match?.status.toLowerCase().includes('in play');
-  const isComplete = match?.status.toLowerCase().includes('finished') || match?.status.toLowerCase().includes('full time') || match?.status.toLowerCase() === 'ft';
+  const matchStatus = match?.status.toLowerCase() ?? '';
+  const isLive = /\b(live|in play|in progress|half[ -]?time|first half|second half)\b/.test(matchStatus);
+  const isComplete = /\b(finished|full time|ft|ended|complete|after extra time|penalties)\b/.test(matchStatus);
+  const kickoffTime = match ? Date.parse(match.date) : Number.NaN;
+  const isUpcomingPreMatch = Boolean(
+    match &&
+    Number.isFinite(kickoffTime) &&
+    kickoffTime > Date.now() &&
+    !isLive &&
+    !isComplete &&
+    !/\b(postponed|cancelled|canceled|abandoned|suspended|awarded)\b/.test(matchStatus),
+  );
 
   return (
     <main className="screen-noise min-h-[100dvh] bg-[#f2f0e8] text-[#243443]">
@@ -316,7 +330,7 @@ export default function MatchDetailsPage() {
               </div>
               <div className="p-4 sm:p-6">
                 {activeTab === 'table' && <StandingsPanel details={details} />}
-                {activeTab === 'fair-ai' && (
+                <div hidden={activeTab !== 'fair-ai'}>
                   <section className="space-y-4" aria-labelledby="fair-ai-match-title" data-testid="panel-fair-ai">
                     <div className="rounded-xl border border-[#d9e0d6] bg-[#f0f4ed] px-4 py-3.5">
                       <p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">Player-level decision analysis</p>
@@ -325,9 +339,26 @@ export default function MatchDetailsPage() {
                         This tab shows the source-data coverage available for this match and the archive. KickoffScore provides aggregate match and lineup records here, but no pitch coordinates or player tracking, so spatial xT/EVA evaluation is not available yet.
                       </p>
                     </div>
+                    {isUpcomingPreMatch ? (
+                      <FairAiSimulationPanel
+                        key={match.fixtureId}
+                        fixture={{
+                          fixtureId: match.fixtureId,
+                          homeTeamId: match.home.id,
+                          awayTeamId: match.away.id,
+                          homeTeamName: match.home.name,
+                          awayTeamName: match.away.name,
+                        }}
+                        autoRunOnOpen
+                      />
+                    ) : (
+                      <div className="rounded-xl border border-[#e8dfca] bg-[#faf5e9] px-4 py-3.5 text-[9px] leading-5 text-[#7d6c4d]" role="status" data-testid="status-fair-ai-not-upcoming">
+                        Pre-match simulation runs automatically for upcoming fixtures. This match is live, complete, or no longer scheduled in the future, so using current team data would not represent a pre-kickoff forecast.
+                      </div>
+                    )}
                     <FairAiSourceDataPanel />
                   </section>
-                )}
+                </div>
                 {activeTab === 'odds' && <OddsPanel details={details} />}
                 {activeTab === 'form' && <FormPanel details={details} />}
                 {activeTab === 'h2h' && <HeadToHeadPanel details={details} />}
