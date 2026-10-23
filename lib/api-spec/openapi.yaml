@@ -1813,8 +1813,8 @@ components:
           type: integer
         goals:
           type: integer
-        terminalStates:
-          $ref: "#/components/schemas/FootballFairAiSimulationTerminalStates"
+        possessionResolutions:
+          $ref: "#/components/schemas/FootballFairAiSimulationPossessionResolutions"
       required:
         - possessions
         - actions
@@ -1823,7 +1823,152 @@ components:
         - shots
         - shotsOnTarget
         - goals
-        - terminalStates
+        - possessionResolutions
+    FootballFairAiSimulationPossessionResolutions:
+      type: object
+      properties:
+        goals:
+          type: integer
+        nonGoalShots:
+          type: integer
+        turnovers:
+          type: integer
+        actionLimitRetentions:
+          type: integer
+      required: [goals, nonGoalShots, turnovers, actionLimitRetentions]
+    FootballFairAiSimulationShotXgSources:
+      type: object
+      properties:
+        playerProfile:
+          type: integer
+        teamStatistics:
+          type: integer
+        recentResults:
+          type: integer
+        neutralPrior:
+          type: integer
+      required: [playerProfile, teamStatistics, recentResults, neutralPrior]
+    FootballFairAiSimulationInputAuditTeam:
+      type: object
+      properties:
+        recentMatches:
+          type: integer
+        detailedMatchStatSamples:
+          type: integer
+        archivePlayerProfiles:
+          type: integer
+        goalkeeperProfiles:
+          type: integer
+        shotXgSources:
+          $ref: "#/components/schemas/FootballFairAiSimulationShotXgSources"
+        coverage:
+          type: string
+          enum: [limited, partial, broad]
+        warnings:
+          type: array
+          items:
+            type: string
+      required:
+        - recentMatches
+        - detailedMatchStatSamples
+        - archivePlayerProfiles
+        - goalkeeperProfiles
+        - shotXgSources
+        - coverage
+        - warnings
+    FootballFairAiSimulationInputAudit:
+      type: object
+      properties:
+        home:
+          $ref: "#/components/schemas/FootballFairAiSimulationInputAuditTeam"
+        away:
+          $ref: "#/components/schemas/FootballFairAiSimulationInputAuditTeam"
+      required: [home, away]
+    FootballFairAiSimulationSamplingInterval:
+      type: object
+      properties:
+        lower:
+          type: number
+        upper:
+          type: number
+      required: [lower, upper]
+    FootballFairAiSimulationUncertainty:
+      type: object
+      properties:
+        samplingMethod:
+          type: string
+        homeWin:
+          $ref: "#/components/schemas/FootballFairAiSimulationSamplingInterval"
+        draw:
+          $ref: "#/components/schemas/FootballFairAiSimulationSamplingInterval"
+        awayWin:
+          $ref: "#/components/schemas/FootballFairAiSimulationSamplingInterval"
+        modelStatus:
+          type: string
+          enum: [not-quantified]
+        modelNotes:
+          type: array
+          items:
+            type: string
+      required: [samplingMethod, homeWin, draw, awayWin, modelStatus, modelNotes]
+    FootballFairAiSimulationGoalMarket:
+      type: object
+      properties:
+        line:
+          type: number
+        overCount:
+          type: integer
+        underCount:
+          type: integer
+        overProbability:
+          type: number
+        underProbability:
+          type: number
+      required: [line, overCount, underCount, overProbability, underProbability]
+    FootballFairAiSimulationGoalMarkets:
+      type: object
+      properties:
+        bttsYesCount:
+          type: integer
+        bttsNoCount:
+          type: integer
+        bttsYesProbability:
+          type: number
+        bttsNoProbability:
+          type: number
+        totals:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFairAiSimulationGoalMarket"
+      required: [bttsYesCount, bttsNoCount, bttsYesProbability, bttsNoProbability, totals]
+    FootballFairAiSimulationSampleMatchAudit:
+      type: object
+      properties:
+        homeGoals:
+          type: integer
+        awayGoals:
+          type: integer
+        shots:
+          type: integer
+        goals:
+          type: integer
+        nonGoalShots:
+          type: integer
+        turnovers:
+          type: integer
+        actionLimitRetentions:
+          type: integer
+        scorelineReconciled:
+          type: boolean
+      required:
+        - homeGoals
+        - awayGoals
+        - shots
+        - goals
+        - nonGoalShots
+        - turnovers
+        - actionLimitRetentions
+        - scorelineReconciled
     FootballFairAiSimulationStandingsTeam:
       type: object
       properties:
@@ -1885,12 +2030,28 @@ components:
           type: number
         expectedAwayGoals:
           type: number
+        expectedHomeXg:
+          type: number
+        expectedAwayXg:
+          type: number
         outcomes:
           $ref: "#/components/schemas/FootballFairAiSimulationOutcome"
         probabilities:
           $ref: "#/components/schemas/FootballFairAiSimulationProbabilities"
         diagnostics:
           $ref: "#/components/schemas/FootballFairAiSimulationDiagnostics"
+        goalMarkets:
+          $ref: "#/components/schemas/FootballFairAiSimulationGoalMarkets"
+        scorelineDistribution:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFairAiSimulationScoreline"
+        inputAudit:
+          $ref: "#/components/schemas/FootballFairAiSimulationInputAudit"
+        uncertainty:
+          $ref: "#/components/schemas/FootballFairAiSimulationUncertainty"
+        sampleMatchAudit:
+          $ref: "#/components/schemas/FootballFairAiSimulationSampleMatchAudit"
         standingsContext:
           $ref: "#/components/schemas/FootballFairAiSimulationStandingsContext"
         topScorelines:
@@ -1915,9 +2076,16 @@ components:
         - away
         - expectedHomeGoals
         - expectedAwayGoals
+        - expectedHomeXg
+        - expectedAwayXg
         - outcomes
         - probabilities
         - diagnostics
+        - goalMarkets
+        - scorelineDistribution
+        - inputAudit
+        - uncertainty
+        - sampleMatchAudit
         - standingsContext
         - topScorelines
         - playerContributions

@@ -21,6 +21,8 @@ type SimAction = SimulatedAction["action"];
 type SimActionOutcome = SimulatedAction["outcome"];
 type SimPossessionOutcome = SimulatedPossession["outcome"];
 type StandingsEvaluation = FootballFairAiSimulation["standingsContext"]["home"];
+type ShotXgSource = keyof FootballFairAiSimulation["inputAudit"]["home"]["shotXgSources"];
+type SampleMatchAudit = FootballFairAiSimulation["sampleMatchAudit"];
 
 type MutableCell = {
   touches: number;
@@ -53,15 +55,9 @@ type TeamCounter = {
   turnovers: number;
   goals: number;
   expectedGoals: number;
+  shotXgSources: Record<ShotXgSource, number>;
   estimatedValueAdded: number;
   cells: MutableCell[];
-};
-
-type TerminalStateCounters = {
-  goals: number;
-  shots: number;
-  turnovers: number;
-  retained: number;
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -264,6 +260,12 @@ function teamCounters(): TeamCounter {
     turnovers: 0,
     goals: 0,
     expectedGoals: 0,
+    shotXgSources: {
+      playerProfile: 0,
+      teamStatistics: 0,
+      recentResults: 0,
+      neutralPrior: 0,
+    },
     estimatedValueAdded: 0,
     cells: Array.from({ length: GRID_COLUMNS * GRID_ROWS }, () => ({
       touches: 0,
@@ -338,6 +340,63 @@ function possessionShare(home: FootballFairAiTeam, away: FootballFairAiTeam): nu
         ? 100 - awayPossession
         : 50);
   return clamp(estimate, 25, 75);
+}
+
+function recentScoreRateEstimate(
+  attacking: FootballFairAiTeam,
+  defending: FootballFairAiTeam,
+): number | null {
+  const signals: number[] = [];
+  if (attacking.recentMatchCount > 0 && Number.isFinite(attacking.avgGoalsFor)) {
+    signals.push(Math.max(0, attacking.avgGoalsFor));
+  }
+  if (defending.recentMatchCount > 0 && Number.isFinite(defending.avgGoalsAgainst)) {
+    signals.push(Math.max(0, defending.avgGoalsAgainst));
+  }
+  return average(signals);
+}
+
+function finishingMultiplier(
+  team: FootballFairAiTeam,
+  player: Player | null,
+): number {
+  if (player && player.expectedGoalsPer90 > 0 && player.goalsPer90 >= 0) {
+    const appearances = Math.max(0, player.ratedAppearances || player.appearances);
+    const reliability = clamp(appearances / (appearances + 8), 0, 0.75);
+    const observedRatio = clamp(
+      player.goalsPer90 / player.expectedGoalsPer90,
+      0.65,
+      1.35,
+    );
+    return 1 + (observedRatio - 1) * reliability;
+  }
+
+  const stats = team.teamStats;
+  if (
+    stats?.expectedGoalsFor !== null &&
+    stats?.expectedGoalsFor !== undefined &&
+    stats.expectedGoalsFor > 0 &&
+    team.recentMatchCount > 0 &&
+    stats.matchStatSampleCount > 0
+  ) {
+    const reliability = clamp(
+      stats.matchStatSampleCount / (stats.matchStatSampleCount + 8),
+      0,
+      0.75,
+    );
+    const observedRatio = clamp(
+      team.avgGoalsFor / stats.expectedGoalsFor,
+      0.65,
+      1.35,
+    );
+    return 1 + (observedRatio - 1) * reliability;
+  }
+  return 1;
+}
+
+function goalkeeperConversionFactor(team: FootballFairAiTeam): number {
+  if (!availablePlayers(team).some(isGoalkeeper)) return 1;
+  return clamp(1 + (0.59 - keeperSaveRate(team)) * 0.75, 0.78, 1.18);
 }
 
 function defensivePressure(
@@ -465,7 +524,7 @@ function shotExpectedGoals(
   y: number,
   attackingStandingsStrength: number,
   defendingStandingsStrength: number,
-): number {
+): { value: number; source: ShotXgSource } {
   const playerBase = player && player.shotsPer90 > 0 && player.expectedGoalsPer90 > 0
     ? player.expectedGoalsPer90 / player.shotsPer90
     : null;
@@ -474,7 +533,23 @@ function shotExpectedGoals(
       (team.teamStats?.shotsPerMatch ?? 0) > 0
     ? team.teamStats.expectedGoalsFor / (team.teamStats.shotsPerMatch ?? 1)
     : null;
-  const base = clamp(playerBase ?? teamBase ?? 0.105, 0.035, 0.36);
+  const recentScoreRate = recentScoreRateEstimate(team, opponent);
+  const expectedShots = clamp(team.teamStats?.shotsPerMatch ?? 11.5, 2, 35);
+  const recentResultsBase = recentScoreRate === null
+    ? null
+    : recentScoreRate / expectedShots;
+  const source: ShotXgSource = playerBase !== null
+    ? "playerProfile"
+    : teamBase !== null
+      ? "teamStatistics"
+      : recentResultsBase !== null
+        ? "recentResults"
+        : "neutralPrior";
+  const base = clamp(
+    playerBase ?? teamBase ?? recentResultsBase ?? 0.105,
+    0.035,
+    0.36,
+  );
   const locationFactor = 0.72 + (positionValue(x, y) / 0.235) * 0.43;
   const insideBox = team.teamStats?.shotsInsideBoxPerMatch;
   const shotCount = team.teamStats?.shotsPerMatch;
@@ -493,25 +568,25 @@ function shotExpectedGoals(
     bigChancesMissed + bigChances > 0
       ? clamp(1 - (bigChancesMissed / (bigChancesMissed + bigChances)) * 0.06, 0.94, 1)
       : 1;
-  const keeper = availablePlayers(opponent).find(isGoalkeeper);
-  const keeperFactor = keeper
-    ? clamp(
-        (1 - ((keeper.averageRating ?? 6.5) - 6.5) * 0.012) *
-          (1 + (0.59 - keeperSaveRate(opponent)) * 0.16),
-        0.93,
-        1.06,
-      )
-    : 1;
   const ratingFactor = player?.averageRating == null
     ? 1
     : clamp(1 + (player.averageRating - 6.5) * 0.028, 0.88, 1.12);
-  return clamp(
-    base * locationFactor * insideBoxFactor * bigChanceFactor *
-      missedChanceFactor * keeperFactor * ratingFactor +
-      (attackingStandingsStrength - defendingStandingsStrength) * 0.012,
-    0.015,
-    0.48,
-  );
+  const opponentGoalsAllowed =
+    opponent.teamStats?.expectedGoalsAgainst ??
+    (opponent.recentMatchCount > 0 ? opponent.avgGoalsAgainst : null);
+  const defensiveFactor = source === "recentResults" || opponentGoalsAllowed === null
+    ? 1
+    : clamp(1 + (opponentGoalsAllowed - 1.35) * 0.045, 0.88, 1.12);
+  return {
+    value: clamp(
+      base * locationFactor * insideBoxFactor * bigChanceFactor *
+        missedChanceFactor * ratingFactor * defensiveFactor +
+        (attackingStandingsStrength - defendingStandingsStrength) * 0.012,
+      0.015,
+      0.48,
+    ),
+    source,
+  };
 }
 
 function chooseReceiver(
