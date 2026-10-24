@@ -419,7 +419,7 @@ export async function createBrowserSession(
     viewport: VIEWPORT,
     deviceScaleFactor: 1,
     acceptDownloads: false,
-    serviceWorkers: "block",
+    serviceWorkers: "allow",
   });
   const page = await context.newPage();
   const sessionId = randomUUID();

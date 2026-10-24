@@ -25,6 +25,7 @@ import {
   Check,
   CalendarDays,
   CircleAlert,
+  ExternalLink,
   Globe2,
   Keyboard,
   LoaderCircle,
@@ -81,6 +82,12 @@ function isGoogleBlockedPage(value: string) {
   } catch {
     return false;
   }
+}
+
+function isAccessBlockedPage(state: BrowserState) {
+  if (isGoogleBlockedPage(state.currentUrl)) return false;
+  const pageText = `${state.title}\n${state.pageContent.text}\n${state.pageContent.markdown.slice(0, 5_000)}`;
+  return /access denied|\bforbidden\b|403\s*forbidden|forbidden\s*403|(?:you (?:do not|don't) have|lack) permission to access|request (?:has been )?blocked|you have been blocked|unusual traffic|automated (?:queries|requests|traffic)|verify (?:that )?you are (?:a )?human|checking your browser|security check|not authorized to view/i.test(pageText);
 }
 
 function SyncTabsOption({
@@ -165,6 +172,7 @@ function BrowserConsole() {
   const pendingMousePositionRef = useRef<BrowserPoint | null>(null);
   const mouseMoveWorkerRef = useRef<Promise<void> | null>(null);
   const lastRemoteMousePositionRef = useRef<BrowserPoint | null>(null);
+  const browserUrlAtActionStartRef = useRef<string | null>(null);
   const sessionQueryKey = getGetBrowserSessionQueryKey(sessionId);
   const createSession = useCreateBrowserSession();
   const closeSession = useCloseBrowserSession();
@@ -198,6 +206,7 @@ function BrowserConsole() {
   };
   const sendAction = (data: BrowserActionInput) => {
     if (!sessionId || busy) return;
+    browserUrlAtActionStartRef.current = state?.currentUrl ?? null;
     performAction.mutate({ sessionId, data: { ...data, syncTabs } }, { onSuccess: acceptState });
   };
 
@@ -282,6 +291,7 @@ function BrowserConsole() {
     event.preventDefault();
     const url = normalizeUrl(address);
     if (!sessionId || !url || busy) return;
+    browserUrlAtActionStartRef.current = state?.currentUrl ?? null;
     navigate.mutate({
       sessionId,
       data: {
@@ -304,6 +314,7 @@ function BrowserConsole() {
       return;
     }
     setAddress(state.currentUrl);
+    browserUrlAtActionStartRef.current = state.currentUrl;
     navigate.mutate({
       sessionId,
       data: {
@@ -425,6 +436,7 @@ function BrowserConsole() {
   const openExtractedLink = (url: string) => {
     if (!sessionId || busy) return;
     setAddress(url);
+    browserUrlAtActionStartRef.current = state?.currentUrl ?? null;
     navigate.mutate({
       sessionId,
       data: {
@@ -435,8 +447,16 @@ function BrowserConsole() {
     }, { onSuccess: acceptState });
   };
 
-  const primaryError = readableError(createSession.error) || readableError(closeSession.error) ||
-    readableError(navigate.error) || readableError(performAction.error) || readableError(moveMouse.error) ||
+  const actionError = navigate.isError || performAction.isError;
+  const actionReachedAnotherPage = Boolean(
+    actionError &&
+    browserUrlAtActionStartRef.current &&
+    state?.currentUrl &&
+    state.currentUrl !== browserUrlAtActionStartRef.current,
+  );
+  const primaryError = (actionReachedAnotherPage ? '' : readableError(navigate.error) || readableError(performAction.error)) ||
+    readableError(createSession.error) || readableError(closeSession.error) ||
+    readableError(moveMouse.error) ||
     readableError(createTab.error) || readableError(activateTab.error) || readableError(closeTab.error) ||
     readableError(sessionQuery.error);
 
@@ -529,6 +549,26 @@ function BrowserConsole() {
           </section>
         )}
 
+        {state && isAccessBlockedPage(state) && (
+          <section className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e7d4ae] bg-[#fff9e9] px-4 py-3 text-[11px] leading-5 text-[#766342]" role="status" data-testid="status-site-access-blocked">
+            <div className="flex min-w-0 items-start gap-3">
+              <CircleAlert size={15} className="mt-0.5 shrink-0 text-[#ae8644]" />
+              <p>
+                This site is denying the hosted browser. It runs on the server, not your phone, so the site may see a different network or block automated access. That restriction can’t be overridden here.
+              </p>
+            </div>
+            <a
+              href={state.currentUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[#d9c79f] bg-[#fffdf6] px-2.5 py-1.5 font-bold text-[#765c32] hover:bg-white"
+              data-testid="link-open-blocked-page-on-device"
+            >
+              Open on this device <ExternalLink size={12} />
+            </a>
+          </section>
+        )}
+
         {!state ? (
           <section className="animate-rise overflow-hidden rounded-[20px] border border-[#d6d5cc] bg-[#f9f8f3] shadow-[0_20px_70px_rgba(47,59,64,.07)]" data-testid="section-session-empty">
             <div className="grid lg:grid-cols-[1fr_370px]">
@@ -567,7 +607,7 @@ function BrowserConsole() {
                     disabled={busy}
                     testId="toggle-sync-tabs-start"
                   />
-                   <p className="text-[10px] leading-[1.65] text-[#858982]">Search for something or enter a domain or complete web address. Sites may block automated browsing.</p>
+                   <p className="text-[10px] leading-[1.65] text-[#858982]">This browser runs on the server, not your phone. Some sites block its network or automated access; use “Open on device” when needed.</p>
                   <button type="submit" disabled={busy} className="mt-2 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#d96f51] px-4 text-[12px] font-extrabold text-white shadow-[0_5px_12px_rgba(173,79,52,.16)] transition hover:bg-[#c95f43] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-start-session">
                     {createSession.isPending ? <><LoaderCircle size={15} className="animate-spin" /> {syncTabs ? 'Opening 25 synced tabs…' : 'Opening browser…'}</> : <>Start browser session <ArrowRight size={15} /></>}
                   </button>
@@ -640,6 +680,20 @@ function BrowserConsole() {
                  <div className="flex min-h-10 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-[#d2d2ca] px-3 py-2 sm:px-5">
                    <div className="min-w-0 flex-1 truncate text-[10px] font-semibold text-[#67716d]" data-testid="text-page-title">{state.title || activeTab?.title || 'Untitled page'}</div>
                    <div className="flex items-center gap-2.5">
+                      {/^https?:\/\//i.test(state.currentUrl) && (
+                        <a
+                          href={state.currentUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-[#d5d6ce] bg-[#fbfaf6] px-2 text-[9px] font-bold text-[#596963] hover:bg-white"
+                          title="Open this address in your device browser"
+                          aria-label="Open this address on this device"
+                          data-testid="link-open-current-page-on-device"
+                        >
+                          <ExternalLink size={12} />
+                          <span className="hidden sm:inline">Open on device</span>
+                        </a>
+                      )}
                      <label htmlFor="browser-zoom" className="sr-only">Page zoom</label>
                      <button
                        type="button"
