@@ -46,8 +46,10 @@ type BrowserSession = {
 };
 
 let browser: Browser | undefined;
+let browserStartPromise: Promise<Browser> | undefined;
 let proxy: Awaited<ReturnType<typeof startSecureBrowserProxy>> | undefined;
 const sessions = new Map<string, BrowserSession>();
+let pendingSessionCreations = 0;
 
 async function applyPageZoom(page: Page, zoomLevel: number): Promise<void> {
   if (page.isClosed()) return;
@@ -85,31 +87,38 @@ async function settleAfterNavigationAction(
 
 async function ensureBrowser(): Promise<Browser> {
   if (browser?.isConnected()) return browser;
+  if (browserStartPromise) return browserStartPromise;
 
-  try {
-    proxy ??= await startSecureBrowserProxy();
-    browser = await chromium.launch({
-      headless: true,
-      proxy: {
-        server: proxy.url,
-        bypass: "<-loopback>",
-      },
-      args: ["--no-sandbox", "--disable-dev-shm-usage"],
-    });
-    return browser;
-  } catch (error) {
-    await proxy?.close().catch(() => undefined);
-    proxy = undefined;
-    browser = undefined;
-    logger.error(
-      { errorName: error instanceof Error ? error.name : "UnknownError" },
-      "Chromium could not be started",
-    );
-    throw new BrowserOperationError(
-      "Chromium is unavailable. The browser service could not start.",
-      503,
-    );
-  }
+  browserStartPromise = (async () => {
+    try {
+      proxy ??= await startSecureBrowserProxy();
+      browser = await chromium.launch({
+        headless: true,
+        proxy: {
+          server: proxy.url,
+          bypass: "<-loopback>",
+        },
+        args: ["--no-sandbox", "--disable-dev-shm-usage"],
+      });
+      return browser;
+    } catch (error) {
+      await proxy?.close().catch(() => undefined);
+      proxy = undefined;
+      browser = undefined;
+      logger.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Chromium could not be started",
+      );
+      throw new BrowserOperationError(
+        "Chromium is unavailable. The browser service could not start.",
+        503,
+      );
+    } finally {
+      browserStartPromise = undefined;
+    }
+  })();
+
+  return browserStartPromise;
 }
 
 function registerPage(
@@ -145,7 +154,10 @@ function registerPage(
   return tabId;
 }
 
-function getSession(sessionId: string): BrowserSession {
+function getSession(
+  sessionId: string,
+  options: { touch?: boolean } = {},
+): BrowserSession {
   const session = sessions.get(sessionId);
   if (!session) {
     throw new BrowserOperationError(
@@ -153,7 +165,7 @@ function getSession(sessionId: string): BrowserSession {
       404,
     );
   }
-  session.lastUsedAt = Date.now();
+  if (options.touch !== false) session.lastUsedAt = Date.now();
   return session;
 }
 
@@ -255,7 +267,9 @@ function validateMousePosition(x: number, y: number): void {
 }
 
 export async function getBrowserState(sessionId: string) {
-  const session = getSession(sessionId);
+  // State refreshes are frequent and read-only; they must not keep abandoned
+  // sessions alive indefinitely.
+  const session = getSession(sessionId, { touch: false });
   const activePage = getActivePage(session);
   const tabs = await Promise.all(
     Array.from(session.tabs, async ([id, page]) => ({
@@ -407,34 +421,41 @@ export async function createBrowserSession(
   tabCount = 1,
 ) {
   validateTabCount(tabCount);
-  if (sessions.size >= MAX_SESSIONS) {
+  await cleanupExpiredSessions();
+  if (sessions.size + pendingSessionCreations >= MAX_SESSIONS) {
     throw new BrowserOperationError(
-      "All browser sessions are currently in use. Try again in a few minutes.",
+      "All browser sessions are currently in use. Close another session or wait for an inactive session to expire.",
       503,
     );
   }
 
-  const browserInstance = await ensureBrowser();
-  const context = await browserInstance.newContext({
-    viewport: VIEWPORT,
-    deviceScaleFactor: 1,
-    acceptDownloads: false,
-    serviceWorkers: "allow",
-  });
-  const page = await context.newPage();
-  const sessionId = randomUUID();
-  const session: BrowserSession = {
-    id: sessionId,
-    context,
-    tabs: new Map(),
-    zoomLevels: new Map(),
-    activeTabId: "",
-    lastUsedAt: Date.now(),
-  };
-  registerPage(session, page);
-  sessions.set(sessionId, session);
-
+  pendingSessionCreations += 1;
+  let creationReservationPending = true;
+  let context: BrowserContext | undefined;
+  let sessionId: string | undefined;
   try {
+    const browserInstance = await ensureBrowser();
+    context = await browserInstance.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 1,
+      acceptDownloads: false,
+      serviceWorkers: "allow",
+    });
+    const page = await context.newPage();
+    sessionId = randomUUID();
+    const session: BrowserSession = {
+      id: sessionId,
+      context,
+      tabs: new Map(),
+      zoomLevels: new Map(),
+      activeTabId: "",
+      lastUsedAt: Date.now(),
+    };
+    registerPage(session, page);
+    sessions.set(sessionId, session);
+    pendingSessionCreations -= 1;
+    creationReservationPending = false;
+
     if (url) {
       const safeUrl = await validatePublicWebUrl(url);
       const pages = await ensureTabCount(session, tabCount);
@@ -454,7 +475,11 @@ export async function createBrowserSession(
     }
     return await getBrowserState(sessionId);
   } catch (error) {
-    await closeBrowserSession(sessionId);
+    if (sessionId && sessions.has(sessionId)) {
+      await closeBrowserSession(sessionId);
+    } else {
+      await context?.close().catch(() => undefined);
+    }
     if (error instanceof BrowserPolicyError) {
       throw new BrowserOperationError(error.message, 400);
     }
@@ -474,6 +499,9 @@ export async function createBrowserSession(
       "The page did not finish loading. Check the address and try again.",
       502,
     );
+  } finally {
+    if (creationReservationPending) pendingSessionCreations -= 1;
+    await closeBrowserWhenUnused();
   }
 }
 
@@ -781,32 +809,41 @@ export async function closeBrowserTab(sessionId: string, tabId: string) {
 
 export async function closeBrowserSession(sessionId: string): Promise<void> {
   const session = sessions.get(sessionId);
-  if (!session) {
-    throw new BrowserOperationError("This browser session was not found.", 404);
-  }
+  // DELETE is intentionally idempotent so page-exit cleanup can safely race
+  // with manual close and inactivity cleanup.
+  if (!session) return;
   sessions.delete(sessionId);
   await session.context.close().catch(() => undefined);
 
-  if (sessions.size === 0 && browser) {
-    const currentBrowser = browser;
-    browser = undefined;
-    await currentBrowser.close().catch(() => undefined);
-    await proxy?.close().catch(() => undefined);
-    proxy = undefined;
-  }
+  await closeBrowserWhenUnused();
 }
 
-const cleanupTimer = setInterval(() => {
+async function closeBrowserWhenUnused(): Promise<void> {
+  if (sessions.size > 0 || pendingSessionCreations > 0 || !browser) return;
+  const currentBrowser = browser;
+  browser = undefined;
+  await currentBrowser.close().catch(() => undefined);
+  await proxy?.close().catch(() => undefined);
+  proxy = undefined;
+}
+
+async function cleanupExpiredSessions(): Promise<void> {
   const expired = Array.from(sessions.values()).filter(
     (session) => Date.now() - session.lastUsedAt > IDLE_TIMEOUT_MS,
   );
-  for (const session of expired) {
-    void closeBrowserSession(session.id).catch((error: unknown) => {
-      logger.warn(
-        { errorName: error instanceof Error ? error.name : "UnknownError" },
-        "An expired browser session could not be closed",
-      );
-    });
-  }
+  await Promise.all(
+    expired.map((session) =>
+      closeBrowserSession(session.id).catch((error: unknown) => {
+        logger.warn(
+          { errorName: error instanceof Error ? error.name : "UnknownError" },
+          "An expired browser session could not be closed",
+        );
+      }),
+    ),
+  );
+}
+
+const cleanupTimer = setInterval(() => {
+  void cleanupExpiredSessions();
 }, 60_000);
 cleanupTimer.unref();
