@@ -87,7 +87,7 @@ function isGoogleBlockedPage(value: string) {
 function isAccessBlockedPage(state: BrowserState) {
   if (isGoogleBlockedPage(state.currentUrl)) return false;
   const pageText = `${state.title}\n${state.pageContent.text}\n${state.pageContent.markdown.slice(0, 5_000)}`;
-  return /access denied|\bforbidden\b|403\s*forbidden|forbidden\s*403|(?:you (?:do not|don't) have|lack) permission to access|request (?:has been )?blocked|you have been blocked|unusual traffic|automated (?:queries|requests|traffic)|verify (?:that )?you are (?:a )?human|checking your browser|security check|not authorized to view/i.test(pageText);
+  return /access denied|403\s*forbidden|forbidden\s*403|request (?:has been )?blocked|unusual traffic|automated (?:queries|requests|traffic)|verify (?:that )?you are (?:a )?human|checking your browser|security check|not authorized to view/i.test(pageText);
 }
 
 function SyncTabsOption({
@@ -154,6 +154,23 @@ function readableError(error: unknown) {
   return 'The browser could not complete that request. Try again.';
 }
 
+function hasApiStatus(error: unknown, status: number) {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'status' in error &&
+      error.status === status,
+  );
+}
+
+function releaseBrowserSession(sessionId: string) {
+  if (!sessionId || typeof window === 'undefined') return;
+  void fetch(`/api/browser/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+    keepalive: true,
+  }).catch(() => undefined);
+}
+
 function BrowserConsole() {
   const client = useQueryClient();
   const health = useHealthCheck();
@@ -165,7 +182,9 @@ function BrowserConsole() {
   const [outputMode, setOutputMode] = useState<OutputMode>('screenshot');
   const [syncTabs, setSyncTabs] = useState(false);
   const [copyStatus, setCopyStatus] = useState('');
+  const [sessionNotice, setSessionNotice] = useState('');
   const [pointerPosition, setPointerPosition] = useState<BrowserPoint | null>(null);
+  const activeSessionIdRef = useRef('');
   const imageRef = useRef<HTMLImageElement>(null);
   const outputPanelRef = useRef<HTMLDivElement>(null);
   const pointerPositionRef = useRef<BrowserPoint | null>(null);
@@ -195,10 +214,30 @@ function BrowserConsole() {
   const state = sessionQuery.data as BrowserState | undefined;
   const activeTab = state?.tabs.find((tab) => tab.id === state.activeTabId) ?? state?.tabs.find((tab) => tab.active);
   const outputText = state ? getOutputText(state, outputMode) : '';
+  activeSessionIdRef.current = sessionId;
 
   useEffect(() => {
     if (state?.currentUrl) setAddress(state.currentUrl);
   }, [state?.currentUrl]);
+
+  useEffect(() => {
+    const releaseActiveSession = () => {
+      releaseBrowserSession(activeSessionIdRef.current);
+    };
+    window.addEventListener('pagehide', releaseActiveSession);
+    return () => {
+      window.removeEventListener('pagehide', releaseActiveSession);
+      releaseActiveSession();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sessionId || !hasApiStatus(sessionQuery.error, 404)) return;
+    client.removeQueries({ queryKey: getGetBrowserSessionQueryKey(sessionId) });
+    setSessionId('');
+    setAddress('');
+    setSessionNotice('This browser session has ended or expired. Start a new session to continue.');
+  }, [client, sessionId, sessionQuery.error]);
 
   const acceptState = (next: BrowserState) => {
     setSessionId(next.sessionId);
@@ -283,6 +322,7 @@ function BrowserConsole() {
       onSuccess: (next) => {
         acceptState(next);
         setAddress(next.currentUrl);
+        setSessionNotice('');
       },
     });
   };
@@ -527,6 +567,13 @@ function BrowserConsole() {
           </section>
         )}
 
+        {sessionNotice && !health.isError && (
+          <section className="mb-5 flex items-start gap-3 rounded-xl border border-[#e7d4ae] bg-[#fff9e9] px-4 py-3.5 text-sm" role="status" data-testid="status-session-ended">
+            <CircleAlert size={17} className="mt-0.5 shrink-0 text-[#ae8644]" />
+            <p className="text-xs leading-5 text-[#766342]">{sessionNotice}</p>
+          </section>
+        )}
+
         {primaryError && !health.isError && (
           <section className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-[#e3c3b6] bg-[#fff6f0] px-4 py-3.5 text-sm" role="alert" data-testid="status-action-error">
             <div className="flex gap-3">
@@ -607,7 +654,7 @@ function BrowserConsole() {
                     disabled={busy}
                     testId="toggle-sync-tabs-start"
                   />
-                   <p className="text-[10px] leading-[1.65] text-[#858982]">This browser runs on the server, not your phone. Some sites block its network or automated access; use “Open on device” when needed.</p>
+                   <p className="text-[10px] leading-[1.65] text-[#858982]">Search for something or enter a domain or complete web address. Sites may block automated browsing.</p>
                   <button type="submit" disabled={busy} className="mt-2 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#d96f51] px-4 text-[12px] font-extrabold text-white shadow-[0_5px_12px_rgba(173,79,52,.16)] transition hover:bg-[#c95f43] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-start-session">
                     {createSession.isPending ? <><LoaderCircle size={15} className="animate-spin" /> {syncTabs ? 'Opening 25 synced tabs…' : 'Opening browser…'}</> : <>Start browser session <ArrowRight size={15} /></>}
                   </button>
