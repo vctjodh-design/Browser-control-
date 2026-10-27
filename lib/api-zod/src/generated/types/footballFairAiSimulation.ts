@@ -10,6 +10,7 @@ import type { FootballFairAiSimulationContribution } from './footballFairAiSimul
 import type { FootballFairAiSimulationDiagnostics } from './footballFairAiSimulationDiagnostics';
 import type { FootballFairAiSimulationGoalMarkets } from './footballFairAiSimulationGoalMarkets';
 import type { FootballFairAiSimulationInputAudit } from './footballFairAiSimulationInputAudit';
+import type { FootballFairAiSimulationMatchupAnalysis } from './footballFairAiSimulationMatchupAnalysis';
 import type { FootballFairAiSimulationOutcome } from './footballFairAiSimulationOutcome';
 import type { FootballFairAiSimulationProbabilities } from './footballFairAiSimulationProbabilities';
 import type { FootballFairAiSimulationSampleMatchAudit } from './footballFairAiSimulationSampleMatchAudit';
@@ -35,6 +36,7 @@ export interface FootballFairAiSimulation {
   uncertainty: FootballFairAiSimulationUncertainty;
   sampleMatchAudit: FootballFairAiSimulationSampleMatchAudit;
   standingsContext: FootballFairAiSimulationStandingsContext;
+  matchupAnalysis: FootballFairAiSimulationMatchupAnalysis;
   topScorelines: FootballFairAiSimulationScoreline[];
   playerContributions: FootballFairAiSimulationContribution[];
   possessionModel: FootballFairAiPossessionModel;

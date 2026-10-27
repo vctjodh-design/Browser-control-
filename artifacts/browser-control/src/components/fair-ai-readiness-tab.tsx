@@ -268,7 +268,7 @@ export default function FairAiReadinessTab({
                   <div>
                     <h3 id="archive-vs-features-title" className="text-[10px] font-extrabold text-[#5c6158]">Archived is not modeled</h3>
                     <p className="mt-1 text-[9px] leading-[1.7] text-[#7c8077]">
-                      The possession simulator consumes available lineups, formations, player and team match statistics, coach records, and card events. Standings remain captured context rather than model inputs because historical as-of snapshots are not guaranteed; archived fields are not automatically part of the separate trained prediction models.
+                      The possession simulator uses available player roles, formations, team statistics, and fresh standings where timestamp checks pass. Its tactical and score-state interactions are explicit proxies. These inputs do not automatically become features in the separate trained prediction models.
                     </p>
                   </div>
                 </div>

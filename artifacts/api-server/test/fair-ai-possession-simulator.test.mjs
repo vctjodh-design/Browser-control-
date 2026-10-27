@@ -244,7 +244,15 @@ test("finishing quality changes simulated goals separately from shot xG", () => 
     0xF1A15,
   );
 
-  assert.equal(high.expectedHomeXg, low.expectedHomeXg);
+  assert.notEqual(
+    high.matchupAnalysis.home.chanceAndExecution.averageFinishingAdjustment,
+    low.matchupAnalysis.home.chanceAndExecution.averageFinishingAdjustment,
+  );
+  assert.notEqual(
+    high.expectedHomeXg,
+    low.expectedHomeXg,
+    "score-state adaptation may change later shot volume after finishing changes the score",
+  );
   assert.ok(high.expectedHomeGoals > low.expectedHomeGoals);
   assert.ok(high.probabilities.home > low.probabilities.home);
 });
@@ -263,7 +271,17 @@ test("goalkeeper saves reduce goals without rewriting shot xG", () => {
     0x6A0A1,
   );
 
-  assert.equal(strongKeeperResult.expectedHomeXg, weakKeeperResult.expectedHomeXg);
+  assert.ok(
+    strongKeeperResult.matchupAnalysis.home.chanceAndExecution
+      .opposingKeeperConversionFactor <
+      weakKeeperResult.matchupAnalysis.home.chanceAndExecution
+        .opposingKeeperConversionFactor,
+  );
+  assert.notEqual(
+    strongKeeperResult.expectedHomeXg,
+    weakKeeperResult.expectedHomeXg,
+    "score-state adaptation may change later shot volume after keeper outcomes change the score",
+  );
   assert.ok(strongKeeperResult.expectedHomeGoals < weakKeeperResult.expectedHomeGoals);
   assert.ok(strongKeeperResult.probabilities.home < weakKeeperResult.probabilities.home);
 });
@@ -285,6 +303,42 @@ test("possession-style inputs change the possession distribution", () => {
   assert.notEqual(
     possessionHome.possessionModel.home.possessionsPerMatch,
     balanced.possessionModel.home.possessionsPerMatch,
+  );
+});
+
+test("matchup output exposes buildup pressure, archived roles, and score-state responses", () => {
+  const home = team("home-matchup", "Home", 50);
+  home.teamStats.longBallCompletionPct = 40;
+  const lowPressAway = team("away-low-press", "Away", 50);
+  const highPressAway = team("away-high-press", "Away", 50);
+  highPressAway.teamStats.defensiveActionsPerMatch = 600;
+
+  const lowPress = simulateWithSeed(home, lowPressAway, 0x1A7C4, 1_000);
+  const highPress = simulateWithSeed(home, highPressAway, 0x1A7C4, 1_000);
+  const analysis = highPress.matchupAnalysis.home;
+
+  assert.ok(
+    highPress.matchupAnalysis.home.tacticalInteraction.opponentPressureProxy >
+      lowPress.matchupAnalysis.home.tacticalInteraction.opponentPressureProxy,
+  );
+  assert.ok(
+    analysis.tacticalInteraction.buildupVsPressAdjustmentPct <
+      lowPress.matchupAnalysis.home.tacticalInteraction.buildupVsPressAdjustmentPct,
+  );
+  assert.equal(analysis.tacticalInteraction.evidenceQuality, "proxy");
+  assert.equal(analysis.playerRoleCoverage.archivedProfiles, 0);
+  assert.equal(analysis.playerRoleCoverage.profilesUsed, 0);
+  assert.ok(analysis.chanceAndExecution.shotsPerMatch > 0);
+
+  const stateSamples = Object.values(analysis.gameStateResponse);
+  assert.ok(stateSamples.every((sample) => Number.isFinite(sample.shotsPer100Possessions)));
+  assert.equal(
+    stateSamples.reduce((sum, sample) => sum + sample.possessions, 0),
+    Math.round(highPress.possessionModel.home.possessionsPerMatch * highPress.iterations),
+  );
+  assert.equal(
+    stateSamples.reduce((sum, sample) => sum + sample.shots, 0),
+    Math.round(analysis.chanceAndExecution.shotsPerMatch * highPress.iterations),
   );
 });
 

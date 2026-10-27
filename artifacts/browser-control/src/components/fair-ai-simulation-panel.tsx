@@ -330,6 +330,10 @@ export default function FairAiSimulationPanel({
   ] : [];
   const teams = result ? [result.home, result.away] : [];
   const possessionTeams = model ? [model.home, model.away] : [];
+  const matchupTeams = result ? [
+    { team: result.home, analysis: result.matchupAnalysis.home },
+    { team: result.away, analysis: result.matchupAnalysis.away },
+  ] : [];
   const overTwoGoalsMarket = result?.goalMarkets.totals.find((market) => market.line === 2.5);
 
   return (
@@ -525,6 +529,70 @@ export default function FairAiSimulationPanel({
                   </div>
               </section>
             </div>
+
+            <section className="overflow-hidden rounded-xl border border-[#d8dfd3] bg-[#f8faf5]" aria-labelledby="matchup-analysis-title" data-testid="fair-ai-matchup-analysis">
+              <div className="border-b border-[#e2e7dd] bg-[#f0f4ed] px-3 py-3">
+                <p className="mono text-[7px] uppercase tracking-[.13em] text-[#9b7160]">Interaction model / synthetic match states</p>
+                <h3 id="matchup-analysis-title" className="mt-1 text-[11px] font-extrabold text-[#40534b]">Why this matchup may behave differently</h3>
+                <p className="mt-1 max-w-[900px] text-[8px] leading-[1.65] text-[#747e73]">{result.matchupAnalysis.evidenceNote}</p>
+              </div>
+              <div className="grid gap-2 p-3 lg:grid-cols-2">
+                {matchupTeams.map(({ team, analysis }) => (
+                  <article key={team.teamKey} className="min-w-0 rounded-lg border border-[#e6e9e1] bg-white p-3">
+                    <h4 className="truncate text-[9px] font-extrabold text-[#4d5f58]">{team.name} · matchup evidence</h4>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <div className="rounded-md bg-[#f7f7f1] p-2">
+                        <p className="text-[7px] font-extrabold uppercase tracking-[.08em] text-[#858982]">Build-up vs press</p>
+                        <p className="mono mt-1 text-[9px] font-semibold text-[#4d6555]">
+                          {analysis.tacticalInteraction.formation ?? 'Formation unavailable'} · {analysis.tacticalInteraction.buildupVsPressAdjustmentPct >= 0 ? '+' : ''}{analysis.tacticalInteraction.buildupVsPressAdjustmentPct.toFixed(1)} pp
+                        </p>
+                        <p className="mt-1 text-[7px] leading-4 text-[#737c73]">
+                          Passing {analysis.tacticalInteraction.passCompletionEvidencePct == null ? '—' : `${analysis.tacticalInteraction.passCompletionEvidencePct.toFixed(1)}%`}
+                          {' · '}long ball {analysis.tacticalInteraction.longBallCompletionEvidencePct == null ? '—' : `${analysis.tacticalInteraction.longBallCompletionEvidencePct.toFixed(1)}%`}
+                          {' · '}opponent pressure proxy {analysis.tacticalInteraction.opponentPressureProxy.toFixed(1)}
+                        </p>
+                        <p className="mt-1 text-[7px] text-[#8a785d]">Evidence: {analysis.tacticalInteraction.evidenceQuality}; not observed tactical tracking.</p>
+                      </div>
+                      <div className="rounded-md bg-[#f7f7f1] p-2">
+                        <p className="text-[7px] font-extrabold uppercase tracking-[.08em] text-[#858982]">Archived role coverage</p>
+                        <p className="mono mt-1 text-[8px] font-semibold text-[#4d6555]">
+                          {analysis.playerRoleCoverage.profilesUsed} used / {analysis.playerRoleCoverage.archivedProfiles} profiles
+                        </p>
+                        <p className="mt-1 text-[7px] leading-4 text-[#737c73]">
+                          F {analysis.playerRoleCoverage.forwards} · M {analysis.playerRoleCoverage.midfielders} · D {analysis.playerRoleCoverage.defenders} · GK {analysis.playerRoleCoverage.goalkeepers}
+                        </p>
+                        <p className="mt-1 text-[7px] text-[#8a785d]">{analysis.playerRoleCoverage.archivedStarters} archived starters; not a confirmed lineup.</p>
+                      </div>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <div className="rounded-md bg-[#f7f7f1] p-2">
+                        <p className="text-[7px] font-extrabold uppercase tracking-[.08em] text-[#858982]">Chance pipeline · per match</p>
+                        <p className="mono mt-1 text-[8px] font-semibold text-[#4d6555]">
+                          {analysis.chanceAndExecution.shotsPerMatch.toFixed(1)} shots · {analysis.chanceAndExecution.expectedGoalsPerMatch.toFixed(2)} xG · {analysis.chanceAndExecution.simulatedGoalsPerMatch.toFixed(2)} goals
+                        </p>
+                        <p className="mt-1 text-[7px] leading-4 text-[#737c73]">
+                          xG/shot {analysis.chanceAndExecution.expectedGoalsPerShot.toFixed(3)} · finishing adjustment {analysis.chanceAndExecution.averageFinishingAdjustment.toFixed(2)}× · keeper factor {analysis.chanceAndExecution.opposingKeeperConversionFactor.toFixed(2)}×
+                        </p>
+                      </div>
+                      <div className="rounded-md bg-[#f7f7f1] p-2">
+                        <p className="text-[7px] font-extrabold uppercase tracking-[.08em] text-[#858982]">Shots by score state · per 100 possessions</p>
+                        <div className="mt-1 space-y-1">
+                          {(['trailing', 'level', 'leading'] as const).map((state) => {
+                            const sample = analysis.gameStateResponse[state];
+                            return (
+                              <p key={state} className="mono flex justify-between gap-2 text-[7px] text-[#68766e]">
+                                <span className="capitalize">{state} · {numberFormat.format(sample.possessions)} possessions</span>
+                                <span>{sample.shotsPer100Possessions.toFixed(1)} shots · {sample.goals} goals</span>
+                              </p>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
 
             <section className="rounded-xl border border-[#e2e2d8] bg-white p-3" aria-labelledby="simulation-diagnostics-title" data-testid="fair-ai-simulation-diagnostics">
               <div className="flex flex-wrap items-end justify-between gap-2">
