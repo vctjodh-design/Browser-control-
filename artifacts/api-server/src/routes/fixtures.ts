@@ -2,6 +2,8 @@ import { Router, type IRouter, type Response } from "express";
 import {
   GetFootballMatchDetailsParams,
   GetFootballMatchDetailsResponse,
+  GetFootballMatchCenterParams,
+  GetFootballMatchCenterResponse,
   GetFootballMatchReplayParams,
   GetFootballMatchReplayResponse,
   GetFootballMatchLastFiveParams,
@@ -16,7 +18,10 @@ import {
   KickoffScoreMatchNotFoundError,
 } from "../lib/kickoffscore-match-details";
 import { getKickoffScoreMatchTmp } from "../lib/kickoffscore-match-tmp";
-import { getKickoffScoreMatchLastFive } from "../lib/kickoffscore-last-five";
+import {
+  getKickoffScoreMatchCenter,
+  getKickoffScoreMatchLastFive,
+} from "../lib/kickoffscore-last-five";
 import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
 import { UpstreamRateLimitError } from "../lib/upstream-rate-limit";
 import {
@@ -124,13 +129,17 @@ router.get(
       const details = await getKickoffScoreMatchDetails(
         params.data.fixtureId,
       );
-      if (
-        !/\b(finished|full time|ft|ended|complete|after extra time|penalties)\b/i.test(
+      const isComplete =
+        /\b(finished|full time|ft|ended|complete|after extra time|penalties)\b/i.test(
           details.match.status,
-        )
-      ) {
+        );
+      const isLive =
+        /\b(live|in play|in progress|first half|second half|1st half|2nd half|1h|2h|half[ -]?time|halftime)\b/i.test(
+          details.match.status,
+        );
+      if (!isComplete && !isLive && details.match.date.getTime() > Date.now()) {
         res.status(400).json({
-          error: "Match replay is available only after the match is complete.",
+          error: "The shot feed is available after the match has started.",
         });
         return;
       }
@@ -158,10 +167,43 @@ router.get(
 
       req.log.error(
         { errorName: error instanceof Error ? error.name : "UnknownError" },
-        "Could not build a completed-match replay",
+        "Could not build the source match shot feed",
       );
       res.status(502).json({
         error: "The match replay could not be built right now. Please try again.",
+      });
+    }
+  },
+);
+
+router.get(
+  "/football/matches/:fixtureId/match-center",
+  async (req, res): Promise<void> => {
+    const params = GetFootballMatchCenterParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    try {
+      const matchCenter = await getKickoffScoreMatchCenter(
+        params.data.fixtureId,
+      );
+      res.json(GetFootballMatchCenterResponse.parse(matchCenter));
+    } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not load live match center data from KickoffScore",
+      );
+      res.status(502).json({
+        error:
+          "Live score and player details could not be loaded right now. Please try again.",
       });
     }
   },

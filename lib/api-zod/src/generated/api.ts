@@ -1638,8 +1638,110 @@ export const GetFootballMatchDetailsResponse = zod.object({
 
 
 /**
- * Finds the match on its 365Scores daily results page and collects the visible match report sections
- * @summary Build a completed-match replay from 365Scores
+ * Returns the current KickoffScore fixture snapshot and source-provided player data
+ * @summary Get live score, events, lineups, and player statistics
+ */
+
+
+
+export const GetFootballMatchCenterParams = zod.object({
+  "fixtureId": zod.coerce.number().int().min(1).describe('KickoffScore fixture ID')
+})
+
+export const GetFootballMatchCenterResponse = zod.object({
+  "sourceUrl": zod.string().url(),
+  "match": zod.object({
+  "fixtureId": zod.number().int(),
+  "date": zod.coerce.date(),
+  "competition": zod.string(),
+  "status": zod.string(),
+  "venue": zod.string().nullable(),
+  "leagueId": zod.number().int().nullable(),
+  "season": zod.number().int().nullable(),
+  "home": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}).and(zod.object({
+  "score": zod.number().int().nullable(),
+  "halfTimeScore": zod.number().int().nullable()
+})),
+  "away": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "logo": zod.string().url().nullable()
+}).and(zod.object({
+  "score": zod.number().int().nullable(),
+  "halfTimeScore": zod.number().int().nullable()
+}))
+}),
+  "elapsedMinute": zod.number().int().nullable(),
+  "observedAt": zod.coerce.date(),
+  "statistics": zod.array(zod.object({
+  "teamId": zod.number().int().nullable(),
+  "teamName": zod.string(),
+  "statistics": zod.array(zod.object({
+  "label": zod.string(),
+  "value": zod.union([zod.string(),zod.number(),zod.null()])
+}))
+})),
+  "events": zod.array(zod.object({
+  "minute": zod.number().int().nullable(),
+  "extraMinute": zod.number().int().nullable(),
+  "teamId": zod.number().int().nullable(),
+  "teamName": zod.string().nullable(),
+  "player": zod.string().nullable(),
+  "playerId": zod.number().int().nullable(),
+  "assist": zod.string().nullable(),
+  "assistId": zod.number().int().nullable(),
+  "type": zod.string(),
+  "detail": zod.string().nullable(),
+  "comments": zod.string().nullable()
+})),
+  "lineups": zod.array(zod.object({
+  "teamId": zod.number().int().nullable(),
+  "teamName": zod.string(),
+  "formation": zod.string().nullable(),
+  "coach": zod.string().nullable(),
+  "coachId": zod.number().int().nullable(),
+  "starters": zod.array(zod.object({
+  "id": zod.number().int().nullable(),
+  "name": zod.string(),
+  "number": zod.number().int().nullable(),
+  "position": zod.string().nullable(),
+  "grid": zod.string().nullable()
+})),
+  "substitutes": zod.array(zod.object({
+  "id": zod.number().int().nullable(),
+  "name": zod.string(),
+  "number": zod.number().int().nullable(),
+  "position": zod.string().nullable(),
+  "grid": zod.string().nullable()
+}))
+})),
+  "players": zod.array(zod.object({
+  "teamId": zod.number().int().nullable(),
+  "teamName": zod.string(),
+  "players": zod.array(zod.object({
+  "id": zod.number().int().nullable(),
+  "name": zod.string(),
+  "photo": zod.string().url().nullable(),
+  "number": zod.number().int().nullable(),
+  "position": zod.string().nullable(),
+  "rating": zod.string().nullable(),
+  "statistics": zod.array(zod.object({
+  "label": zod.string(),
+  "value": zod.union([zod.string(),zod.number(),zod.null()])
+}))
+}))
+})),
+  "issues": zod.array(zod.string())
+})
+
+
+/**
+ * Finds the same fixture on 365Scores and returns recorded match events, shot coordinates, lineups, and report sections during or after play
+ * @summary Collect source match events and shot locations from 365Scores
  */
 
 

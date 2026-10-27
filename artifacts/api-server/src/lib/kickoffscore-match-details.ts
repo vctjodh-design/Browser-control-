@@ -179,7 +179,7 @@ function sourceMatchUrl(
   return `${KICKOFFSCORE_SITE_ORIGIN}/match/${slug}/${fixtureId}`;
 }
 
-function parseMatchSummary(
+export function parseMatchSummary(
   payload: unknown,
   requestedFixtureId: number,
 ): FootballMatchSummary | null {

@@ -19,6 +19,7 @@ const DAY_LIST_URL = "https://www.365scores.com/football/yesterdays-matches";
 const RESULTS_LIST_URL = "https://www.365scores.com/football/match-results";
 const PAGE_LOAD_SETTLE_MS = 3_500;
 const REPLAY_CACHE_TTL_MS = 10 * 60 * 1_000;
+const LIVE_SHOT_FEED_CACHE_TTL_MS = 55_000;
 const REPLAY_SOURCE_TIMEOUT_MS = 45_000;
 const MAX_REPLAY_CACHE_ENTRIES = 60;
 
@@ -141,6 +142,12 @@ const replayCache = new Map<
   number,
   { expiresAt: number; replay: FootballMatchReplay }
 >();
+
+function isLiveMatchStatus(status: string): boolean {
+  return /\b(live|in play|in progress|first half|second half|1st half|2nd half|1h|2h|half[ -]?time|halftime)\b/i.test(
+    status,
+  );
+}
 
 const teamAliases: string[][] = [
   ["psg", "paris saint germain", "paris saint-germain", "paris sg"],
@@ -1003,7 +1010,11 @@ export async function get365ScoresMatchReplay(
 
     replayCache.set(details.match.fixtureId, {
       replay,
-      expiresAt: Date.now() + REPLAY_CACHE_TTL_MS,
+      expiresAt:
+        Date.now() +
+        (isLiveMatchStatus(details.match.status)
+          ? LIVE_SHOT_FEED_CACHE_TTL_MS
+          : REPLAY_CACHE_TTL_MS),
     });
     if (replayCache.size > MAX_REPLAY_CACHE_ENTRIES) {
       const oldestFixtureId = replayCache.keys().next().value;

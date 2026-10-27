@@ -34,6 +34,7 @@ import type {
   FootballFairAiTeamsResponse,
   FootballFixtureError,
   FootballFixtures,
+  FootballMatchCenter,
   FootballMatchDetails,
   FootballMatchLastFive,
   FootballMatchModelPredictions,
@@ -2282,6 +2283,84 @@ export function useGetFootballMatchDetails<TData = Awaited<ReturnType<typeof get
 
 
 
+export const getGetFootballMatchCenterUrl = (fixtureId: number,) => {
+
+
+
+
+  return `/api/football/matches/${fixtureId}/match-center`
+}
+
+/**
+ * Returns the current KickoffScore fixture snapshot and source-provided player data
+ * @summary Get live score, events, lineups, and player statistics
+ */
+export const getFootballMatchCenter = async (fixtureId: number, options?: Parameters<typeof customFetch>[1]): Promise<FootballMatchCenter> => {
+
+  return customFetch<FootballMatchCenter>(getGetFootballMatchCenterUrl(fixtureId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballMatchCenterQueryKey = (fixtureId: number,) => {
+    return [
+    `/api/football/matches/${fixtureId}/match-center`
+    ] as const;
+    }
+
+
+export const getGetFootballMatchCenterQueryOptions = <TData = Awaited<ReturnType<typeof getFootballMatchCenter>>, TError = ErrorType<FootballFixtureError>>(fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchCenter>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballMatchCenterQueryKey(fixtureId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballMatchCenter>>> = ({ signal }) => getFootballMatchCenter(fixtureId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: fixtureId !== null && fixtureId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchCenter>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballMatchCenterQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballMatchCenter>>>
+export type GetFootballMatchCenterQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary Get live score, events, lineups, and player statistics
+ */
+
+export function useGetFootballMatchCenter<TData = Awaited<ReturnType<typeof getFootballMatchCenter>>, TError = ErrorType<FootballFixtureError>>(
+ fixtureId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballMatchCenter>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballMatchCenterQueryOptions(fixtureId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getGetFootballMatchReplayUrl = (fixtureId: number,) => {
 
 
@@ -2291,8 +2370,8 @@ export const getGetFootballMatchReplayUrl = (fixtureId: number,) => {
 }
 
 /**
- * Finds the match on its 365Scores daily results page and collects the visible match report sections
- * @summary Build a completed-match replay from 365Scores
+ * Finds the same fixture on 365Scores and returns recorded match events, shot coordinates, lineups, and report sections during or after play
+ * @summary Collect source match events and shot locations from 365Scores
  */
 export const getFootballMatchReplay = async (fixtureId: number, options?: Parameters<typeof customFetch>[1]): Promise<FootballMatchReplay> => {
 
@@ -2339,7 +2418,7 @@ export type GetFootballMatchReplayQueryError = ErrorType<FootballFixtureError>
 
 
 /**
- * @summary Build a completed-match replay from 365Scores
+ * @summary Collect source match events and shot locations from 365Scores
  */
 
 export function useGetFootballMatchReplay<TData = Awaited<ReturnType<typeof getFootballMatchReplay>>, TError = ErrorType<FootballFixtureError>>(
