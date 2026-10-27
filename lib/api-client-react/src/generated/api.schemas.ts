@@ -1352,6 +1352,58 @@ export interface DeleteFootballTesterMatchesResponse {
   deletedCount: number;
 }
 
+export interface FootballMatchReplayEvent {
+  minute: string;
+  kind: string;
+  title: string;
+  detail: string;
+  /** @minimum 0 */
+  sourceOrder: number;
+}
+
+export type FootballMatchReplaySectionKey = typeof FootballMatchReplaySectionKey[keyof typeof FootballMatchReplaySectionKey];
+
+
+export const FootballMatchReplaySectionKey = {
+  lineups: 'lineups',
+  commentary: 'commentary',
+  'full-time-stats': 'full-time-stats',
+  'first-half-stats': 'first-half-stats',
+  'second-half-stats': 'second-half-stats',
+  'shot-map': 'shot-map',
+  'time-details': 'time-details',
+} as const;
+
+export interface FootballMatchReplaySection {
+  key: FootballMatchReplaySectionKey;
+  title: string;
+  /** @nullable */
+  text: string | null;
+  available: boolean;
+}
+
+export interface FootballMatchReplay {
+  fixtureId: number;
+  date: string;
+  competition: string;
+  homeTeam: string;
+  awayTeam: string;
+  /** @nullable */
+  homeScore: number | null;
+  /** @nullable */
+  awayScore: number | null;
+  /** @nullable */
+  halfTimeScore: string | null;
+  /** @nullable */
+  actualPlayTime: string | null;
+  /** @nullable */
+  totalDuration: string | null;
+  sourceDateListUrl: string;
+  sourceMatchUrl: string;
+  events: FootballMatchReplayEvent[];
+  sections: FootballMatchReplaySection[];
+}
+
 export interface FootballFixtureError {
   error: string;
 }

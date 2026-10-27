@@ -810,6 +810,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballFixtureError"
+  /football/matches/{fixtureId}/replay:
+    get:
+      operationId: getFootballMatchReplay
+      tags: [fixtures]
+      summary: Build a completed-match replay from 365Scores
+      description: Finds the match on its 365Scores daily results page and collects the visible match report sections
+      parameters:
+        - name: fixtureId
+          in: path
+          required: true
+          description: KickoffScore fixture ID
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Public match report, events, lineups, and period data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballMatchReplay"
+        "400":
+          description: Invalid fixture ID or the fixture is not complete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "404":
+          description: No unambiguous 365Scores match was found for this fixture date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "502":
+          description: 365Scores could not be reached or its match report could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
   /football/matches/{fixtureId}/tmp:
     get:
       operationId: getFootballMatchTmp
@@ -3088,6 +3127,87 @@ components:
         - awayRecent
         - headToHead
         - issues
+    FootballMatchReplayEvent:
+      type: object
+      properties:
+        minute:
+          type: string
+        kind:
+          type: string
+        title:
+          type: string
+        detail:
+          type: string
+        sourceOrder:
+          type: integer
+          minimum: 0
+      required: [minute, kind, title, detail, sourceOrder]
+    FootballMatchReplaySection:
+      type: object
+      properties:
+        key:
+          type: string
+          enum: [lineups, commentary, full-time-stats, first-half-stats, second-half-stats, shot-map, time-details]
+        title:
+          type: string
+        text:
+          type: ["string", "null"]
+        available:
+          type: boolean
+      required: [key, title, text, available]
+    FootballMatchReplay:
+      type: object
+      properties:
+        fixtureId:
+          type: integer
+        date:
+          type: string
+          format: date-time
+        competition:
+          type: string
+        homeTeam:
+          type: string
+        awayTeam:
+          type: string
+        homeScore:
+          type: ["integer", "null"]
+        awayScore:
+          type: ["integer", "null"]
+        halfTimeScore:
+          type: ["string", "null"]
+        actualPlayTime:
+          type: ["string", "null"]
+        totalDuration:
+          type: ["string", "null"]
+        sourceDateListUrl:
+          type: string
+          format: uri
+        sourceMatchUrl:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballMatchReplayEvent"
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballMatchReplaySection"
+      required:
+        - fixtureId
+        - date
+        - competition
+        - homeTeam
+        - awayTeam
+        - homeScore
+        - awayScore
+        - halfTimeScore
+        - actualPlayTime
+        - totalDuration
+        - sourceDateListUrl
+        - sourceMatchUrl
+        - events
+        - sections
     FootballLastFiveStat:
       type: object
       properties:

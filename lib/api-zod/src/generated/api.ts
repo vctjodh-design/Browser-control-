@@ -1638,6 +1638,50 @@ export const GetFootballMatchDetailsResponse = zod.object({
 
 
 /**
+ * Finds the match on its 365Scores daily results page and collects the visible match report sections
+ * @summary Build a completed-match replay from 365Scores
+ */
+
+
+
+export const GetFootballMatchReplayParams = zod.object({
+  "fixtureId": zod.coerce.number().int().min(1).describe('KickoffScore fixture ID')
+})
+
+export const getFootballMatchReplayResponseEventsItemSourceOrderMin = 0;
+
+
+
+export const GetFootballMatchReplayResponse = zod.object({
+  "fixtureId": zod.number().int(),
+  "date": zod.coerce.date(),
+  "competition": zod.string(),
+  "homeTeam": zod.string(),
+  "awayTeam": zod.string(),
+  "homeScore": zod.number().int().nullable(),
+  "awayScore": zod.number().int().nullable(),
+  "halfTimeScore": zod.string().nullable(),
+  "actualPlayTime": zod.string().nullable(),
+  "totalDuration": zod.string().nullable(),
+  "sourceDateListUrl": zod.string().url(),
+  "sourceMatchUrl": zod.string().url(),
+  "events": zod.array(zod.object({
+  "minute": zod.string(),
+  "kind": zod.string(),
+  "title": zod.string(),
+  "detail": zod.string(),
+  "sourceOrder": zod.number().int().min(getFootballMatchReplayResponseEventsItemSourceOrderMin)
+})),
+  "sections": zod.array(zod.object({
+  "key": zod.enum(['lineups', 'commentary', 'full-time-stats', 'first-half-stats', 'second-half-stats', 'shot-map', 'time-details']),
+  "title": zod.string(),
+  "text": zod.string().nullable(),
+  "available": zod.boolean()
+}))
+})
+
+
+/**
  * Returns historical market expectations and latest available season tables for recent matches
  * @summary Get historical odds and standings context for match TMP
  */

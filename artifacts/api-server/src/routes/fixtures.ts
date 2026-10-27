@@ -2,6 +2,8 @@ import { Router, type IRouter, type Response } from "express";
 import {
   GetFootballMatchDetailsParams,
   GetFootballMatchDetailsResponse,
+  GetFootballMatchReplayParams,
+  GetFootballMatchReplayResponse,
   GetFootballMatchLastFiveParams,
   GetFootballMatchLastFiveResponse,
   GetFootballMatchTmpParams,
@@ -17,6 +19,11 @@ import { getKickoffScoreMatchTmp } from "../lib/kickoffscore-match-tmp";
 import { getKickoffScoreMatchLastFive } from "../lib/kickoffscore-last-five";
 import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
 import { UpstreamRateLimitError } from "../lib/upstream-rate-limit";
+import {
+  get365ScoresMatchReplay,
+  MatchReplayNotFoundError,
+  MatchReplaySourceError,
+} from "../lib/365scores-match-replay";
 
 const router: IRouter = Router();
 
@@ -99,6 +106,62 @@ router.get(
       res.status(502).json({
         error:
           "KickoffScore match details could not be loaded right now. Please try again.",
+      });
+    }
+  },
+);
+
+router.get(
+  "/football/matches/:fixtureId/replay",
+  async (req, res): Promise<void> => {
+    const params = GetFootballMatchReplayParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    try {
+      const details = await getKickoffScoreMatchDetails(
+        params.data.fixtureId,
+      );
+      if (
+        !/\b(finished|full time|ft|ended|complete|after extra time|penalties)\b/i.test(
+          details.match.status,
+        )
+      ) {
+        res.status(400).json({
+          error: "Match replay is available only after the match is complete.",
+        });
+        return;
+      }
+
+      const replay = await get365ScoresMatchReplay(details);
+      res.json(GetFootballMatchReplayResponse.parse(replay));
+    } catch (error) {
+      if (error instanceof MatchReplayNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      if (error instanceof MatchReplaySourceError) {
+        req.log.warn(
+          { errorName: error.name },
+          "365Scores match replay data could not be collected",
+        );
+        res.status(502).json({ error: error.message });
+        return;
+      }
+      if (sendUpstreamRateLimit(res, error)) return;
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not build a completed-match replay",
+      );
+      res.status(502).json({
+        error: "The match replay could not be built right now. Please try again.",
       });
     }
   },

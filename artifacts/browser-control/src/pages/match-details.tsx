@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'wouter';
 import {
   getGetFootballMatchLastFiveQueryKey,
+  getGetFootballMatchReplayQueryKey,
   useGetFootballMatchDetails,
   useGetFootballMatchLastFive,
+  useGetFootballMatchReplay,
   useGetFootballMatchTmp,
 } from '@workspace/api-client-react';
 import type { FootballMatchDetails, FootballMatchLastFive, FootballMatchTmpContext, FootballRecentMatch } from '@workspace/api-client-react';
@@ -15,6 +17,7 @@ import { ModelPredictionGraphs } from '@/components/model-predictions-panel';
 import { LastFivePanel } from '@/components/last-five-panel';
 import FairAiSourceDataPanel from '@/components/fair-ai-source-data-panel';
 import FairAiSimulationPanel from '@/components/fair-ai-simulation-panel';
+import { MatchReplayPanel } from '@/components/match-replay-panel';
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -47,6 +50,10 @@ function readableError(error: unknown) {
   if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message;
   if (error && typeof error === 'object' && 'error' in error && typeof error.error === 'string') return error.error;
   return 'The match context could not be loaded. Please try again.';
+}
+
+function isCompleteMatchStatus(status: string | undefined) {
+  return /\b(finished|full time|ft|ended|complete|after extra time|penalties)\b/i.test(status ?? '');
 }
 
 function formatDate(value: string) {
@@ -256,6 +263,9 @@ export default function MatchDetailsPage() {
   const lastFiveQuery = useGetFootballMatchLastFive(validId ? fixtureId : 0, {
     query: { enabled: validId && (activeTab === 'lastfive' || activeTab === 'insights' || activeTab === 'graphs' || activeTab === 'predictions'), queryKey: getGetFootballMatchLastFiveQueryKey(fixtureId) },
   });
+  const replayQuery = useGetFootballMatchReplay(validId ? fixtureId : 0, {
+    query: { enabled: validId && isCompleteMatchStatus(detailsQuery.data?.match.status), queryKey: getGetFootballMatchReplayQueryKey(fixtureId) },
+  });
   const details = detailsQuery.data as FootballMatchDetails | undefined;
   const match = details?.match;
   const matchStatus = match?.status.toLowerCase() ?? '';
@@ -355,6 +365,16 @@ export default function MatchDetailsPage() {
                       <div className="rounded-xl border border-[#e8dfca] bg-[#faf5e9] px-4 py-3.5 text-[9px] leading-5 text-[#7d6c4d]" role="status" data-testid="status-fair-ai-not-upcoming">
                         Pre-match simulation runs automatically for upcoming fixtures. This match is live, complete, or no longer scheduled in the future, so using current team data would not represent a pre-kickoff forecast.
                       </div>
+                    )}
+                    {isComplete && (
+                      <MatchReplayPanel
+                        fixtureId={fixtureId}
+                        replay={replayQuery.data}
+                        isLoading={replayQuery.isLoading}
+                        isError={replayQuery.isError}
+                        error={replayQuery.error}
+                        onRetry={() => { void replayQuery.refetch(); }}
+                      />
                     )}
                     <FairAiSourceDataPanel />
                   </section>
