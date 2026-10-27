@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Timer,
 } from 'lucide-react';
+import { RecordedEventPitch } from './recorded-event-pitch';
 
 function readableError(error: unknown) {
   if (typeof error === 'string') return error;
@@ -115,7 +116,9 @@ function ReplaySectionCard({ section }: { section: FootballMatchReplay['sections
         <p className="mt-3 whitespace-pre-wrap text-[10px] leading-[1.8] text-[#737b72]" data-testid={`text-replay-section-${section.key}`}>{section.text}</p>
       ) : (
         <p className="mt-3 text-[9px] leading-5 text-[#929388]">
-          {section.key === 'shot-map' ? 'No shot coordinates were supplied by the source. A pitch map is not available.' : 'This section was not present in the source report.'}
+          {section.key === 'shot-map'
+            ? 'The text shot-map section was not present. The recorded-event pitch above uses typed source coordinates when they are available.'
+            : 'This section was not present in the source report.'}
         </p>
       )}
     </article>
@@ -135,7 +138,11 @@ function ReplayContent({ replay }: { replay: FootballMatchReplay }) {
     return true;
   });
   const providedCount = replay.sections.filter((section) => section.available && Boolean(section.text?.trim())).length;
-  const hasReplayContent = replay.events.length > 0 || replay.sections.some((section) => section.available && Boolean(section.text?.trim()));
+  const hasReplayContent =
+    replay.events.length > 0 ||
+    replay.shotEvents.length > 0 ||
+    replay.formationPlayers.length > 0 ||
+    replay.sections.some((section) => section.available && Boolean(section.text?.trim()));
 
   if (!hasReplayContent) return <ReplayEmpty fixtureId={replay.fixtureId} />;
 
@@ -175,6 +182,13 @@ function ReplayContent({ replay }: { replay: FootballMatchReplay }) {
           <p>{replay.events.length === 0 ? 'No event commentary was supplied. The timeline is intentionally empty.' : `${replay.events.length} source event${replay.events.length === 1 ? '' : 's'} shown; ${replay.sections.length - providedCount} report section${replay.sections.length - providedCount === 1 ? '' : 's'} unavailable. Gaps are left explicit.`}</p>
         </div>
       )}
+
+      <RecordedEventPitch
+        homeTeam={replay.homeTeam}
+        awayTeam={replay.awayTeam}
+        shotEvents={replay.shotEvents}
+        formationPlayers={replay.formationPlayers}
+      />
 
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(330px,.92fr)]">
         <section className="overflow-hidden rounded-[15px] border border-[#d9d9cf] bg-[#f9f8f2]" aria-labelledby="replay-timeline-title" data-testid="section-replay-timeline">
