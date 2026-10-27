@@ -461,7 +461,7 @@ export async function clickBrowserText(
       );
     }
 
-    await target.locator.click({ timeout: 8_000 });
+    await target.locator.click({ timeout: 8_000, force: true });
     await page.waitForTimeout(700);
   } catch (error) {
     if (error instanceof BrowserOperationError) throw error;
