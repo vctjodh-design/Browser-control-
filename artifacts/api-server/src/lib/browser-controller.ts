@@ -632,6 +632,44 @@ export async function navigateBrowser(
   }
 }
 
+export async function navigateBrowserJsonDocument(
+  sessionId: string,
+  url: string,
+): Promise<{ currentUrl: string; document: unknown }> {
+  const session = getSession(sessionId);
+  let safeUrl: string;
+  try {
+    safeUrl = await validatePublicWebUrl(url);
+  } catch (error) {
+    if (error instanceof BrowserPolicyError) {
+      throw new BrowserOperationError(error.message, 400);
+    }
+    throw error;
+  }
+
+  const page = getActivePage(session);
+  try {
+    await page.goto(safeUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 12_000,
+    });
+    return {
+      currentUrl: page.url(),
+      document: await readBrowserJsonDocument(sessionId),
+    };
+  } catch (error) {
+    if (error instanceof BrowserOperationError) throw error;
+    logger.warn(
+      { errorName: error instanceof Error ? error.name : "UnknownError" },
+      "A browser JSON source failed to load",
+    );
+    throw new BrowserOperationError(
+      "The data source could not be loaded or timed out.",
+      502,
+    );
+  }
+}
+
 export async function performBrowserAction(
   sessionId: string,
   action: BrowserAction,
