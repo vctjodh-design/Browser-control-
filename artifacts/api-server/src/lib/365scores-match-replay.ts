@@ -1,7 +1,9 @@
 import type {
   FootballMatchDetails,
+  FootballMatchReplayFormationPlayer,
   FootballMatchReplay,
   FootballMatchReplayEvent,
+  FootballMatchReplayShotEvent,
   FootballMatchReplaySection,
 } from "@workspace/api-zod";
 import {
@@ -33,6 +35,7 @@ type SourcePlayer = {
   name?: string;
   shortName?: string;
   jerseyNumber?: number;
+  competitorId?: number;
 };
 
 type SourceLineupMember = {
@@ -43,6 +46,7 @@ type SourceLineupMember = {
   ranking?: number;
   substitution?: { time?: number };
   stats?: SourcePlayerStat[];
+  yardFormation?: { fieldLine?: number; fieldSide?: number };
 };
 
 type SourceTeam = {
@@ -69,6 +73,7 @@ type SourceGameEvent = {
 type SourceShot = {
   time?: string;
   playerId?: number;
+  competitorNum?: number;
   bodyPart?: string;
   xg?: string | number;
   xgot?: string | number;
@@ -316,6 +321,120 @@ function sourcePlayerMap(game: SourceGame): Map<number, SourcePlayer> {
     if (typeof player.id === "number") players.set(player.id, player);
   }
   return players;
+}
+
+function sourcePercent(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 100) {
+    return null;
+  }
+  return Math.round(value * 10) / 10;
+}
+
+function sourceMetricText(value: string | number | undefined): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function replayTeamSide(
+  game: SourceGame,
+  player: SourcePlayer | undefined,
+  competitorNum: number | undefined,
+): "home" | "away" | null {
+  if (
+    typeof player?.competitorId === "number" &&
+    player.competitorId === game.homeCompetitor?.id
+  ) {
+    return "home";
+  }
+  if (
+    typeof player?.competitorId === "number" &&
+    player.competitorId === game.awayCompetitor?.id
+  ) {
+    return "away";
+  }
+  if (competitorNum === 1) return "home";
+  if (competitorNum === 2) return "away";
+  return null;
+}
+
+function replayShotEvents(game: SourceGame): FootballMatchReplayShotEvent[] {
+  const playersById = sourcePlayerMap(game);
+  return (game.chartEvents?.events ?? []).flatMap((shot, sourceOrder) => {
+    const player =
+      typeof shot.playerId === "number"
+        ? playersById.get(shot.playerId)
+        : undefined;
+    const teamSide = replayTeamSide(game, player, shot.competitorNum);
+    if (!teamSide) return [];
+
+    const sourceSide = sourcePercent(shot.side);
+    const y = sourcePercent(shot.line);
+    return [
+      {
+        minute: shot.time?.trim() || "—",
+        teamSide,
+        playerName: player?.name?.trim() || null,
+        outcome: shot.outcome?.name?.trim() || null,
+        bodyPart: shot.bodyPart?.trim() || null,
+        xg: sourceMetricText(shot.xg),
+        xgot: sourceMetricText(shot.xgot),
+        x: sourceSide === null
+          ? null
+          : teamSide === "home"
+            ? Math.round((100 - sourceSide) * 10) / 10
+            : sourceSide,
+        y,
+        sourceOrder,
+      },
+    ];
+  });
+}
+
+function replayFormationPlayers(
+  game: SourceGame,
+): FootballMatchReplayFormationPlayer[] {
+  const playersById = sourcePlayerMap(game);
+  return ([game.homeCompetitor, game.awayCompetitor] as const).flatMap(
+    (team, teamIndex) => {
+      if (!team) return [];
+      const teamSide = teamIndex === 0 ? "home" : "away";
+      return (team.lineups?.members ?? []).flatMap((member) => {
+        if (member.statusText !== "Starting" || typeof member.id !== "number") {
+          return [];
+        }
+        const player = playersById.get(member.id);
+        const fieldLine = sourcePercent(member.yardFormation?.fieldLine);
+        const y = sourcePercent(member.yardFormation?.fieldSide);
+        if (!player?.name?.trim() || fieldLine === null || y === null) {
+          return [];
+        }
+
+        return [
+          {
+            teamSide,
+            playerName: player.name.trim(),
+            shirtNumber:
+              typeof player.jerseyNumber === "number" &&
+              Number.isInteger(player.jerseyNumber)
+                ? player.jerseyNumber
+                : null,
+            position:
+              member.formation?.shortName?.trim() ||
+              member.formation?.name?.trim() ||
+              member.position?.name?.trim() ||
+              null,
+            x:
+              teamSide === "home"
+                ? Math.round((100 - fieldLine) * 10) / 10
+                : fieldLine,
+            y,
+          },
+        ];
+      });
+    },
+  );
 }
 
 function formatLineups(game: SourceGame): string | null {
@@ -821,6 +940,8 @@ export async function get365ScoresMatchReplay(
     }
     const commentary = formatCommentary(feed);
     const lineupText = formatLineups(game);
+    const shotEvents = replayShotEvents(game);
+    const formationPlayers = replayFormationPlayers(game);
     const fullTimeStats = fullStatsResponse
       ? formatStatistics(fullStatsResponse, game)
       : null;
@@ -872,6 +993,8 @@ export async function get365ScoresMatchReplay(
       sourceDateListUrl,
       sourceMatchUrl: sourceMatchUrl.toString(),
       events: commentary.events,
+      shotEvents,
+      formationPlayers,
       sections,
     };
 

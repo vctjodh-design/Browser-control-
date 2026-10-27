@@ -3142,6 +3142,67 @@ components:
           type: integer
           minimum: 0
       required: [minute, kind, title, detail, sourceOrder]
+    FootballMatchReplayShotEvent:
+      type: object
+      properties:
+        minute:
+          type: string
+        teamSide:
+          type: string
+          enum: [home, away]
+        playerName:
+          type: ["string", "null"]
+        outcome:
+          type: ["string", "null"]
+        bodyPart:
+          type: ["string", "null"]
+        xg:
+          type: ["string", "null"]
+        xgot:
+          type: ["string", "null"]
+        x:
+          type: ["number", "null"]
+          minimum: 0
+          maximum: 100
+        y:
+          type: ["number", "null"]
+          minimum: 0
+          maximum: 100
+        sourceOrder:
+          type: integer
+          minimum: 0
+      required:
+        - minute
+        - teamSide
+        - playerName
+        - outcome
+        - bodyPart
+        - xg
+        - xgot
+        - x
+        - y
+        - sourceOrder
+    FootballMatchReplayFormationPlayer:
+      type: object
+      properties:
+        teamSide:
+          type: string
+          enum: [home, away]
+        playerName:
+          type: string
+        shirtNumber:
+          type: ["integer", "null"]
+        position:
+          type: ["string", "null"]
+        x:
+          type: number
+          minimum: 0
+          maximum: 100
+        y:
+          type: number
+          minimum: 0
+          maximum: 100
+      required: [teamSide, playerName, shirtNumber, position, x, y]
     FootballMatchReplaySection:
       type: object
       properties:
@@ -3189,6 +3250,14 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FootballMatchReplayEvent"
+        shotEvents:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballMatchReplayShotEvent"
+        formationPlayers:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballMatchReplayFormationPlayer"
         sections:
           type: array
           items:
@@ -3207,6 +3276,8 @@ components:
         - sourceDateListUrl
         - sourceMatchUrl
         - events
+        - shotEvents
+        - formationPlayers
         - sections
     FootballLastFiveStat:
       type: object
