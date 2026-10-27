@@ -80,6 +80,8 @@ function fixturesReturnHref() {
   if (competition) params.set('competition', competition);
   const search = current.get('search')?.trim();
   if (search) params.set('search', search);
+  const returnCompetition = current.get('returnCompetition')?.trim();
+  if (returnCompetition) params.set('focusCompetition', returnCompetition);
   return `/fixtures${params.size ? `?${params.toString()}` : ''}`;
 }
 

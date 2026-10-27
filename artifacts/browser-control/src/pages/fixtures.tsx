@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useGetFootballFixtures } from '@workspace/api-client-react';
 import { Link } from 'wouter';
 import {
@@ -35,8 +35,19 @@ function fixtureListContext() {
     date: validCalendarDate(date) ? date : getLocalDateString(),
     search: params.get('search') ?? '',
     competition: params.get('competition') ?? '',
+    focusCompetition: params.get('focusCompetition') ?? '',
   };
 }
+
+const FIXTURE_RETURN_STORAGE_KEY = 'browser-control:fixture-return';
+
+type FixtureReturnState = {
+  date: string;
+  competitionFilter: string;
+  search: string;
+  competition: string;
+  scrollY: number;
+};
 
 function shiftDate(dateString: string, amount: number) {
   const [year, month, day] = dateString.split('-').map(Number);
@@ -104,6 +115,7 @@ function groupFixturesByCountry(fixtures: Fixture[]) {
   return Array.from(countries, ([country, leagues]) => {
     const groupedLeagues = Array.from(leagues, ([name, matches]) => ({
       name,
+      competition: matches[0]?.competition ?? name,
       fixtures: matches,
     }));
     return {
@@ -125,19 +137,20 @@ function TeamMark({ name, logo }: { name: string; logo: string | null }) {
 function FixtureRow({
   fixture,
   selectedDate,
+  selectedCompetition,
   searchTerm,
 }: {
   fixture: Fixture;
   selectedDate: string;
+  selectedCompetition: string;
   searchTerm: string;
 }) {
   const matchId = fixture.matchUrl.split('/').pop() ?? fixture.matchUrl;
   const fixtureId = Number(matchId.match(/\d+/)?.[0]);
-  const returnParams = new URLSearchParams({
-    date: selectedDate,
-    competition: fixture.competition,
-  });
+  const returnParams = new URLSearchParams({ date: selectedDate });
+  if (selectedCompetition) returnParams.set('competition', selectedCompetition);
   if (searchTerm.trim()) returnParams.set('search', searchTerm.trim());
+  returnParams.set('returnCompetition', fixture.competition);
   const detailsHref = Number.isFinite(fixtureId)
     ? `/matches/${fixtureId}?${returnParams.toString()}`
     : '/fixtures';
@@ -146,9 +159,23 @@ function FixtureRow({
   const statusLower = status.toLowerCase();
   const isLive = statusLower.includes('live') || statusLower.includes('in play');
   const isComplete = statusLower.includes('full') || statusLower.includes('finished') || statusLower.includes('ft');
+  const rememberListPosition = () => {
+    try {
+      const returnState: FixtureReturnState = {
+        date: selectedDate,
+        competitionFilter: selectedCompetition,
+        search: searchTerm.trim(),
+        competition: fixture.competition,
+        scrollY: window.scrollY,
+      };
+      window.sessionStorage.setItem(FIXTURE_RETURN_STORAGE_KEY, JSON.stringify(returnState));
+    } catch {
+      // The return URL still carries the competition anchor if session storage is unavailable.
+    }
+  };
 
   return (
-    <Link href={detailsHref} className="group grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-4 border-b border-[#e7e5dc] px-4 py-4 transition-colors last:border-b-0 hover:bg-[#fbfaf5] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d96f51] sm:grid-cols-[minmax(86px,.45fr)_minmax(250px,1.35fr)_minmax(130px,.7fr)_auto] sm:gap-5 sm:px-5" data-testid={`fixture-row-${matchId}`} aria-label={`View ${fixture.homeTeam} versus ${fixture.awayTeam} match details`}>
+    <Link href={detailsHref} onClick={rememberListPosition} className="group grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-4 border-b border-[#e7e5dc] px-4 py-4 transition-colors last:border-b-0 hover:bg-[#fbfaf5] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d96f51] sm:grid-cols-[minmax(86px,.45fr)_minmax(250px,1.35fr)_minmax(130px,.7fr)_auto] sm:gap-5 sm:px-5" data-testid={`fixture-row-${matchId}`} aria-label={`View ${fixture.homeTeam} versus ${fixture.awayTeam} match details`}>
       <div className="min-w-0">
         <p className="mono text-[10px] text-[#8b928a]" data-testid={`text-kickoff-${matchId}`}>{fixture.kickoff}</p>
       </div>
@@ -184,9 +211,12 @@ function FixtureRow({
 }
 
 export default function FixturesPage() {
-  const [selectedDate, setSelectedDate] = useState(() => fixtureListContext().date);
-  const [searchTerm, setSearchTerm] = useState(() => fixtureListContext().search);
-  const [selectedCompetition, setSelectedCompetition] = useState(() => fixtureListContext().competition);
+  const [initialContext] = useState(fixtureListContext);
+  const [selectedDate, setSelectedDate] = useState(initialContext.date);
+  const [searchTerm, setSearchTerm] = useState(initialContext.search);
+  const [selectedCompetition, setSelectedCompetition] = useState(initialContext.competition);
+  const [focusCompetition, setFocusCompetition] = useState(initialContext.focusCompetition);
+  const didRestorePosition = useRef(false);
   const fixturesQuery = useGetFootballFixtures({ date: selectedDate });
   const data = fixturesQuery.data;
   const normalizedSearch = normalizeSearchTerm(searchTerm);
@@ -203,11 +233,89 @@ export default function FixturesPage() {
     const params = new URLSearchParams({ date: selectedDate });
     if (selectedCompetition) params.set('competition', selectedCompetition);
     if (searchTerm.trim()) params.set('search', searchTerm.trim());
+    if (focusCompetition) params.set('focusCompetition', focusCompetition);
     const nextUrl = `/fixtures?${params.toString()}`;
     if (`${window.location.pathname}${window.location.search}` !== nextUrl) {
       window.history.replaceState(window.history.state, '', nextUrl);
     }
-  }, [selectedDate, selectedCompetition, searchTerm]);
+  }, [selectedDate, selectedCompetition, searchTerm, focusCompetition]);
+
+  useEffect(() => {
+    if (!data || didRestorePosition.current) return undefined;
+    didRestorePosition.current = true;
+
+    let savedReturn: FixtureReturnState | null = null;
+    try {
+      const serialized = window.sessionStorage.getItem(FIXTURE_RETURN_STORAGE_KEY);
+      if (serialized) {
+        const parsed: unknown = JSON.parse(serialized);
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          'date' in parsed &&
+          'competitionFilter' in parsed &&
+          'search' in parsed &&
+          'competition' in parsed &&
+          'scrollY' in parsed &&
+          typeof parsed.date === 'string' &&
+          typeof parsed.competitionFilter === 'string' &&
+          typeof parsed.search === 'string' &&
+          typeof parsed.competition === 'string' &&
+          typeof parsed.scrollY === 'number'
+        ) {
+          savedReturn = parsed as FixtureReturnState;
+        }
+      }
+    } catch {
+      // A malformed or unavailable stored position should not block the fixture list.
+    }
+
+    const matchesSavedContext = Boolean(
+      savedReturn &&
+      savedReturn.date === selectedDate &&
+      savedReturn.competitionFilter === selectedCompetition &&
+      savedReturn.search === searchTerm.trim(),
+    );
+    const competitionToFocus = focusCompetition || (matchesSavedContext ? savedReturn?.competition ?? '' : '');
+
+    if (matchesSavedContext || competitionToFocus) {
+      const frame = window.requestAnimationFrame(() => {
+        if (matchesSavedContext && savedReturn) {
+          window.scrollTo({ top: savedReturn.scrollY, behavior: 'auto' });
+          try {
+            window.sessionStorage.removeItem(FIXTURE_RETURN_STORAGE_KEY);
+          } catch {
+            // The restored page remains usable if storage is unavailable.
+          }
+          setFocusCompetition('');
+          return;
+        }
+
+        const target = Array.from(document.querySelectorAll<HTMLElement>('[data-competition]'))
+          .find((element) => element.dataset.competition === competitionToFocus);
+        target?.scrollIntoView({ block: 'start', behavior: 'auto' });
+        if (savedReturn) {
+          try {
+            window.sessionStorage.removeItem(FIXTURE_RETURN_STORAGE_KEY);
+          } catch {
+            // The restored page remains usable if storage is unavailable.
+          }
+        }
+        setFocusCompetition('');
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    if (savedReturn) {
+      try {
+        window.sessionStorage.removeItem(FIXTURE_RETURN_STORAGE_KEY);
+      } catch {
+        // A stale scroll position is optional; the fixture list still loads.
+      }
+    }
+    setFocusCompetition('');
+    return undefined;
+  }, [data, focusCompetition, searchTerm, selectedCompetition, selectedDate]);
 
   const countryGroups = groupFixturesByCountry(filteredFixtures);
 
@@ -400,13 +508,13 @@ export default function FixturesPage() {
                       <span className="text-[10px] font-semibold text-[#78817b]">{countryGroup.matchCount} {countryGroup.matchCount === 1 ? 'match' : 'matches'}</span>
                     </div>
                     {countryGroup.leagues.map((league) => (
-                      <section key={`${countryGroup.country}-${league.name}`} data-testid={`league-group-${countryGroup.country}-${league.name}`}>
+                      <section key={`${countryGroup.country}-${league.name}`} className="scroll-mt-4" data-competition={league.competition} data-testid={`league-group-${countryGroup.country}-${league.name}`}>
                         <div className="flex items-center justify-between gap-3 border-b border-[#e1dfd7] bg-[#f4f3ed] px-4 py-2.5 sm:px-5">
                           <h4 className="text-[11px] font-extrabold tracking-[-.01em] text-[#344550]">{league.name}</h4>
                           <span className="text-[10px] font-semibold text-[#858982]">{league.fixtures.length} {league.fixtures.length === 1 ? 'match' : 'matches'}</span>
                         </div>
                         {league.fixtures.map((fixture) => (
-                          <FixtureRow key={fixture.matchUrl} fixture={fixture} selectedDate={selectedDate} searchTerm={searchTerm} />
+                          <FixtureRow key={fixture.matchUrl} fixture={fixture} selectedDate={selectedDate} selectedCompetition={selectedCompetition} searchTerm={searchTerm} />
                         ))}
                       </section>
                     ))}
