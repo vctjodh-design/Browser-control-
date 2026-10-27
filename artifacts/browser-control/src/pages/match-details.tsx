@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'wouter';
 import {
+  getGetFootballMatchCenterQueryKey,
   getGetFootballMatchLastFiveQueryKey,
   getGetFootballMatchReplayQueryKey,
   useGetFootballMatchDetails,
+  useGetFootballMatchCenter,
   useGetFootballMatchLastFive,
   useGetFootballMatchReplay,
   useGetFootballMatchTmp,
 } from '@workspace/api-client-react';
-import type { FootballMatchDetails, FootballMatchLastFive, FootballMatchTmpContext, FootballRecentMatch } from '@workspace/api-client-react';
+import type { FootballMatchCenter, FootballMatchDetails, FootballMatchLastFive, FootballMatchTmpContext, FootballRecentMatch } from '@workspace/api-client-react';
 import { MatchTmpPanel } from '@/components/match-tmp-panel';
 import { MatchInsightsPanel } from '@/components/match-insights-panel';
 import { MatchupAnalysisPanel } from '@/components/matchup-analysis-panel';
@@ -18,6 +20,7 @@ import { LastFivePanel } from '@/components/last-five-panel';
 import FairAiSourceDataPanel from '@/components/fair-ai-source-data-panel';
 import FairAiSimulationPanel from '@/components/fair-ai-simulation-panel';
 import { MatchReplayPanel } from '@/components/match-replay-panel';
+import { MatchCenterPanel } from '@/components/match-center-panel';
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -31,10 +34,11 @@ import {
   Trophy,
 } from 'lucide-react';
 
-type MatchTab = 'table' | 'fair-ai' | 'replay' | 'odds' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
+type MatchTab = 'table' | 'fair-ai' | 'match-center' | 'replay' | 'odds' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
 const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'table', label: 'Table', short: '01' },
   { id: 'fair-ai', label: 'FAIR AI', short: '02' },
+  { id: 'match-center', label: 'Match centre', short: '12' },
   { id: 'replay', label: 'Match replay', short: '11' },
   { id: 'odds', label: 'Odds', short: '03' },
   { id: 'form', label: 'Team form', short: '04' },
@@ -55,6 +59,10 @@ function readableError(error: unknown) {
 
 function isCompleteMatchStatus(status: string | undefined) {
   return /\b(finished|full time|ft|ended|complete|after extra time|penalties)\b/i.test(status ?? '');
+}
+
+function isLiveMatchStatus(status: string | undefined) {
+  return /\b(live|in play|in progress|first half|second half|1st half|2nd half|1h|2h|half[ -]?time|halftime)\b/i.test(status ?? '');
 }
 
 function formatDate(value: string) {
@@ -254,32 +262,37 @@ export default function MatchDetailsPage() {
   const detailsQuery = useGetFootballMatchDetails(validId ? fixtureId : 0, {
     query: { enabled: validId, queryKey: ['/api/football/matches', fixtureId, 'details'] },
   });
+  const details = detailsQuery.data as FootballMatchDetails;
   const [activeTab, setActiveTab] = useState<MatchTab>('fair-ai');
   useEffect(() => {
     setActiveTab('fair-ai');
   }, [fixtureId]);
-  const tmpQuery = useGetFootballMatchTmp(validId ? fixtureId : 0, {
-    query: { enabled: validId && (activeTab === 'tmp' || activeTab === 'insights' || activeTab === 'graphs' || activeTab === 'predictions'), queryKey: ['/api/football/matches', fixtureId, 'tmp'] },
-  });
-  const lastFiveQuery = useGetFootballMatchLastFive(validId ? fixtureId : 0, {
-    query: { enabled: validId && (activeTab === 'lastfive' || activeTab === 'insights' || activeTab === 'graphs' || activeTab === 'predictions'), queryKey: getGetFootballMatchLastFiveQueryKey(fixtureId) },
-  });
-  const replayQuery = useGetFootballMatchReplay(validId ? fixtureId : 0, {
+  useEffect(() => {
+    if (isLiveMatchStatus(details?.match.status)) setActiveTab('match-center');
+  }, [fixtureId, details?.match.status]);
+  const matchCenterQuery = useGetFootballMatchCenter(validId ? fixtureId : 0, {
     query: {
       enabled:
         validId &&
-        activeTab === 'replay' &&
-        isCompleteMatchStatus(detailsQuery.data?.match.status),
-      queryKey: getGetFootballMatchReplayQueryKey(fixtureId),
+        (activeTab === 'match-center' ||
+          isLiveMatchStatus(details?.match.status)),
+      queryKey: getGetFootballMatchCenterQueryKey(fixtureId),
       retry: false,
-      staleTime: 10 * 60_000,
+      staleTime: 0,
+      refetchInterval: (query) =>
+        isLiveMatchStatus(
+          query.state.data?.match.status ?? details?.match.status,
+        )
+          ? 15_000
+          : false,
+      refetchIntervalInBackground: false,
     },
   });
-  const details = detailsQuery.data as FootballMatchDetails | undefined;
-  const match = details?.match;
+  const matchCenter = matchCenterQuery.data as FootballMatchCenter | undefined;
+  const match = matchCenter?.match ?? details?.match;
   const matchStatus = match?.status.toLowerCase() ?? '';
-  const isLive = /\b(live|in play|in progress|half[ -]?time|first half|second half)\b/.test(matchStatus);
-  const isComplete = /\b(finished|full time|ft|ended|complete|after extra time|penalties)\b/.test(matchStatus);
+  const isLive = isLiveMatchStatus(match?.status);
+  const isComplete = isCompleteMatchStatus(match?.status);
   const canRunFairAiSimulation = !/\b(postponed|cancelled|canceled|abandoned|suspended|awarded)\b/.test(matchStatus);
   const kickoffTime = match ? Date.parse(match.date) : Number.NaN;
   const isUpcomingPreMatch = Boolean(
@@ -290,6 +303,25 @@ export default function MatchDetailsPage() {
     !isComplete &&
     !/\b(postponed|cancelled|canceled|abandoned|suspended|awarded)\b/.test(matchStatus),
   );
+  const tmpQuery = useGetFootballMatchTmp(validId ? fixtureId : 0, {
+    query: { enabled: validId && (activeTab === 'tmp' || activeTab === 'insights' || activeTab === 'graphs' || activeTab === 'predictions'), queryKey: ['/api/football/matches', fixtureId, 'tmp'] },
+  });
+  const lastFiveQuery = useGetFootballMatchLastFive(validId ? fixtureId : 0, {
+    query: { enabled: validId && (activeTab === 'lastfive' || activeTab === 'insights' || activeTab === 'graphs' || activeTab === 'predictions'), queryKey: getGetFootballMatchLastFiveQueryKey(fixtureId) },
+  });
+  const replayQuery = useGetFootballMatchReplay(validId ? fixtureId : 0, {
+    query: {
+      enabled:
+        validId &&
+        ((activeTab === 'replay' && isComplete) ||
+          (activeTab === 'match-center' && (isLive || isComplete))),
+      queryKey: getGetFootballMatchReplayQueryKey(fixtureId),
+      retry: false,
+      staleTime: isLive ? 30_000 : 10 * 60_000,
+      refetchInterval: isLive ? 60_000 : false,
+      refetchIntervalInBackground: false,
+    },
+  });
   const visibleTabs = isComplete ? tabs : tabs.filter((tab) => tab.id !== 'replay');
 
   return (
@@ -384,6 +416,20 @@ export default function MatchDetailsPage() {
                     <FairAiSourceDataPanel />
                   </section>
                 </div>
+                {activeTab === 'match-center' && (
+                  <MatchCenterPanel
+                    data={matchCenter}
+                    isLoading={matchCenterQuery.isLoading}
+                    isError={matchCenterQuery.isError}
+                    error={matchCenterQuery.error}
+                    onRetry={() => { void matchCenterQuery.refetch(); }}
+                    shotEvents={replayQuery.data?.shotEvents}
+                    formationPlayers={replayQuery.data?.formationPlayers}
+                    shotFeedLoading={replayQuery.isLoading}
+                    shotFeedError={replayQuery.error}
+                    onRetryShotFeed={() => { void replayQuery.refetch(); }}
+                  />
+                )}
                 {activeTab === 'replay' && isComplete && (
                   <MatchReplayPanel
                     fixtureId={fixtureId}

@@ -75,6 +75,7 @@ export * from './footballLastFivePlayerGroup';
 export * from './footballLastFiveStat';
 export * from './footballLastFiveTeam';
 export * from './footballLastFiveTeamStatistics';
+export * from './footballMatchCenter';
 export * from './footballMatchDetails';
 export * from './footballMatchDetailsIssue';
 export * from './footballMatchDetailsIssueSection';

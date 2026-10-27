@@ -1352,6 +1352,19 @@ export interface DeleteFootballTesterMatchesResponse {
   deletedCount: number;
 }
 
+export interface FootballMatchCenter {
+  sourceUrl: string;
+  match: FootballMatchSummary;
+  /** @nullable */
+  elapsedMinute: number | null;
+  observedAt: string;
+  statistics: FootballLastFiveTeamStatistics[];
+  events: FootballLastFiveEvent[];
+  lineups: FootballLastFiveLineup[];
+  players: FootballLastFivePlayerGroup[];
+  issues: string[];
+}
+
 export interface FootballMatchReplayEvent {
   minute: string;
   kind: string;

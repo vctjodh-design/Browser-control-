@@ -10,12 +10,14 @@ import type {
   FootballLastFiveStat,
   FootballLastFiveTeam,
   FootballLastFiveTeamStatistics,
+  FootballMatchCenter,
   FootballMatchLastFive,
   FootballRecentMatch,
 } from "@workspace/api-zod";
 import {
   fetchKickoffScoreJson,
   getKickoffScoreMatchDetails,
+  parseMatchSummary,
   oddsCategory,
   KickoffScoreMatchNotFoundError,
 } from "./kickoffscore-match-details";
@@ -45,6 +47,11 @@ type TeamHistoryCacheEntry = {
 
 const resultCache = new Map<number, CacheEntry>();
 const inFlightResults = new Map<number, Promise<FootballMatchLastFive>>();
+const matchCenterCache = new Map<
+  number,
+  { expiresAt: number; data: FootballMatchCenter }
+>();
+const inFlightMatchCenters = new Map<number, Promise<FootballMatchCenter>>();
 const teamHistoryCache = new Map<number, TeamHistoryCacheEntry>();
 const inFlightTeamHistory = new Map<number, Promise<HistoricalFixture[]>>();
 
@@ -416,7 +423,7 @@ function parseFairAiSourceSnapshot(value: unknown) {
   const competition = asString(league?.name) ?? asString(league?.country) ?? "Football";
   const recentMatch: FootballRecentMatch = {
     fixtureId: match.fixtureId,
-    date: match.date,
+    date: new Date(match.date),
     competition,
     status: matchStatus,
     leagueId: asInteger(league?.id),
@@ -882,6 +889,95 @@ async function loadMatch(match: FootballRecentMatch) {
     prematchStats,
     issues,
   };
+}
+
+function isLiveMatchStatus(status: string): boolean {
+  return /\b(live|in play|in progress|first half|second half|1st half|2nd half|1h|2h|half[ -]?time|halftime)\b/i.test(
+    status,
+  );
+}
+
+async function loadMatchCenter(
+  fixtureId: number,
+): Promise<FootballMatchCenter> {
+  const payload = await fetchKickoffScoreJson("/api/fixtures", {
+    id: String(fixtureId),
+  });
+  const fixture = fixtureObject(payload);
+  const match = parseMatchSummary(fixture, fixtureId);
+  if (!fixture || !match) throw new KickoffScoreMatchNotFoundError();
+
+  const recentMatch: FootballRecentMatch = {
+    fixtureId: match.fixtureId,
+    date: match.date,
+    competition: match.competition,
+    status: match.status,
+    leagueId: match.leagueId,
+    season: match.season,
+    homeTeam: match.home,
+    awayTeam: match.away,
+    homeScore: match.home.score,
+    awayScore: match.away.score,
+  };
+  const fixtureInfo = asObject(fixture.fixture);
+  const statusInfo = asObject(fixtureInfo?.status);
+  const statistics = parseStatistics(fixture);
+  const events = parseEvents(fixture);
+  const lineups = parseLineups(fixture);
+  const players = parsePlayers(fixture);
+  const issues: string[] = [];
+
+  if (!statistics.length) issues.push("Team statistics were not returned.");
+  if (!events.length) issues.push("Match events were not returned.");
+  if (!lineups.length) issues.push("Lineups were not returned.");
+  if (!players.length) issues.push("Player statistics were not returned.");
+
+  return {
+    sourceUrl: sourceMatchUrl(recentMatch),
+    match,
+    elapsedMinute: asInteger(statusInfo?.elapsed),
+    observedAt: new Date(),
+    statistics,
+    events,
+    lineups,
+    players,
+    issues,
+  };
+}
+
+export function getKickoffScoreMatchCenter(
+  fixtureId: number,
+): Promise<FootballMatchCenter> {
+  const cached = matchCenterCache.get(fixtureId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return Promise.resolve(cached.data);
+  }
+
+  const activeRequest = inFlightMatchCenters.get(fixtureId);
+  if (activeRequest) return activeRequest;
+
+  const request = loadMatchCenter(fixtureId)
+    .then((data) => {
+      matchCenterCache.set(fixtureId, {
+        data,
+        expiresAt:
+          Date.now() +
+          (isLiveMatchStatus(data.match.status) ? 10_000 : 5 * 60_000),
+      });
+      if (matchCenterCache.size > 80) {
+        const oldestFixtureId = matchCenterCache.keys().next().value;
+        if (oldestFixtureId !== undefined) {
+          matchCenterCache.delete(oldestFixtureId);
+        }
+      }
+      return data;
+    })
+    .finally(() => {
+      inFlightMatchCenters.delete(fixtureId);
+    });
+
+  inFlightMatchCenters.set(fixtureId, request);
+  return request;
 }
 
 async function loadLastFive(fixtureId: number): Promise<FootballMatchLastFive> {

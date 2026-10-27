@@ -810,12 +810,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballFixtureError"
-  /football/matches/{fixtureId}/replay:
+  /football/matches/{fixtureId}/match-center:
     get:
-      operationId: getFootballMatchReplay
+      operationId: getFootballMatchCenter
       tags: [fixtures]
-      summary: Build a completed-match replay from 365Scores
-      description: Finds the match on its 365Scores daily results page and collects the visible match report sections
+      summary: Get live score, events, lineups, and player statistics
+      description: Returns the current KickoffScore fixture snapshot and source-provided player data
       parameters:
         - name: fixtureId
           in: path
@@ -826,13 +826,63 @@ paths:
             minimum: 1
       responses:
         "200":
-          description: Public match report, events, lineups, and period data
+          description: Current score, match events, team statistics, lineups, and player statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballMatchCenter"
+        "400":
+          description: Invalid fixture ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "404":
+          description: Match was not found on KickoffScore
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "429":
+          description: KickoffScore is temporarily rate limiting requests
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait before trying again
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "502":
+          description: KickoffScore could not be reached or its data could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+  /football/matches/{fixtureId}/replay:
+    get:
+      operationId: getFootballMatchReplay
+      tags: [fixtures]
+      summary: Collect source match events and shot locations from 365Scores
+      description: Finds the same fixture on 365Scores and returns recorded match events, shot coordinates, lineups, and report sections during or after play
+      parameters:
+        - name: fixtureId
+          in: path
+          required: true
+          description: KickoffScore fixture ID
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Source match events, shot coordinates, lineups, and report data
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballMatchReplay"
         "400":
-          description: Invalid fixture ID or the fixture is not complete
+          description: Invalid fixture ID or the match has not started
           content:
             application/json:
               schema:
@@ -3126,6 +3176,49 @@ components:
         - homeRecent
         - awayRecent
         - headToHead
+        - issues
+    FootballMatchCenter:
+      type: object
+      properties:
+        sourceUrl:
+          type: string
+          format: uri
+        match:
+          $ref: "#/components/schemas/FootballMatchSummary"
+        elapsedMinute:
+          type: ["integer", "null"]
+        observedAt:
+          type: string
+          format: date-time
+        statistics:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballLastFiveTeamStatistics"
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballLastFiveEvent"
+        lineups:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballLastFiveLineup"
+        players:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballLastFivePlayerGroup"
+        issues:
+          type: array
+          items:
+            type: string
+      required:
+        - sourceUrl
+        - match
+        - elapsedMinute
+        - observedAt
+        - statistics
+        - events
+        - lineups
+        - players
         - issues
     FootballMatchReplayEvent:
       type: object
