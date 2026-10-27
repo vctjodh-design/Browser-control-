@@ -425,6 +425,33 @@ export async function waitForBrowserPage(
   await page.waitForTimeout(boundedDelay);
 }
 
+export async function readBrowserJsonDocument(
+  sessionId: string,
+): Promise<unknown> {
+  const page = getActivePage(getSession(sessionId));
+  try {
+    const documentText = await page.evaluate(() => {
+      const doc = (
+        globalThis as unknown as { document: any }
+      ).document;
+      if (!String(doc.contentType ?? "").includes("json")) {
+        throw new Error("The page is not a JSON document.");
+      }
+      const text = String(doc.body?.innerText ?? "");
+      if (text.length > 1_000_000) {
+        throw new Error("The source response is too large to read.");
+      }
+      return text;
+    });
+    return JSON.parse(documentText) as unknown;
+  } catch {
+    throw new BrowserOperationError(
+      "The 365Scores data response could not be read.",
+      502,
+    );
+  }
+}
+
 export async function clickBrowserText(
   sessionId: string,
   text: string,
@@ -461,7 +488,7 @@ export async function clickBrowserText(
       );
     }
 
-    await target.locator.click({ timeout: 8_000, force: true });
+    await target.locator.click({ timeout: 8_000 });
     await page.waitForTimeout(700);
   } catch (error) {
     if (error instanceof BrowserOperationError) throw error;

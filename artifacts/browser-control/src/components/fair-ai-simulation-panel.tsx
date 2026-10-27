@@ -385,7 +385,7 @@ export default function FairAiSimulationPanel({
           >
             {simulation.isPending
               ? <><RefreshCw size={12} className="animate-spin" /> Refreshing source &amp; running…</>
-              : <><Play size={12} /> {fixture ? 'Refresh and rerun' : 'Run simulation'}</>}
+              : <><Play size={12} /> {result ? 'Refresh and rerun' : 'Run simulation'}</>}
           </button>
           {fixture && !allowSimulation && (
             <span className="text-[8px] text-[#8b7157]" role="status" data-testid="status-fair-ai-not-prematch">
