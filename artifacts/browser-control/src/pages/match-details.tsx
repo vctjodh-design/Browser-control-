@@ -31,10 +31,11 @@ import {
   Trophy,
 } from 'lucide-react';
 
-type MatchTab = 'table' | 'fair-ai' | 'odds' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
+type MatchTab = 'table' | 'fair-ai' | 'replay' | 'odds' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
 const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'table', label: 'Table', short: '01' },
   { id: 'fair-ai', label: 'FAIR AI', short: '02' },
+  { id: 'replay', label: 'Match replay', short: '11' },
   { id: 'odds', label: 'Odds', short: '03' },
   { id: 'form', label: 'Team form', short: '04' },
   { id: 'lastfive', label: 'Last five', short: '05' },
@@ -271,6 +272,7 @@ export default function MatchDetailsPage() {
   const matchStatus = match?.status.toLowerCase() ?? '';
   const isLive = /\b(live|in play|in progress|half[ -]?time|first half|second half)\b/.test(matchStatus);
   const isComplete = /\b(finished|full time|ft|ended|complete|after extra time|penalties)\b/.test(matchStatus);
+  const canRunFairAiSimulation = !/\b(postponed|cancelled|canceled|abandoned|suspended|awarded)\b/.test(matchStatus);
   const kickoffTime = match ? Date.parse(match.date) : Number.NaN;
   const isUpcomingPreMatch = Boolean(
     match &&
@@ -280,6 +282,7 @@ export default function MatchDetailsPage() {
     !isComplete &&
     !/\b(postponed|cancelled|canceled|abandoned|suspended|awarded)\b/.test(matchStatus),
   );
+  const visibleTabs = isComplete ? tabs : tabs.filter((tab) => tab.id !== 'replay');
 
   return (
     <main className="screen-noise min-h-[100dvh] bg-[#f2f0e8] text-[#243443]">
@@ -336,7 +339,7 @@ export default function MatchDetailsPage() {
 
             <section className="mt-5 overflow-hidden rounded-[16px] border border-[#d6d5cc] bg-[#f9f8f3] shadow-[0_12px_40px_rgba(47,59,64,.04)]">
               <div role="tablist" aria-label="Match details sections" className="flex gap-1 overflow-x-auto border-b border-[#deddd4] bg-[#f4f3ed] p-2 sm:p-2.5" data-testid="tabs-match-details">
-                {tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} onClick={() => setActiveTab(tab.id)} className={`flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold transition sm:px-4 ${activeTab === tab.id ? 'bg-[#253746] text-[#f8f2e7] shadow-sm' : 'text-[#718079] hover:bg-[#e9eee8] hover:text-[#344550]'}`} data-testid={`tab-${tab.id}`}><span className={`mono text-[8px] ${activeTab === tab.id ? 'text-[#d8a08a]' : 'text-[#a7a99f]'}`}>{tab.short}</span>{tab.label}</button>)}
+                {visibleTabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} onClick={() => setActiveTab(tab.id)} className={`flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold transition sm:px-4 ${activeTab === tab.id ? 'bg-[#253746] text-[#f8f2e7] shadow-sm' : 'text-[#718079] hover:bg-[#e9eee8] hover:text-[#344550]'}`} data-testid={`tab-${tab.id}`}><span className={`mono text-[8px] ${activeTab === tab.id ? 'text-[#d8a08a]' : 'text-[#a7a99f]'}`}>{tab.short}</span>{tab.label}</button>)}
               </div>
               <div className="p-4 sm:p-6">
                 {activeTab === 'table' && <StandingsPanel details={details} />}
@@ -349,36 +352,40 @@ export default function MatchDetailsPage() {
                         This tab shows the source-data coverage available for this match and the archive. KickoffScore provides aggregate match and lineup records here, but no pitch coordinates or player tracking, so spatial xT/EVA evaluation is not available yet.
                       </p>
                     </div>
-                    {isUpcomingPreMatch ? (
-                      <FairAiSimulationPanel
-                        key={match.fixtureId}
-                        fixture={{
-                          fixtureId: match.fixtureId,
-                          homeTeamId: match.home.id,
-                          awayTeamId: match.away.id,
-                          homeTeamName: match.home.name,
-                          awayTeamName: match.away.name,
-                        }}
-                        autoRunOnOpen
-                      />
-                    ) : (
+                    {!isUpcomingPreMatch && (
                       <div className="rounded-xl border border-[#e8dfca] bg-[#faf5e9] px-4 py-3.5 text-[9px] leading-5 text-[#7d6c4d]" role="status" data-testid="status-fair-ai-not-upcoming">
-                        Pre-match simulation runs automatically for upcoming fixtures. This match is live, complete, or no longer scheduled in the future, so using current team data would not represent a pre-kickoff forecast.
+                        {isComplete
+                          ? 'This match is complete. You can run a current-data what-if simulation manually; it is not a prediction or a reconstruction, and recent source data may include this match.'
+                          : isLive
+                            ? 'This match is live. A manual simulation uses the teams’ latest completed records; it is not a live forecast or match replay.'
+                            : 'This fixture is not eligible for automatic pre-match simulation. A manual current-data simulation can still be run.'}
                       </div>
                     )}
-                    {isComplete && (
-                      <MatchReplayPanel
-                        fixtureId={fixtureId}
-                        replay={replayQuery.data}
-                        isLoading={replayQuery.isLoading}
-                        isError={replayQuery.isError}
-                        error={replayQuery.error}
-                        onRetry={() => { void replayQuery.refetch(); }}
-                      />
-                    )}
+                    <FairAiSimulationPanel
+                      key={match.fixtureId}
+                      fixture={{
+                        fixtureId: match.fixtureId,
+                        homeTeamId: match.home.id,
+                        awayTeamId: match.away.id,
+                        homeTeamName: match.home.name,
+                        awayTeamName: match.away.name,
+                      }}
+                      autoRunOnOpen={isUpcomingPreMatch}
+                      allowSimulation={canRunFairAiSimulation}
+                    />
                     <FairAiSourceDataPanel />
                   </section>
                 </div>
+                {activeTab === 'replay' && isComplete && (
+                  <MatchReplayPanel
+                    fixtureId={fixtureId}
+                    replay={replayQuery.data}
+                    isLoading={replayQuery.isLoading}
+                    isError={replayQuery.isError}
+                    error={replayQuery.error}
+                    onRetry={() => { void replayQuery.refetch(); }}
+                  />
+                )}
                 {activeTab === 'odds' && <OddsPanel details={details} />}
                 {activeTab === 'form' && <FormPanel details={details} />}
                 {activeTab === 'h2h' && <HeadToHeadPanel details={details} />}
