@@ -1361,6 +1361,70 @@ export interface FootballMatchReplayEvent {
   sourceOrder: number;
 }
 
+export type FootballMatchReplayShotEventTeamSide = typeof FootballMatchReplayShotEventTeamSide[keyof typeof FootballMatchReplayShotEventTeamSide];
+
+
+export const FootballMatchReplayShotEventTeamSide = {
+  home: 'home',
+  away: 'away',
+} as const;
+
+export interface FootballMatchReplayShotEvent {
+  minute: string;
+  teamSide: FootballMatchReplayShotEventTeamSide;
+  /** @nullable */
+  playerName: string | null;
+  /** @nullable */
+  outcome: string | null;
+  /** @nullable */
+  bodyPart: string | null;
+  /** @nullable */
+  xg: string | null;
+  /** @nullable */
+  xgot: string | null;
+  /**
+     * @minimum 0
+     * @maximum 100
+     * @nullable
+     */
+  x: number | null;
+  /**
+     * @minimum 0
+     * @maximum 100
+     * @nullable
+     */
+  y: number | null;
+  /** @minimum 0 */
+  sourceOrder: number;
+}
+
+export type FootballMatchReplayFormationPlayerTeamSide = typeof FootballMatchReplayFormationPlayerTeamSide[keyof typeof FootballMatchReplayFormationPlayerTeamSide];
+
+
+export const FootballMatchReplayFormationPlayerTeamSide = {
+  home: 'home',
+  away: 'away',
+} as const;
+
+export interface FootballMatchReplayFormationPlayer {
+  teamSide: FootballMatchReplayFormationPlayerTeamSide;
+  playerName: string;
+  /** @nullable */
+  shirtNumber: number | null;
+  /** @nullable */
+  position: string | null;
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  x: number;
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  y: number;
+}
+
 export type FootballMatchReplaySectionKey = typeof FootballMatchReplaySectionKey[keyof typeof FootballMatchReplaySectionKey];
 
 
@@ -1401,6 +1465,8 @@ export interface FootballMatchReplay {
   sourceDateListUrl: string;
   sourceMatchUrl: string;
   events: FootballMatchReplayEvent[];
+  shotEvents: FootballMatchReplayShotEvent[];
+  formationPlayers: FootballMatchReplayFormationPlayer[];
   sections: FootballMatchReplaySection[];
 }
 

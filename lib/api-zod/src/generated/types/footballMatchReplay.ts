@@ -6,7 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { FootballMatchReplayEvent } from './footballMatchReplayEvent';
+import type { FootballMatchReplayFormationPlayer } from './footballMatchReplayFormationPlayer';
 import type { FootballMatchReplaySection } from './footballMatchReplaySection';
+import type { FootballMatchReplayShotEvent } from './footballMatchReplayShotEvent';
 
 export interface FootballMatchReplay {
   fixtureId: number;
@@ -27,5 +29,7 @@ export interface FootballMatchReplay {
   sourceDateListUrl: string;
   sourceMatchUrl: string;
   events: FootballMatchReplayEvent[];
+  shotEvents: FootballMatchReplayShotEvent[];
+  formationPlayers: FootballMatchReplayFormationPlayer[];
   sections: FootballMatchReplaySection[];
 }

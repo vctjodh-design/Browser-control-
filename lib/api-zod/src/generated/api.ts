@@ -1650,6 +1650,20 @@ export const GetFootballMatchReplayParams = zod.object({
 
 export const getFootballMatchReplayResponseEventsItemSourceOrderMin = 0;
 
+export const getFootballMatchReplayResponseShotEventsItemXMin = 0;
+export const getFootballMatchReplayResponseShotEventsItemXMax = 100;
+
+export const getFootballMatchReplayResponseShotEventsItemYMin = 0;
+export const getFootballMatchReplayResponseShotEventsItemYMax = 100;
+
+export const getFootballMatchReplayResponseShotEventsItemSourceOrderMin = 0;
+
+export const getFootballMatchReplayResponseFormationPlayersItemXMin = 0;
+export const getFootballMatchReplayResponseFormationPlayersItemXMax = 100;
+
+export const getFootballMatchReplayResponseFormationPlayersItemYMin = 0;
+export const getFootballMatchReplayResponseFormationPlayersItemYMax = 100;
+
 
 
 export const GetFootballMatchReplayResponse = zod.object({
@@ -1671,6 +1685,26 @@ export const GetFootballMatchReplayResponse = zod.object({
   "title": zod.string(),
   "detail": zod.string(),
   "sourceOrder": zod.number().int().min(getFootballMatchReplayResponseEventsItemSourceOrderMin)
+})),
+  "shotEvents": zod.array(zod.object({
+  "minute": zod.string(),
+  "teamSide": zod.enum(['home', 'away']),
+  "playerName": zod.string().nullable(),
+  "outcome": zod.string().nullable(),
+  "bodyPart": zod.string().nullable(),
+  "xg": zod.string().nullable(),
+  "xgot": zod.string().nullable(),
+  "x": zod.number().min(getFootballMatchReplayResponseShotEventsItemXMin).max(getFootballMatchReplayResponseShotEventsItemXMax).nullable(),
+  "y": zod.number().min(getFootballMatchReplayResponseShotEventsItemYMin).max(getFootballMatchReplayResponseShotEventsItemYMax).nullable(),
+  "sourceOrder": zod.number().int().min(getFootballMatchReplayResponseShotEventsItemSourceOrderMin)
+})),
+  "formationPlayers": zod.array(zod.object({
+  "teamSide": zod.enum(['home', 'away']),
+  "playerName": zod.string(),
+  "shirtNumber": zod.number().int().nullable(),
+  "position": zod.string().nullable(),
+  "x": zod.number().min(getFootballMatchReplayResponseFormationPlayersItemXMin).max(getFootballMatchReplayResponseFormationPlayersItemXMax),
+  "y": zod.number().min(getFootballMatchReplayResponseFormationPlayersItemYMin).max(getFootballMatchReplayResponseFormationPlayersItemYMax)
 })),
   "sections": zod.array(zod.object({
   "key": zod.enum(['lineups', 'commentary', 'full-time-stats', 'first-half-stats', 'second-half-stats', 'shot-map', 'time-details']),
