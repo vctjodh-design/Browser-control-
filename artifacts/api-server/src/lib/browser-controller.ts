@@ -416,6 +416,62 @@ export async function getBrowserState(sessionId: string) {
   };
 }
 
+export async function waitForBrowserPage(
+  sessionId: string,
+  milliseconds = 4_000,
+): Promise<void> {
+  const boundedDelay = Math.max(0, Math.min(10_000, milliseconds));
+  const page = getActivePage(getSession(sessionId));
+  await page.waitForTimeout(boundedDelay);
+}
+
+export async function clickBrowserText(
+  sessionId: string,
+  text: string,
+): Promise<void> {
+  const normalizedText = text.trim();
+  if (!normalizedText || normalizedText.length > 80) {
+    throw new BrowserOperationError("That page control could not be selected.", 400);
+  }
+
+  const page = getActivePage(getSession(sessionId));
+  try {
+    const locators = await page.getByText(normalizedText, { exact: true }).all();
+    const candidates = await Promise.all(
+      locators.map(async (locator) => ({
+        locator,
+        visible: await locator.isVisible().catch(() => false),
+        box: await locator.boundingBox().catch(() => null),
+      })),
+    );
+    const target = candidates
+      .filter(
+        (candidate) =>
+          candidate.visible &&
+          candidate.box &&
+          candidate.box.x >= VIEWPORT.width * 0.3 &&
+          candidate.box.y >= VIEWPORT.height * 0.2,
+      )
+      .sort((left, right) => (right.box?.x ?? 0) - (left.box?.x ?? 0))[0];
+
+    if (!target) {
+      throw new BrowserOperationError(
+        `The page does not expose a visible “${normalizedText}” control.`,
+        404,
+      );
+    }
+
+    await target.locator.click({ timeout: 8_000 });
+    await page.waitForTimeout(700);
+  } catch (error) {
+    if (error instanceof BrowserOperationError) throw error;
+    throw new BrowserOperationError(
+      `The “${normalizedText}” section could not be opened.`,
+      502,
+    );
+  }
+}
+
 export async function createBrowserSession(
   url?: string,
   tabCount = 1,
