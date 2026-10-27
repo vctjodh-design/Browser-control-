@@ -265,7 +265,15 @@ export default function MatchDetailsPage() {
     query: { enabled: validId && (activeTab === 'lastfive' || activeTab === 'insights' || activeTab === 'graphs' || activeTab === 'predictions'), queryKey: getGetFootballMatchLastFiveQueryKey(fixtureId) },
   });
   const replayQuery = useGetFootballMatchReplay(validId ? fixtureId : 0, {
-    query: { enabled: validId && isCompleteMatchStatus(detailsQuery.data?.match.status), queryKey: getGetFootballMatchReplayQueryKey(fixtureId) },
+    query: {
+      enabled:
+        validId &&
+        activeTab === 'replay' &&
+        isCompleteMatchStatus(detailsQuery.data?.match.status),
+      queryKey: getGetFootballMatchReplayQueryKey(fixtureId),
+      retry: false,
+      staleTime: 10 * 60_000,
+    },
   });
   const details = detailsQuery.data as FootballMatchDetails | undefined;
   const match = details?.match;

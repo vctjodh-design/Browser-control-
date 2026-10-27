@@ -71,6 +71,13 @@ function LoadingReplay() {
   return (
     <section className="overflow-hidden rounded-[16px] border border-[#d7d9ce] bg-[#f9f8f2]" role="status" aria-label="Loading match replay" data-testid="status-replay-loading">
       <div className="h-1 bg-[#e3e9df]"><div className="h-full w-1/3 animate-pulse bg-[#527b60]" /></div>
+      <div className="flex items-start gap-3 border-b border-[#e6e5dc] bg-[#f4f3eb] px-5 py-3.5 sm:px-7">
+        <span className="mt-0.5 size-2 shrink-0 animate-pulse rounded-full bg-[#527b60]" aria-hidden="true" />
+        <div>
+          <p className="text-[10px] font-extrabold text-[#465a52]">Loading the source match report</p>
+          <p className="mt-1 text-[9px] leading-5 text-[#80847a]">Fetching recorded events, shot locations, and lineup positions. If the source is unavailable, a retry option will appear.</p>
+        </div>
+      </div>
       <div className="grid gap-5 p-5 sm:grid-cols-[1.2fr_.8fr] sm:p-7">
         <div className="space-y-4"><div className="h-3 w-28 animate-pulse rounded bg-[#e7e6dc]" /><div className="h-8 w-3/4 animate-pulse rounded bg-[#e7e6dc]" /><div className="h-20 animate-pulse rounded-xl bg-[#efeee6]" /><div className="space-y-3 pt-2">{[0, 1, 2].map((row) => <div key={row} className="h-12 animate-pulse rounded-lg bg-[#efeee6]" />)}</div></div>
         <div className="h-52 animate-pulse rounded-xl bg-[#efeee6]" />

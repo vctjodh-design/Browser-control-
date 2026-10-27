@@ -11,7 +11,7 @@ import {
   createBrowserSession,
   getBrowserState,
   navigateBrowser,
-  readBrowserJsonDocument,
+  navigateBrowserJsonDocument,
   waitForBrowserPage,
 } from "./browser-controller";
 
@@ -19,6 +19,7 @@ const DAY_LIST_URL = "https://www.365scores.com/football/yesterdays-matches";
 const RESULTS_LIST_URL = "https://www.365scores.com/football/match-results";
 const PAGE_LOAD_SETTLE_MS = 3_500;
 const REPLAY_CACHE_TTL_MS = 10 * 60 * 1_000;
+const REPLAY_SOURCE_TIMEOUT_MS = 45_000;
 const MAX_REPLAY_CACHE_ENTRIES = 60;
 
 type BrowserSnapshot = Awaited<ReturnType<typeof getBrowserState>>;
@@ -787,9 +788,9 @@ async function readSourceJson(
     );
   }
 
-  const state = await navigateBrowser(sessionId, url.toString());
+  const response = await navigateBrowserJsonDocument(sessionId, url.toString());
   try {
-    if (new URL(state.currentUrl).hostname !== url.hostname) {
+    if (new URL(response.currentUrl).hostname !== url.hostname) {
       throw new MatchReplaySourceError(
         "365Scores redirected the replay to an unexpected source.",
       );
@@ -798,7 +799,7 @@ async function readSourceJson(
     if (error instanceof MatchReplaySourceError) throw error;
     throw new MatchReplaySourceError();
   }
-  return readBrowserJsonDocument(sessionId);
+  return response.document;
 }
 
 function statsApiUrl(gameId: number, filterId?: number): URL {
@@ -853,6 +854,9 @@ export async function get365ScoresMatchReplay(
   const cached = replayCache.get(details.match.fixtureId);
   if (cached && cached.expiresAt > Date.now()) return cached.replay;
 
+  let sessionId: string | null = null;
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const sourceTask = (async (): Promise<FootballMatchReplay> => {
   const fixtureDate = new Date(details.match.date);
   if (!Number.isFinite(fixtureDate.getTime())) {
     throw new MatchReplaySourceError("The match date is unavailable.");
@@ -863,7 +867,6 @@ export async function get365ScoresMatchReplay(
   const resultsListUrl = new URL(RESULTS_LIST_URL);
   resultsListUrl.searchParams.set("date", date);
 
-  let sessionId: string | null = null;
   try {
     const listState = await createBrowserSession(dayListUrl.toString());
     sessionId = listState.sessionId;
@@ -1017,5 +1020,23 @@ export async function get365ScoresMatchReplay(
     throw new MatchReplaySourceError(replayErrorMessage(error));
   } finally {
     if (sessionId) await closeBrowserSession(sessionId).catch(() => undefined);
+  }
+  })();
+
+  const timeoutTask = new Promise<never>((_resolve, reject) => {
+    timeoutHandle = setTimeout(() => {
+      if (sessionId) void closeBrowserSession(sessionId);
+      reject(
+        new MatchReplaySourceError(
+          "365Scores took too long to load this replay. Please try again shortly.",
+        ),
+      );
+    }, REPLAY_SOURCE_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([sourceTask, timeoutTask]);
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
   }
 }
