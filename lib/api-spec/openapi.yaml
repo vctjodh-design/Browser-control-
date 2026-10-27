@@ -2106,6 +2106,120 @@ components:
         away:
           $ref: "#/components/schemas/FootballFairAiSimulationStandingsTeam"
       required: [adjustmentsApplied, home, away]
+    FootballFairAiSimulationGameStateSample:
+      type: object
+      properties:
+        possessions:
+          type: integer
+        shots:
+          type: integer
+        goals:
+          type: integer
+        shotsPer100Possessions:
+          type: number
+      required: [possessions, shots, goals, shotsPer100Possessions]
+    FootballFairAiSimulationGameStateResponse:
+      type: object
+      properties:
+        leading:
+          $ref: "#/components/schemas/FootballFairAiSimulationGameStateSample"
+        level:
+          $ref: "#/components/schemas/FootballFairAiSimulationGameStateSample"
+        trailing:
+          $ref: "#/components/schemas/FootballFairAiSimulationGameStateSample"
+      required: [leading, level, trailing]
+    FootballFairAiSimulationTacticalInteraction:
+      type: object
+      properties:
+        formation:
+          type: ["string", "null"]
+        passCompletionEvidencePct:
+          type: ["number", "null"]
+        longBallCompletionEvidencePct:
+          type: ["number", "null"]
+        opponentPressureProxy:
+          type: number
+        buildupVsPressAdjustmentPct:
+          type: number
+        evidenceQuality:
+          type: string
+          enum: [proxy, limited, missing]
+      required:
+        - formation
+        - passCompletionEvidencePct
+        - longBallCompletionEvidencePct
+        - opponentPressureProxy
+        - buildupVsPressAdjustmentPct
+        - evidenceQuality
+    FootballFairAiSimulationPlayerRoleCoverage:
+      type: object
+      properties:
+        archivedProfiles:
+          type: integer
+        profilesUsed:
+          type: integer
+        archivedStarters:
+          type: integer
+        forwards:
+          type: integer
+        midfielders:
+          type: integer
+        defenders:
+          type: integer
+        goalkeepers:
+          type: integer
+      required:
+        - archivedProfiles
+        - profilesUsed
+        - archivedStarters
+        - forwards
+        - midfielders
+        - defenders
+        - goalkeepers
+    FootballFairAiSimulationChanceAndExecution:
+      type: object
+      properties:
+        shotsPerMatch:
+          type: number
+        expectedGoalsPerMatch:
+          type: number
+        simulatedGoalsPerMatch:
+          type: number
+        expectedGoalsPerShot:
+          type: number
+        averageFinishingAdjustment:
+          type: number
+        opposingKeeperConversionFactor:
+          type: number
+      required:
+        - shotsPerMatch
+        - expectedGoalsPerMatch
+        - simulatedGoalsPerMatch
+        - expectedGoalsPerShot
+        - averageFinishingAdjustment
+        - opposingKeeperConversionFactor
+    FootballFairAiSimulationMatchupTeam:
+      type: object
+      properties:
+        tacticalInteraction:
+          $ref: "#/components/schemas/FootballFairAiSimulationTacticalInteraction"
+        playerRoleCoverage:
+          $ref: "#/components/schemas/FootballFairAiSimulationPlayerRoleCoverage"
+        chanceAndExecution:
+          $ref: "#/components/schemas/FootballFairAiSimulationChanceAndExecution"
+        gameStateResponse:
+          $ref: "#/components/schemas/FootballFairAiSimulationGameStateResponse"
+      required: [tacticalInteraction, playerRoleCoverage, chanceAndExecution, gameStateResponse]
+    FootballFairAiSimulationMatchupAnalysis:
+      type: object
+      properties:
+        home:
+          $ref: "#/components/schemas/FootballFairAiSimulationMatchupTeam"
+        away:
+          $ref: "#/components/schemas/FootballFairAiSimulationMatchupTeam"
+        evidenceNote:
+          type: string
+      required: [home, away, evidenceNote]
     FootballFairAiSimulation:
       type: object
       properties:
@@ -2143,6 +2257,8 @@ components:
           $ref: "#/components/schemas/FootballFairAiSimulationSampleMatchAudit"
         standingsContext:
           $ref: "#/components/schemas/FootballFairAiSimulationStandingsContext"
+        matchupAnalysis:
+          $ref: "#/components/schemas/FootballFairAiSimulationMatchupAnalysis"
         topScorelines:
           type: array
           items:
@@ -2176,6 +2292,7 @@ components:
         - uncertainty
         - sampleMatchAudit
         - standingsContext
+        - matchupAnalysis
         - topScorelines
         - playerContributions
         - possessionModel

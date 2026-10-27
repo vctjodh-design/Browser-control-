@@ -496,6 +496,72 @@ export interface FootballFairAiSimulationStandingsContext {
   away: FootballFairAiSimulationStandingsTeam;
 }
 
+export interface FootballFairAiSimulationGameStateSample {
+  possessions: number;
+  shots: number;
+  goals: number;
+  shotsPer100Possessions: number;
+}
+
+export interface FootballFairAiSimulationGameStateResponse {
+  leading: FootballFairAiSimulationGameStateSample;
+  level: FootballFairAiSimulationGameStateSample;
+  trailing: FootballFairAiSimulationGameStateSample;
+}
+
+export type FootballFairAiSimulationTacticalInteractionEvidenceQuality = typeof FootballFairAiSimulationTacticalInteractionEvidenceQuality[keyof typeof FootballFairAiSimulationTacticalInteractionEvidenceQuality];
+
+
+export const FootballFairAiSimulationTacticalInteractionEvidenceQuality = {
+  proxy: 'proxy',
+  limited: 'limited',
+  missing: 'missing',
+} as const;
+
+export interface FootballFairAiSimulationTacticalInteraction {
+  /** @nullable */
+  formation: string | null;
+  /** @nullable */
+  passCompletionEvidencePct: number | null;
+  /** @nullable */
+  longBallCompletionEvidencePct: number | null;
+  opponentPressureProxy: number;
+  buildupVsPressAdjustmentPct: number;
+  evidenceQuality: FootballFairAiSimulationTacticalInteractionEvidenceQuality;
+}
+
+export interface FootballFairAiSimulationPlayerRoleCoverage {
+  archivedProfiles: number;
+  profilesUsed: number;
+  archivedStarters: number;
+  forwards: number;
+  midfielders: number;
+  defenders: number;
+  goalkeepers: number;
+}
+
+export interface FootballFairAiSimulationChanceAndExecution {
+  shotsPerMatch: number;
+  expectedGoalsPerMatch: number;
+  simulatedGoalsPerMatch: number;
+  expectedGoalsPerShot: number;
+  averageFinishingAdjustment: number;
+  opposingKeeperConversionFactor: number;
+}
+
+export interface FootballFairAiSimulationMatchupTeam {
+  tacticalInteraction: FootballFairAiSimulationTacticalInteraction;
+  playerRoleCoverage: FootballFairAiSimulationPlayerRoleCoverage;
+  chanceAndExecution: FootballFairAiSimulationChanceAndExecution;
+  gameStateResponse: FootballFairAiSimulationGameStateResponse;
+}
+
+export interface FootballFairAiSimulationMatchupAnalysis {
+  home: FootballFairAiSimulationMatchupTeam;
+  away: FootballFairAiSimulationMatchupTeam;
+  evidenceNote: string;
+}
+
 export interface FootballFairAiSimulationProbabilities {
   /**
      * @minimum 0
@@ -638,6 +704,7 @@ export interface FootballFairAiSimulation {
   uncertainty: FootballFairAiSimulationUncertainty;
   sampleMatchAudit: FootballFairAiSimulationSampleMatchAudit;
   standingsContext: FootballFairAiSimulationStandingsContext;
+  matchupAnalysis: FootballFairAiSimulationMatchupAnalysis;
   topScorelines: FootballFairAiSimulationScoreline[];
   playerContributions: FootballFairAiSimulationContribution[];
   possessionModel: FootballFairAiPossessionModel;

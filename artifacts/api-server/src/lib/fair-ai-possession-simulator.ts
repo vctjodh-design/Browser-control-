@@ -23,6 +23,9 @@ type SimPossessionOutcome = SimulatedPossession["outcome"];
 type StandingsEvaluation = FootballFairAiSimulation["standingsContext"]["home"];
 type ShotXgSource = keyof FootballFairAiSimulation["inputAudit"]["home"]["shotXgSources"];
 type SampleMatchAudit = FootballFairAiSimulation["sampleMatchAudit"];
+type GameStateKey = keyof FootballFairAiSimulation["matchupAnalysis"]["home"]["gameStateResponse"];
+type GameStateSample = FootballFairAiSimulation["matchupAnalysis"]["home"]["gameStateResponse"]["level"];
+type MatchupTeamAnalysis = FootballFairAiSimulation["matchupAnalysis"]["home"];
 
 type MutableCell = {
   touches: number;
@@ -55,9 +58,20 @@ type TeamCounter = {
   turnovers: number;
   goals: number;
   expectedGoals: number;
+  finishingAdjustmentTotal: number;
+  keeperConversionFactorTotal: number;
+  shotQualityEvents: number;
   shotXgSources: Record<ShotXgSource, number>;
   estimatedValueAdded: number;
+  gameStates: Record<GameStateKey, { possessions: number; shots: number; goals: number }>;
   cells: MutableCell[];
+};
+
+type CurrentGameState = {
+  key: GameStateKey;
+  minute: number;
+  trailingLate: boolean;
+  protectingLeadLate: boolean;
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -260,6 +274,9 @@ function teamCounters(): TeamCounter {
     turnovers: 0,
     goals: 0,
     expectedGoals: 0,
+    finishingAdjustmentTotal: 0,
+    keeperConversionFactorTotal: 0,
+    shotQualityEvents: 0,
     shotXgSources: {
       playerProfile: 0,
       teamStatistics: 0,
@@ -267,6 +284,11 @@ function teamCounters(): TeamCounter {
       neutralPrior: 0,
     },
     estimatedValueAdded: 0,
+    gameStates: {
+      leading: { possessions: 0, shots: 0, goals: 0 },
+      level: { possessions: 0, shots: 0, goals: 0 },
+      trailing: { possessions: 0, shots: 0, goals: 0 },
+    },
     cells: Array.from({ length: GRID_COLUMNS * GRID_ROWS }, () => ({
       touches: 0,
       passes: 0,
@@ -441,14 +463,63 @@ function keeperSaveRate(team: FootballFairAiTeam): number {
     : 0.59;
 }
 
+function hasObservedPressureEvidence(team: FootballFairAiTeam): boolean {
+  if (team.teamStats?.defensiveActionsPerMatch != null) return true;
+  return availablePlayers(team).some(
+    (player) => player.tacklesPer90 > 0 || player.interceptionsPer90 > 0,
+  );
+}
+
+function buildupVsPressAdjustment(
+  attacking: FootballFairAiTeam,
+  defending: FootballFairAiTeam,
+  defendingStandingsStrength: number,
+): number {
+  const pressure = defensivePressure(defending, defendingStandingsStrength);
+  const disruption = -(pressure - 7) * 0.002;
+  const longBallCompletion = attacking.teamStats?.longBallCompletionPct;
+  const longBallEscape = longBallCompletion == null
+    ? 0
+    : Math.max(0, pressure - 7) *
+      Math.max(0, longBallCompletion - 50) * 0.00012;
+  return clamp(disruption + longBallEscape, -0.06, 0.05);
+}
+
+function gameStateFor(
+  goalsFor: number,
+  goalsAgainst: number,
+  minute: number,
+): CurrentGameState {
+  const key: GameStateKey = goalsFor > goalsAgainst
+    ? "leading"
+    : goalsFor < goalsAgainst
+      ? "trailing"
+      : "level";
+  return {
+    key,
+    minute,
+    trailingLate: key === "trailing" && minute >= 65,
+    protectingLeadLate: key === "leading" && minute >= 65,
+  };
+}
+
 function chooseAction(
   team: FootballFairAiTeam,
   x: number,
   plannedShot: boolean,
   actionIndex: number,
+  gameState: CurrentGameState,
 ): SimAction {
   if (plannedShot) {
-    const shotThreshold = x >= 9 ? 0.86 : x >= 7 ? 0.66 : x >= 5 ? 0.4 : 0.08;
+    const baseShotThreshold = x >= 9 ? 0.86 : x >= 7 ? 0.66 : x >= 5 ? 0.4 : 0.08;
+    const urgency = gameState.trailingLate
+      ? 1.55
+      : gameState.key === "trailing"
+        ? 1.18
+        : gameState.protectingLeadLate
+          ? 0.78
+          : 1;
+    const shotThreshold = clamp(baseShotThreshold * urgency, 0, 0.98);
     if (
       (actionIndex === MAX_ACTIONS_PER_POSSESSION - 1 && x >= 4) ||
       Math.random() < shotThreshold
@@ -458,7 +529,9 @@ function chooseAction(
   }
   const carryPreference = clamp(
     0.24 + formationProgression(team) * 1.5 +
-      ((team.teamStats?.boxTouchesPerMatch ?? 18) - 18) * 0.001,
+      ((team.teamStats?.boxTouchesPerMatch ?? 18) - 18) * 0.001 +
+      (gameState.key === "trailing" ? 0.025 : 0) +
+      (gameState.protectingLeadLate ? 0.02 : 0),
     0.12,
     0.38,
   );
@@ -472,6 +545,7 @@ function passCompletionProbability(
   x: number,
   teamStandingsStrength: number,
   opponentStandingsStrength: number,
+  gameState: CurrentGameState,
 ): number {
   const playerAccuracy = player?.passCompletionPct === null || player?.passCompletionPct === undefined
     ? teamPassAccuracy(team)
@@ -488,8 +562,18 @@ function passCompletionProbability(
   const fatigue = team.teamStats?.daysSinceLastMatch !== null && team.teamStats?.daysSinceLastMatch !== undefined
     ? clamp((team.teamStats.daysSinceLastMatch - 3) * 0.0008, -0.01, 0.008)
     : 0;
-  const opponentPressure = defensivePressure(opponent, opponentStandingsStrength);
-  const pressurePenalty = (opponentPressure - 7) * 0.002;
+  const matchupAdjustment = buildupVsPressAdjustment(
+    team,
+    opponent,
+    opponentStandingsStrength,
+  );
+  const gameStateRisk = gameState.trailingLate
+    ? -0.025
+    : gameState.key === "trailing"
+      ? -0.01
+      : gameState.protectingLeadLate
+        ? 0.01
+        : 0;
   const cardDisciplinePenalty =
     (team.teamStats?.redCardsPerMatch ?? 0) * 0.018 +
     (team.teamStats?.yellowCardsPerMatch ?? 0) * 0.001;
@@ -499,7 +583,7 @@ function passCompletionProbability(
   return clamp(
     playerAccuracy + progressionSkill + coachEdge + fatigue + longBallBonus +
       teamStandingsStrength * 0.012 -
-      pressurePenalty - cardDisciplinePenalty,
+      cardDisciplinePenalty + matchupAdjustment + gameStateRisk,
     0.54,
     0.97,
   );
@@ -511,6 +595,7 @@ function carryCompletionProbability(
   player: Player | null,
   teamStandingsStrength: number,
   opponentStandingsStrength: number,
+  gameState: CurrentGameState,
 ): number {
   const duels = player?.duelsWonPct ?? average(
     availablePlayers(team).map((candidate) => candidate.duelsWonPct),
@@ -525,7 +610,8 @@ function carryCompletionProbability(
     (team.teamStats?.yellowCardsPerMatch ?? 0) * 0.001;
   return clamp(
     0.69 + (duels - 50) * 0.002 - (opponentPressure - 7) * 0.004 +
-      coachEdge - cardDisciplinePenalty + teamStandingsStrength * 0.012,
+      coachEdge - cardDisciplinePenalty + teamStandingsStrength * 0.012 +
+      (gameState.trailingLate ? -0.02 : gameState.protectingLeadLate ? 0.015 : 0),
     0.48,
     0.9,
   );
@@ -776,6 +862,100 @@ function possessionSummary(
   };
 }
 
+function gameStateSample(
+  sample: TeamCounter["gameStates"][GameStateKey],
+): GameStateSample {
+  return {
+    possessions: sample.possessions,
+    shots: sample.shots,
+    goals: sample.goals,
+    shotsPer100Possessions: sample.possessions
+      ? sample.shots / sample.possessions * 100
+      : 0,
+  };
+}
+
+function matchupTeamAnalysis(
+  team: FootballFairAiTeam,
+  opponent: FootballFairAiTeam,
+  teamCounter: TeamCounter,
+  iterations: number,
+  opponentStandingsStrength: number,
+): MatchupTeamAnalysis {
+  const archivedPlayers = team.players ?? [];
+  const players = availablePlayers(team);
+  const playerPassEvidence = players.some(
+    (player) => player.passCompletionPct !== null && player.passCompletionPct !== undefined,
+  );
+  const teamPassEvidence = team.teamStats?.passCompletionPct !== null &&
+    team.teamStats?.passCompletionPct !== undefined;
+  const pressureEvidence = hasObservedPressureEvidence(opponent);
+  const buildupEvidence = playerPassEvidence || teamPassEvidence ||
+    team.teamStats?.longBallCompletionPct != null;
+  const evidenceQuality = buildupEvidence && pressureEvidence
+    ? "proxy"
+    : buildupEvidence || pressureEvidence
+      ? "limited"
+      : "missing";
+  const stats = team.teamStats;
+  const passesObserved = playerPassEvidence || teamPassEvidence;
+  const passCompletionEvidencePct = passesObserved
+    ? teamPassAccuracy(team) * 100
+    : null;
+  const opponentPressureProxy = defensivePressure(
+    opponent,
+    opponentStandingsStrength,
+  );
+  const shotsPerMatch = teamCounter.shots / iterations;
+  const expectedGoalsPerMatch = teamCounter.expectedGoals / iterations;
+  const playerGroups = {
+    forwards: players.filter(isForward).length,
+    midfielders: players.filter(isMidfielder).length,
+    defenders: players.filter(isDefender).length,
+    goalkeepers: players.filter(isGoalkeeper).length,
+  };
+  const stateSamples = teamCounter.gameStates;
+  return {
+    tacticalInteraction: {
+      formation: team.formation,
+      passCompletionEvidencePct,
+      longBallCompletionEvidencePct: stats?.longBallCompletionPct ?? null,
+      opponentPressureProxy,
+      buildupVsPressAdjustmentPct: buildupVsPressAdjustment(
+        team,
+        opponent,
+        opponentStandingsStrength,
+      ) * 100,
+      evidenceQuality,
+    },
+    playerRoleCoverage: {
+      archivedProfiles: archivedPlayers.length,
+      profilesUsed: players.length,
+      archivedStarters: archivedPlayers.filter((player) => player.starter).length,
+      ...playerGroups,
+    },
+    chanceAndExecution: {
+      shotsPerMatch,
+      expectedGoalsPerMatch,
+      simulatedGoalsPerMatch: teamCounter.goals / iterations,
+      expectedGoalsPerShot: teamCounter.shots
+        ? teamCounter.expectedGoals / teamCounter.shots
+        : 0,
+      averageFinishingAdjustment: teamCounter.shotQualityEvents
+        ? teamCounter.finishingAdjustmentTotal / teamCounter.shotQualityEvents
+        : 1,
+      opposingKeeperConversionFactor: teamCounter.shotQualityEvents
+        ? teamCounter.keeperConversionFactorTotal / teamCounter.shotQualityEvents
+        : 1,
+    },
+    gameStateResponse: {
+      leading: gameStateSample(stateSamples.leading),
+      level: gameStateSample(stateSamples.level),
+      trailing: gameStateSample(stateSamples.trailing),
+    },
+  };
+}
+
 export function runFairAiPossessionSimulation(
   home: FootballFairAiTeam,
   away: FootballFairAiTeam,
@@ -838,22 +1018,37 @@ export function runFairAiPossessionSimulation(
     for (let index = 0; index < POSSESSIONS_PER_MATCH; index += 1) {
       const attacking = Math.random() * 100 < homeShare ? home : away;
       const defending = attacking.teamKey === home.teamKey ? away : home;
+      const minute = 1 + Math.floor((index / POSSESSIONS_PER_MATCH) * 90);
+      const attackingGoals = attacking.teamKey === home.teamKey ? homeGoals : awayGoals;
+      const defendingGoals = attacking.teamKey === home.teamKey ? awayGoals : homeGoals;
+      const gameState = gameStateFor(attackingGoals, defendingGoals, minute);
       const attackingStandingsStrength = standingsStrengths.get(attacking.teamKey) ?? 0;
       const defendingStandingsStrength = standingsStrengths.get(defending.teamKey) ?? 0;
       const attackingTotals = totals.get(attacking.teamKey);
       const defendingTotals = totals.get(defending.teamKey);
       if (!attackingTotals || !defendingTotals) continue;
       attackingTotals.possessions += 1;
+      attackingTotals.gameStates[gameState.key].possessions += 1;
       totalPossessionNumber += 1;
-       const remainingPossessions = POSSESSIONS_PER_MATCH - index;
-       const expectedRemainingTeamPossessions = remainingPossessions *
-         (attacking.teamKey === home.teamKey ? homeShare : awayShare) / 100;
-       const shotBudget = shotBudgets.get(attacking.teamKey) ?? 0;
-       const plannedShot = Math.random() <
-         clamp(shotBudget / Math.max(1, expectedRemainingTeamPossessions), 0, 1);
+      const remainingPossessions = POSSESSIONS_PER_MATCH - index;
+      const expectedRemainingTeamPossessions = remainingPossessions *
+        (attacking.teamKey === home.teamKey ? homeShare : awayShare) / 100;
+      const shotBudget = shotBudgets.get(attacking.teamKey) ?? 0;
+      const shotUrgency = gameState.trailingLate
+        ? 1.45
+        : gameState.key === "trailing"
+          ? 1.12
+          : gameState.protectingLeadLate
+            ? 0.82
+            : 1;
+      const plannedShot = Math.random() <
+        clamp(
+          shotBudget / Math.max(1, expectedRemainingTeamPossessions) * shotUrgency,
+          0,
+          1,
+        );
       let x = 1 + randomInteger(3);
       let y = 1 + randomInteger(GRID_ROWS - 2);
-      const minute = 1 + Math.floor((index / POSSESSIONS_PER_MATCH) * 90);
       const sampleThisPossession = iteration === 0 &&
         (sampledByTeam.get(attacking.teamKey) ?? 0) < 2;
       const actionLog: SimulatedAction[] = [];
@@ -863,7 +1058,7 @@ export function runFairAiPossessionSimulation(
       let lastCreator: Player | null = null;
 
       for (let actionIndex = 0; actionIndex < MAX_ACTIONS_PER_POSSESSION; actionIndex += 1) {
-         const action = chooseAction(attacking, x, plannedShot, actionIndex);
+        const action = chooseAction(attacking, x, plannedShot, actionIndex, gameState);
         const actor = choosePlayer(attacking, action, x);
         const actorCredit = credit(playerTotals, attacking, actor);
         if (action === "pass") {
@@ -886,6 +1081,7 @@ export function runFairAiPossessionSimulation(
         if (action === "shot") {
           shotBudgets.set(attacking.teamKey, Math.max(0, shotBudget - 1));
           attackingTotals.shots += 1;
+          attackingTotals.gameStates[gameState.key].shots += 1;
           if (iteration === 0) sampleMatchAudit.shots += 1;
           if (actorCredit) actorCredit.simulatedShots += 1;
           const shotEstimate = shotExpectedGoals(
@@ -900,6 +1096,11 @@ export function runFairAiPossessionSimulation(
           const shotXg = shotEstimate.value;
           attackingTotals.shotXgSources[shotEstimate.source] += 1;
           attackingTotals.expectedGoals += shotXg;
+          const finishingAdjustment = finishingMultiplier(attacking, actor);
+          const keeperFactor = goalkeeperConversionFactor(defending);
+          attackingTotals.finishingAdjustmentTotal += finishingAdjustment;
+          attackingTotals.keeperConversionFactorTotal += keeperFactor;
+          attackingTotals.shotQualityEvents += 1;
           const xgRoll = Math.random();
           const accuracy = actor?.shotAccuracyPct == null
             ? (attacking.teamStats?.shotsPerMatch ?? 0) > 0 &&
@@ -914,8 +1115,8 @@ export function runFairAiPossessionSimulation(
             : clamp(actor.shotAccuracyPct / 100, 0.18, 0.78);
           const goalProbability = clamp(
             shotXg *
-              finishingMultiplier(attacking, actor) *
-              goalkeeperConversionFactor(defending),
+              finishingAdjustment *
+              keeperFactor,
             0.005,
             0.65,
           );
@@ -925,6 +1126,7 @@ export function runFairAiPossessionSimulation(
             valueAfter = 1;
             possessionOutcome = "goal";
             attackingTotals.goals += 1;
+            attackingTotals.gameStates[gameState.key].goals += 1;
             if (iteration === 0) sampleMatchAudit.goals += 1;
             if (attacking.teamKey === home.teamKey) homeGoals += 1;
             else awayGoals += 1;
@@ -953,6 +1155,7 @@ export function runFairAiPossessionSimulation(
                 x,
                 attackingStandingsStrength,
                 defendingStandingsStrength,
+                gameState,
               )
             : carryCompletionProbability(
                 attacking,
@@ -960,6 +1163,7 @@ export function runFairAiPossessionSimulation(
                 actor,
                 attackingStandingsStrength,
                 defendingStandingsStrength,
+                gameState,
               );
           const successful = Math.random() < successProbability;
           if (successful) {
@@ -1229,6 +1433,23 @@ export function runFairAiPossessionSimulation(
       home: homeStandings,
       away: awayStandings,
     },
+    matchupAnalysis: {
+      home: matchupTeamAnalysis(
+        home,
+        away,
+        homeTotals,
+        iterations,
+        standingsStrengths.get(away.teamKey) ?? 0,
+      ),
+      away: matchupTeamAnalysis(
+        away,
+        home,
+        awayTotals,
+        iterations,
+        standingsStrengths.get(home.teamKey) ?? 0,
+      ),
+      evidenceNote: "Tactical effects are bounded proxies from archived formations, passing, long-ball and defensive-action rates. Score-state responses are generated by a simple synthetic policy, not learned from observed substitutions or player tracking. Archived starters are not confirmed future lineups; finishing and keeper adjustments are noisy source estimates, not validated skill ratings.",
+    },
     topScorelines: scorelineDistribution
       .slice(0, 6)
       .map((scoreline) => ({ ...scoreline })),
@@ -1241,9 +1462,12 @@ export function runFairAiPossessionSimulation(
       away: possessionSummary(away, awayShare, awayTotals, iterations),
       sampledPossessions: samples,
     },
-    method: `Possession-by-possession Monte Carlo over ${iterations.toLocaleString()} simulated matches. Simulated goals are generated by shot events; 1X2, BTTS, totals, and scoreline probabilities are derived from those same final scores. Shot xG is a proxy: player xG/shot is preferred, then team xG/shot, then (attacking recent goals-for + defending recent goals-against) / 2 divided by the expected shot budget, and finally a neutral 0.105-per-shot prior. Synthetic location and available shot-quality factors adjust that base. Finishing and keeper factors adjust goal conversion separately from xG. When both teams have fresh standings snapshots, normalized rank, points-per-game, goal difference and form add small bounded execution and shot-quality adjustments.`,
+    method: `Possession-by-possession Monte Carlo over ${iterations.toLocaleString()} simulated matches. Simulated goals are generated by shot events; 1X2, BTTS, totals, and scoreline probabilities are derived from those same final scores. Shot xG is a proxy: player xG/shot is preferred, then team xG/shot, then (attacking recent goals-for + defending recent goals-against) / 2 divided by the expected shot budget, and finally a neutral 0.105-per-shot prior. Synthetic location and available shot-quality factors adjust that base. Finishing and keeper factors adjust goal conversion separately from xG. Pass completion changes through a bounded buildup-versus-pressing proxy, and attacking shot urgency and action risk respond to simulated score state. When both teams have fresh standings snapshots, normalized rank, points-per-game, goal difference and form add small bounded execution and shot-quality adjustments.`,
     limitations: [
       "Player roles and action profiles are aggregated from recent archived lineups and match statistics; the latest observed starting XI is not a confirmed future lineup.",
+      "Tactical compatibility is represented by bounded proxies from archived passing, long-ball, defensive-action, and formation data. The archive does not establish pressing triggers, defensive-line height, width/space exploitation, or event-level tactical changes.",
+      "Leading, level, and trailing shot rates come from this simulation's own score-aware rules. They are not evidence of observed psychological behavior, substitutions, or proven in-match adaptability.",
+      "Finishing and goalkeeper effects are shrunk proxies from small archived samples when available. Goals relative to xG are noisy; shot placement and pressure-specific finishing data are unavailable.",
       "Recent score records can inform a clearly labeled shot-xG proxy when detailed statistics are absent; this is not observed or validated xG and does not replace missing match-stat samples.",
       "The confidence intervals report Monte Carlo sampling variability only. Predictive model error is not quantified, and chronological held-out validation has not been completed.",
       "The 12 × 8 pitch path, action locations, and estimated value-added deltas are generated from tactical roles and aggregate rates. They are model proxies, not observed coordinates, measured spatial xT/EVA, or a trained reinforcement-learning policy.",

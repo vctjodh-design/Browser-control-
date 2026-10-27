@@ -653,6 +653,103 @@ export const RunFootballFairAiSimulationResponse = zod.object({
   "strengthScore": zod.number().nullable()
 })
 }),
+  "matchupAnalysis": zod.object({
+  "home": zod.object({
+  "tacticalInteraction": zod.object({
+  "formation": zod.string().nullable(),
+  "passCompletionEvidencePct": zod.number().nullable(),
+  "longBallCompletionEvidencePct": zod.number().nullable(),
+  "opponentPressureProxy": zod.number(),
+  "buildupVsPressAdjustmentPct": zod.number(),
+  "evidenceQuality": zod.enum(['proxy', 'limited', 'missing'])
+}),
+  "playerRoleCoverage": zod.object({
+  "archivedProfiles": zod.number().int(),
+  "profilesUsed": zod.number().int(),
+  "archivedStarters": zod.number().int(),
+  "forwards": zod.number().int(),
+  "midfielders": zod.number().int(),
+  "defenders": zod.number().int(),
+  "goalkeepers": zod.number().int()
+}),
+  "chanceAndExecution": zod.object({
+  "shotsPerMatch": zod.number(),
+  "expectedGoalsPerMatch": zod.number(),
+  "simulatedGoalsPerMatch": zod.number(),
+  "expectedGoalsPerShot": zod.number(),
+  "averageFinishingAdjustment": zod.number(),
+  "opposingKeeperConversionFactor": zod.number()
+}),
+  "gameStateResponse": zod.object({
+  "leading": zod.object({
+  "possessions": zod.number().int(),
+  "shots": zod.number().int(),
+  "goals": zod.number().int(),
+  "shotsPer100Possessions": zod.number()
+}),
+  "level": zod.object({
+  "possessions": zod.number().int(),
+  "shots": zod.number().int(),
+  "goals": zod.number().int(),
+  "shotsPer100Possessions": zod.number()
+}),
+  "trailing": zod.object({
+  "possessions": zod.number().int(),
+  "shots": zod.number().int(),
+  "goals": zod.number().int(),
+  "shotsPer100Possessions": zod.number()
+})
+})
+}),
+  "away": zod.object({
+  "tacticalInteraction": zod.object({
+  "formation": zod.string().nullable(),
+  "passCompletionEvidencePct": zod.number().nullable(),
+  "longBallCompletionEvidencePct": zod.number().nullable(),
+  "opponentPressureProxy": zod.number(),
+  "buildupVsPressAdjustmentPct": zod.number(),
+  "evidenceQuality": zod.enum(['proxy', 'limited', 'missing'])
+}),
+  "playerRoleCoverage": zod.object({
+  "archivedProfiles": zod.number().int(),
+  "profilesUsed": zod.number().int(),
+  "archivedStarters": zod.number().int(),
+  "forwards": zod.number().int(),
+  "midfielders": zod.number().int(),
+  "defenders": zod.number().int(),
+  "goalkeepers": zod.number().int()
+}),
+  "chanceAndExecution": zod.object({
+  "shotsPerMatch": zod.number(),
+  "expectedGoalsPerMatch": zod.number(),
+  "simulatedGoalsPerMatch": zod.number(),
+  "expectedGoalsPerShot": zod.number(),
+  "averageFinishingAdjustment": zod.number(),
+  "opposingKeeperConversionFactor": zod.number()
+}),
+  "gameStateResponse": zod.object({
+  "leading": zod.object({
+  "possessions": zod.number().int(),
+  "shots": zod.number().int(),
+  "goals": zod.number().int(),
+  "shotsPer100Possessions": zod.number()
+}),
+  "level": zod.object({
+  "possessions": zod.number().int(),
+  "shots": zod.number().int(),
+  "goals": zod.number().int(),
+  "shotsPer100Possessions": zod.number()
+}),
+  "trailing": zod.object({
+  "possessions": zod.number().int(),
+  "shots": zod.number().int(),
+  "goals": zod.number().int(),
+  "shotsPer100Possessions": zod.number()
+})
+})
+}),
+  "evidenceNote": zod.string()
+}),
   "topScorelines": zod.array(zod.object({
   "homeGoals": zod.number().int(),
   "awayGoals": zod.number().int(),
