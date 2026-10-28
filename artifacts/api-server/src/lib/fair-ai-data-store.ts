@@ -15,6 +15,7 @@ import type {
 } from "@workspace/api-zod";
 import { database } from "./processed-match-store";
 import { runFairAiPossessionSimulation } from "./fair-ai-possession-simulator";
+import { buildFairAiTacticalForensics } from "./fair-ai-tactical-forensics";
 import { getFreshKickoffScoreFairAiSnapshots } from "./kickoffscore-last-five";
 import { get365ScoresMatchReplay } from "./365scores-match-replay";
 
@@ -1882,11 +1883,19 @@ export async function runFairAiArchiveSimulation(
     refreshed.sourceTeamIds[0] ?? 0,
     refreshed.sourceTeamIds[1] ?? 0,
   );
+  const tacticalForensics = buildFairAiTacticalForensics(
+    [...refreshed.snapshotsByFixture.values()],
+    refreshed.recentFixtureIdsByTeam,
+    refreshed.sourceTeamIds[0] ?? 0,
+    refreshed.sourceTeamIds[1] ?? 0,
+    home.name,
+    away.name,
+  );
   return runFairAiPossessionSimulation(
     home,
     away,
     input.iterations ?? 10_000,
-    { oddsBaseline: input.oddsBaseline, actionEvidence },
+    { oddsBaseline: input.oddsBaseline, actionEvidence, tacticalForensics },
   );
 }
 
