@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import type { FootballMatchReplay, FootballMatchReplayEvent } from '@workspace/api-client-react';
+import type { FootballMatchLastFive, FootballMatchReplay, FootballMatchReplayEvent } from '@workspace/api-client-react';
+import { LastFivePanel } from '@/components/last-five-panel';
 import {
   ArrowUpRight,
   CalendarDays,
@@ -132,7 +133,21 @@ function ReplaySectionCard({ section }: { section: FootballMatchReplay['sections
   );
 }
 
-function ReplayContent({ replay }: { replay: FootballMatchReplay }) {
+function ReplayContent({
+  replay,
+  lastFive,
+  lastFiveLoading,
+  lastFiveError,
+  lastFiveErrorDetail,
+  onRetryLastFive,
+}: {
+  replay: FootballMatchReplay;
+  lastFive?: FootballMatchLastFive;
+  lastFiveLoading: boolean;
+  lastFiveError: boolean;
+  lastFiveErrorDetail: unknown;
+  onRetryLastFive: () => void;
+}) {
   const [period, setPeriod] = useState<'all' | 'first' | 'second'>('all');
   const sortedEvents = useMemo(
     () => [...replay.events].sort((a, b) => parseMinute(a.minute) - parseMinute(b.minute) || a.sourceOrder - b.sourceOrder),
@@ -197,6 +212,23 @@ function ReplayContent({ replay }: { replay: FootballMatchReplay }) {
         formationPlayers={replay.formationPlayers}
       />
 
+      <section className="overflow-hidden rounded-[15px] border border-[#d9d9cf] bg-[#f9f8f2]" aria-labelledby="replay-fair-ai-history-title" data-testid="section-replay-fair-ai-stats">
+        <div className="border-b border-[#e3e2d9] bg-[#f3f2ea] px-4 py-3.5 sm:px-5">
+          <p className="mono text-[8px] uppercase tracking-[.17em] text-[#9b7160]">FAIR AI · source-backed history</p>
+          <h3 id="replay-fair-ai-history-title" className="mt-1 text-[13px] font-extrabold text-[#354a45]">Recent team and player statistics</h3>
+          <p className="mt-1 text-[9px] leading-4 text-[#858982]">Both teams’ past match records include available full-match, first-half, second-half, lineup, and player statistics. Missing source fields stay marked as unavailable.</p>
+        </div>
+        <div className="p-4 sm:p-5">
+          <LastFivePanel
+            data={lastFive}
+            isLoading={lastFiveLoading}
+            isError={lastFiveError}
+            error={lastFiveErrorDetail}
+            onRetry={onRetryLastFive}
+          />
+        </div>
+      </section>
+
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(330px,.92fr)]">
         <section className="overflow-hidden rounded-[15px] border border-[#d9d9cf] bg-[#f9f8f2]" aria-labelledby="replay-timeline-title" data-testid="section-replay-timeline">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e3e2d9] bg-[#f3f2ea] px-4 py-3.5 sm:px-5">
@@ -239,20 +271,39 @@ function ReplayContent({ replay }: { replay: FootballMatchReplay }) {
 export function MatchReplayPanel({
   fixtureId,
   replay,
+  lastFive,
   isLoading,
   isError,
   error,
   onRetry,
+  lastFiveLoading,
+  lastFiveError,
+  lastFiveErrorDetail,
+  onRetryLastFive,
 }: {
   fixtureId: number;
   replay: FootballMatchReplay | undefined;
+  lastFive?: FootballMatchLastFive;
   isLoading: boolean;
   isError: boolean;
   error: unknown;
   onRetry: () => void;
+  lastFiveLoading: boolean;
+  lastFiveError: boolean;
+  lastFiveErrorDetail: unknown;
+  onRetryLastFive: () => void;
 }) {
   if (isLoading) return <LoadingReplay />;
   if (isError) return <ReplayError error={error} onRetry={onRetry} />;
   if (!replay) return <ReplayEmpty fixtureId={fixtureId} />;
-  return <ReplayContent replay={replay} />;
+  return (
+    <ReplayContent
+      replay={replay}
+      lastFive={lastFive}
+      lastFiveLoading={lastFiveLoading}
+      lastFiveError={lastFiveError}
+      lastFiveErrorDetail={lastFiveErrorDetail}
+      onRetryLastFive={onRetryLastFive}
+    />
+  );
 }

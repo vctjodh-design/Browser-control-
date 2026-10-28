@@ -17,6 +17,10 @@ import type {
   FootballModelType,
   FootballModelPrediction,
 } from "@workspace/api-zod";
+import {
+  RECENT_MATCH_STAT_FEATURE_COUNT,
+  summarizeRecentMatchStatFeatures,
+} from "./recent-match-stat-features";
 
 type SqlRow = Record<string, SQLOutputValue>;
 type ProcessingDataset = "archive" | "tester";
@@ -397,7 +401,8 @@ function ensureModelTrainingMatchIndex(): void {
   const state = database
     .prepare("SELECT version FROM model_training_index_state WHERE id = 1")
     .get() as SqlRow | undefined;
-  if (numberValue(state?.version ?? 0) < 2) {
+  const version = numberValue(state?.version ?? 0);
+  if (version < 2) {
     database.exec("BEGIN IMMEDIATE");
     try {
       database.exec("DELETE FROM model_training_match_index");
@@ -417,6 +422,57 @@ function ensureModelTrainingMatchIndex(): void {
       ).run();
       database.prepare(
         `INSERT INTO model_training_index_state (id, version) VALUES (1, 2)
+         ON CONFLICT(id) DO UPDATE SET version = excluded.version`,
+      ).run();
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  if (version < 3) {
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      const trainingContext = database.prepare(
+        "SELECT training_context_json FROM model_training_match_index WHERE fixture_id = ?",
+      );
+      const updateContext = database.prepare(
+        "UPDATE model_training_match_index SET training_context_json = ? WHERE fixture_id = ?",
+      );
+      const historyRows = database.prepare(
+        `SELECT fixture_id, match_date, last_five_json
+         FROM processed_matches
+         WHERE home_score IS NOT NULL AND away_score IS NOT NULL
+           AND actual_outcome IS NOT NULL`,
+      );
+      for (const row of historyRows.iterate() as Iterable<SqlRow>) {
+        const fixtureId = numberValue(row.fixture_id);
+        if (fixtureId === null) continue;
+        const existing = trainingContext.get(fixtureId) as SqlRow | undefined;
+        if (!existing) continue;
+        const context = storedJson<Record<string, unknown>>(
+          existing.training_context_json,
+          {},
+        );
+        const lastFive = storedJson<Record<string, unknown>>(
+          row.last_five_json,
+          {},
+        );
+        const targetDate = stringValue(row.match_date);
+        context.homeHistoricalStats = summarizeRecentMatchStatFeatures(
+          lastFive,
+          "home",
+          targetDate,
+        );
+        context.awayHistoricalStats = summarizeRecentMatchStatFeatures(
+          lastFive,
+          "away",
+          targetDate,
+        );
+        updateContext.run(JSON.stringify(context), fixtureId);
+      }
+      database.prepare(
+        `INSERT INTO model_training_index_state (id, version) VALUES (1, 3)
          ON CONFLICT(id) DO UPDATE SET version = excluded.version`,
       ).run();
       database.exec("COMMIT");
@@ -710,6 +766,8 @@ export type ModelTrainingContext = {
   awayRecent: ModelFormMatch[];
   homeLastFive: ModelFormMatch[];
   awayLastFive: ModelFormMatch[];
+  homeHistoricalStats: number[];
+  awayHistoricalStats: number[];
   homeStanding: ModelTeamStanding | null;
   awayStanding: ModelTeamStanding | null;
   standingTeamCount: number;
@@ -772,6 +830,16 @@ function modelFormMatches(value: unknown): ModelFormMatch[] {
   });
 }
 
+function modelHistoricalStatFeatures(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    return Array(RECENT_MATCH_STAT_FEATURE_COUNT).fill(0);
+  }
+  return Array.from({ length: RECENT_MATCH_STAT_FEATURE_COUNT }, (_, index) => {
+    const feature = finiteNumber(value[index]) ?? 0;
+    return Math.max(0, Math.min(1, feature));
+  });
+}
+
 function modelStanding(value: unknown): ModelTeamStanding | null {
   const row = recordOf(value);
   const rank = finiteNumber(row?.rank);
@@ -800,6 +868,8 @@ function modelTrainingContextFromJson(value: SQLOutputValue): ModelTrainingConte
     awayRecent: modelFormMatches(parsed.awayRecent),
     homeLastFive: modelFormMatches(parsed.homeLastFive),
     awayLastFive: modelFormMatches(parsed.awayLastFive),
+    homeHistoricalStats: modelHistoricalStatFeatures(parsed.homeHistoricalStats),
+    awayHistoricalStats: modelHistoricalStatFeatures(parsed.awayHistoricalStats),
     homeStanding: modelStanding(parsed.homeStanding),
     awayStanding: modelStanding(parsed.awayStanding),
     standingTeamCount: finiteNumber(parsed.standingTeamCount) ?? 0,
@@ -852,6 +922,16 @@ function modelTrainingContextFromPayloads(
     awayRecent: compact(payloads.details.awayRecent),
     homeLastFive: compactFive(payloads.lastFive.home.matches),
     awayLastFive: compactFive(payloads.lastFive.away.matches),
+    homeHistoricalStats: summarizeRecentMatchStatFeatures(
+      payloads.lastFive,
+      "home",
+      summary.date,
+    ),
+    awayHistoricalStats: summarizeRecentMatchStatFeatures(
+      payloads.lastFive,
+      "away",
+      summary.date,
+    ),
     homeStanding: homeStanding
       ? {
           rank: homeStanding.rank,

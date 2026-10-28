@@ -313,7 +313,7 @@ export default function MatchDetailsPage() {
     query: { enabled: validId && (activeTab === 'tmp' || activeTab === 'insights' || activeTab === 'graphs' || activeTab === 'predictions'), queryKey: ['/api/football/matches', fixtureId, 'tmp'] },
   });
   const lastFiveQuery = useGetFootballMatchLastFive(validId ? fixtureId : 0, {
-    query: { enabled: validId && (activeTab === 'lastfive' || activeTab === 'insights' || activeTab === 'graphs' || activeTab === 'predictions'), queryKey: getGetFootballMatchLastFiveQueryKey(fixtureId) },
+    query: { enabled: validId && (activeTab === 'lastfive' || activeTab === 'insights' || activeTab === 'graphs' || activeTab === 'predictions' || (activeTab === 'replay' && isComplete)), queryKey: getGetFootballMatchLastFiveQueryKey(fixtureId) },
   });
   const replayQuery = useGetFootballMatchReplay(validId ? fixtureId : 0, {
     query: {
@@ -445,10 +445,15 @@ export default function MatchDetailsPage() {
                   <MatchReplayPanel
                     fixtureId={fixtureId}
                     replay={replayQuery.data}
+                    lastFive={lastFiveQuery.data}
                     isLoading={replayQuery.isLoading}
                     isError={replayQuery.isError}
                     error={replayQuery.error}
                     onRetry={() => { void replayQuery.refetch(); }}
+                    lastFiveLoading={lastFiveQuery.isLoading}
+                    lastFiveError={lastFiveQuery.isError}
+                    lastFiveErrorDetail={lastFiveQuery.error}
+                    onRetryLastFive={() => { void lastFiveQuery.refetch(); }}
                   />
                 )}
                 {activeTab === 'odds' && <OddsPanel details={details} />}
