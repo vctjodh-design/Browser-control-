@@ -5,3 +5,4 @@
 - [SQLite archive constraints](sqlite-deployment-durability.md) — published local files reset, and large archived JSON must be queried through compact projections.
 - [FAIR AI target](fair-ai-scope.md) — preserve player-level spatial evaluation, live KickoffScore freshness, and clear limits around match-result models.
 - [Fixture return navigation](fixture-return-navigation.md) — keep the clicked league as a return position, not an automatic competition filter.
+- [365Scores replay lookup](365scores-replay-lookup.md) — use the results API for dated historical match lookup; the generic games endpoint may return current fixtures instead.
