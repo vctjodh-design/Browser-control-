@@ -899,6 +899,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballFixtureError"
+  /football/365scores/live-action:
+    get:
+      operationId: getFootballLiveAction
+      tags: [fixtures]
+      summary: Read live action data from a 365Scores match link
+      description: Returns source-reported commentary, shot coordinates, and lineup positions for a validated 365Scores football match URL
+      parameters:
+        - name: sourceUrl
+          in: query
+          required: true
+          description: 365Scores football match URL containing its match and matchup identifiers
+          schema:
+            type: string
+            format: uri
+            maxLength: 2048
+      responses:
+        "200":
+          description: Current match state, commentary, and shot locations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballLiveAction"
+        "400":
+          description: Invalid 365Scores match URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
+        "502":
+          description: 365Scores live action data could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
   /football/matches/{fixtureId}/tmp:
     get:
       operationId: getFootballMatchTmp
@@ -3489,6 +3523,61 @@ components:
         - shotEvents
         - formationPlayers
         - sections
+    FootballLiveAction:
+      type: object
+      properties:
+        sourceMatchUrl:
+          type: string
+          format: uri
+        gameId:
+          type: integer
+          minimum: 1
+        competition:
+          type: string
+        status:
+          type: string
+        elapsedMinute:
+          type: ["integer", "null"]
+          minimum: 0
+        homeTeam:
+          type: string
+        awayTeam:
+          type: string
+        homeScore:
+          type: ["integer", "null"]
+          minimum: 0
+        awayScore:
+          type: ["integer", "null"]
+          minimum: 0
+        observedAt:
+          type: string
+          format: date-time
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballMatchReplayEvent"
+        shotEvents:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballMatchReplayShotEvent"
+        formationPlayers:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballMatchReplayFormationPlayer"
+      required:
+        - sourceMatchUrl
+        - gameId
+        - competition
+        - status
+        - elapsedMinute
+        - homeTeam
+        - awayTeam
+        - homeScore
+        - awayScore
+        - observedAt
+        - events
+        - shotEvents
+        - formationPlayers
     FootballLastFiveStat:
       type: object
       properties:
