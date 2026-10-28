@@ -26,6 +26,7 @@ type SampleMatchAudit = FootballFairAiSimulation["sampleMatchAudit"];
 type GameStateKey = keyof FootballFairAiSimulation["matchupAnalysis"]["home"]["gameStateResponse"];
 type GameStateSample = FootballFairAiSimulation["matchupAnalysis"]["home"]["gameStateResponse"]["level"];
 type MatchupTeamAnalysis = FootballFairAiSimulation["matchupAnalysis"]["home"];
+type MatchHalf = "first" | "second";
 
 type MutableCell = {
   touches: number;
@@ -351,9 +352,21 @@ function teamPassAccuracy(team: FootballFairAiTeam): number {
   return clamp((supplied ?? 78) / 100, 0.55, 0.97);
 }
 
-function possessionShare(home: FootballFairAiTeam, away: FootballFairAiTeam): number {
-  const homePossession = home.teamStats?.possessionPct;
-  const awayPossession = away.teamStats?.possessionPct;
+function possessionShare(
+  home: FootballFairAiTeam,
+  away: FootballFairAiTeam,
+  half?: MatchHalf,
+): number {
+  const homePossession = half === "first"
+    ? home.teamStats?.firstHalfPossessionPct ?? home.teamStats?.possessionPct
+    : half === "second"
+      ? home.teamStats?.secondHalfPossessionPct ?? home.teamStats?.possessionPct
+      : home.teamStats?.possessionPct;
+  const awayPossession = half === "first"
+    ? away.teamStats?.firstHalfPossessionPct ?? away.teamStats?.possessionPct
+    : half === "second"
+      ? away.teamStats?.secondHalfPossessionPct ?? away.teamStats?.possessionPct
+      : away.teamStats?.possessionPct;
   const estimate =
     homePossession !== null && homePossession !== undefined &&
     awayPossession !== null && awayPossession !== undefined
@@ -381,16 +394,26 @@ function recentScoreRateEstimate(
 function expectedShotBudget(
   attacking: FootballFairAiTeam,
   defending: FootballFairAiTeam,
+  half?: MatchHalf,
 ): number {
+  const halfShots = half === "first"
+    ? attacking.teamStats?.firstHalfShotsPerMatch
+    : half === "second"
+      ? attacking.teamStats?.secondHalfShotsPerMatch
+      : null;
+  if (halfShots !== null && halfShots !== undefined && halfShots > 0) {
+    return clamp(halfShots, 1, 22);
+  }
   const suppliedShots = attacking.teamStats?.shotsPerMatch;
   if (suppliedShots !== null && suppliedShots !== undefined && suppliedShots > 0) {
-    return clamp(suppliedShots, 2, 35);
+    return clamp(half ? suppliedShots / 2 : suppliedShots, 1, half ? 17.5 : 35);
   }
   const recentScoreRate = recentScoreRateEstimate(attacking, defending);
-  if (recentScoreRate === null) return 11.5;
+  if (recentScoreRate === null) return half ? 5.75 : 11.5;
   const sampleCount = Math.max(0, attacking.recentMatchCount);
   const reliability = clamp(sampleCount / (sampleCount + 10), 0, 0.55);
-  return clamp(11.5 + (recentScoreRate - 1.35) * 3 * reliability, 6, 18);
+  const fullMatchBudget = clamp(11.5 + (recentScoreRate - 1.35) * 3 * reliability, 6, 18);
+  return half ? fullMatchBudget / 2 : fullMatchBudget;
 }
 
 function finishingMultiplier(
@@ -1002,21 +1025,29 @@ export function runFairAiPossessionSimulation(
   let totalPossessionNumber = 0;
 
   for (let iteration = 0; iteration < iterations; iteration += 1) {
-    const shotBudgets = new Map<string, number>([
+    const shotBudgets = new Map<string, { first: number; second: number }>([
       [
         home.teamKey,
-        samplePoisson(expectedShotBudget(home, away)),
+        {
+          first: samplePoisson(expectedShotBudget(home, away, "first")),
+          second: samplePoisson(expectedShotBudget(home, away, "second")),
+        },
       ],
       [
         away.teamKey,
-        samplePoisson(expectedShotBudget(away, home)),
+        {
+          first: samplePoisson(expectedShotBudget(away, home, "first")),
+          second: samplePoisson(expectedShotBudget(away, home, "second")),
+        },
       ],
     ]);
     let homeGoals = 0;
     let awayGoals = 0;
 
     for (let index = 0; index < POSSESSIONS_PER_MATCH; index += 1) {
-      const attacking = Math.random() * 100 < homeShare ? home : away;
+      const half: MatchHalf = index < POSSESSIONS_PER_MATCH / 2 ? "first" : "second";
+      const halfHomeShare = possessionShare(home, away, half);
+      const attacking = Math.random() * 100 < halfHomeShare ? home : away;
       const defending = attacking.teamKey === home.teamKey ? away : home;
       const minute = 1 + Math.floor((index / POSSESSIONS_PER_MATCH) * 90);
       const attackingGoals = attacking.teamKey === home.teamKey ? homeGoals : awayGoals;
@@ -1030,10 +1061,11 @@ export function runFairAiPossessionSimulation(
       attackingTotals.possessions += 1;
       attackingTotals.gameStates[gameState.key].possessions += 1;
       totalPossessionNumber += 1;
-      const remainingPossessions = POSSESSIONS_PER_MATCH - index;
+      const halfEnd = half === "first" ? POSSESSIONS_PER_MATCH / 2 : POSSESSIONS_PER_MATCH;
+      const remainingPossessions = halfEnd - index;
       const expectedRemainingTeamPossessions = remainingPossessions *
-        (attacking.teamKey === home.teamKey ? homeShare : awayShare) / 100;
-      const shotBudget = shotBudgets.get(attacking.teamKey) ?? 0;
+        (attacking.teamKey === home.teamKey ? halfHomeShare : 100 - halfHomeShare) / 100;
+      const shotBudget = shotBudgets.get(attacking.teamKey)?.[half] ?? 0;
       const shotUrgency = gameState.trailingLate
         ? 1.45
         : gameState.key === "trailing"

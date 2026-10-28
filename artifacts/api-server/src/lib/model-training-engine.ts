@@ -11,10 +11,13 @@ import type {
   ModelTrainingContext,
   TesterPredictionTarget,
 } from "./processed-match-store";
+import { RECENT_MATCH_STAT_FEATURE_COUNT } from "./recent-match-stat-features";
 
 const OUTCOME_INDEX = { home: 0, draw: 1, away: 2 } as const;
 const BASE_TEAM_EVENT_FEATURES = 7;
-const MATCH_CONTEXT_FEATURES = 9;
+const BASE_MATCH_CONTEXT_FEATURES = 9;
+const MATCH_CONTEXT_FEATURES =
+  BASE_MATCH_CONTEXT_FEATURES + RECENT_MATCH_STAT_FEATURE_COUNT;
 const TEAM_EVENT_FEATURES = BASE_TEAM_EVENT_FEATURES + MATCH_CONTEXT_FEATURES;
 const SEQUENCE_FEATURES = TEAM_EVENT_FEATURES * 2 + 1;
 const GRAPH_NODE_COUNT = 4;
@@ -303,7 +306,7 @@ function matchContextFeatures(
   const lastFiveGoalsFor = lastFive.reduce((sum, item) => sum + item.goalsFor, 0);
   const lastFiveGoalsAgainst = lastFive.reduce((sum, item) => sum + item.goalsAgainst, 0);
 
-  return [
+  const baseFeatures = [
     recent.length ? overallTmp / 100 : 0,
     recent.length ? (100 + 4 * averageFor - 100) / 100 : 0,
     recent.length ? (100 - 4 * averageAgainst - 100) / 100 : 0,
@@ -316,6 +319,19 @@ function matchContextFeatures(
     standingGames ? standing!.goalDifference / standingGames / 5 : 0,
     match.leagueAverageGoals === null ? 0 : match.leagueAverageGoals / 5,
   ];
+  const historyStats = side === "home"
+    ? match.trainingContext.homeHistoricalStats
+    : match.trainingContext.awayHistoricalStats;
+  const historyFeatures = Array.from(
+    { length: RECENT_MATCH_STAT_FEATURE_COUNT },
+    (_, index) => {
+      const value = historyStats?.[index];
+      return typeof value === "number" && Number.isFinite(value)
+        ? Math.max(0, Math.min(1, value))
+        : 0;
+    },
+  );
+  return [...baseFeatures, ...historyFeatures];
 }
 
 function sequenceFeatures(
@@ -1132,6 +1148,8 @@ export async function predictArchivedFixture(input: {
       awayRecent: [],
       homeLastFive: [],
       awayLastFive: [],
+      homeHistoricalStats: Array(RECENT_MATCH_STAT_FEATURE_COUNT).fill(0),
+      awayHistoricalStats: Array(RECENT_MATCH_STAT_FEATURE_COUNT).fill(0),
       homeStanding: null,
       awayStanding: null,
       standingTeamCount: 0,

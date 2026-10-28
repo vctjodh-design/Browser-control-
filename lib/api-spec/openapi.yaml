@@ -1659,12 +1659,34 @@ components:
           type: ["number", "null"]
         possessionPct:
           type: ["number", "null"]
+        firstHalfPossessionPct:
+          type: ["number", "null"]
+        secondHalfPossessionPct:
+          type: ["number", "null"]
         shotsPerMatch:
+          type: ["number", "null"]
+        firstHalfShotsPerMatch:
+          type: ["number", "null"]
+        secondHalfShotsPerMatch:
           type: ["number", "null"]
         shotsOnTargetPerMatch:
           type: ["number", "null"]
+        firstHalfShotsOnTargetPerMatch:
+          type: ["number", "null"]
+        secondHalfShotsOnTargetPerMatch:
+          type: ["number", "null"]
         passesPerMatch:
           type: ["number", "null"]
+        firstHalfPassesPerMatch:
+          type: ["number", "null"]
+        secondHalfPassesPerMatch:
+          type: ["number", "null"]
+        firstHalfStatSampleCount:
+          type: integer
+          minimum: 0
+        secondHalfStatSampleCount:
+          type: integer
+          minimum: 0
         shotsInsideBoxPerMatch:
           type: ["number", "null"]
         boxTouchesPerMatch:
@@ -2746,6 +2768,22 @@ components:
           maxItems: 5
           items:
             $ref: "#/components/schemas/FootballModelFormMatchInput"
+        homeHistoricalStats:
+          type: array
+          minItems: 14
+          maxItems: 14
+          items:
+            type: number
+            minimum: 0
+            maximum: 1
+        awayHistoricalStats:
+          type: array
+          minItems: 14
+          maxItems: 14
+          items:
+            type: number
+            minimum: 0
+            maximum: 1
         homeStanding:
           oneOf:
             - $ref: "#/components/schemas/FootballModelStandingInput"
@@ -2773,6 +2811,8 @@ components:
         - awayRecent
         - homeLastFive
         - awayLastFive
+        - homeHistoricalStats
+        - awayHistoricalStats
         - homeStanding
         - awayStanding
         - standingTeamCount

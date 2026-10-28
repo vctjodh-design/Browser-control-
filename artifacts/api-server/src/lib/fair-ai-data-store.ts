@@ -968,6 +968,18 @@ function matchingStat(stats: JsonObject[], aliases: string[]): number | null {
   return null;
 }
 
+function periodStats(
+  stats: JsonObject[],
+  period: "first" | "second",
+): JsonObject[] {
+  return stats.filter((stat) => {
+    const prefix = statToken(text(stat.label)?.split("·")[0] ?? "");
+    return period === "first"
+      ? prefix === "1st half" || prefix === "first half"
+      : prefix === "2nd half" || prefix === "second half";
+  });
+}
+
 function average(values: Array<number | null>): number | null {
   const present = values.filter((value): value is number => value !== null && Number.isFinite(value));
   return present.length ? present.reduce((total, value) => total + value, 0) / present.length : null;
@@ -1338,6 +1350,8 @@ function summarizeTeamStats(teamKey: string): FootballFairAiTeamStats {
       return [];
     }
   });
+  const firstHalfStats = ownStats.map((stats) => periodStats(stats, "first"));
+  const secondHalfStats = ownStats.map((stats) => periodStats(stats, "second"));
   const opponentStats = rows.map((row) => {
     const opponentKey = row.home_team_key === teamKey
       ? text(row.away_team_key)
@@ -1358,6 +1372,8 @@ function summarizeTeamStats(teamKey: string): FootballFairAiTeamStats {
   });
   const values = (samples: JsonObject[][], aliases: string[]) =>
     average(samples.map((stats) => matchingStat(stats, aliases)));
+  const periodValues = (samples: JsonObject[][], period: "first" | "second", aliases: string[]) =>
+    average(samples.map((stats) => matchingStat(periodStats(stats, period), aliases)));
   const completionValues = (
     samples: JsonObject[][],
     directAliases: string[],
@@ -1513,9 +1529,19 @@ function summarizeTeamStats(teamKey: string): FootballFairAiTeamStats {
     expectedGoalsFor,
     expectedGoalsAgainst: values(opponentStats, ["expected goals", "expected goals xg", "xg"]),
     possessionPct: values(ownStats, ["ball possession", "possession"]),
+    firstHalfPossessionPct: periodValues(ownStats, "first", ["ball possession", "possession"]),
+    secondHalfPossessionPct: periodValues(ownStats, "second", ["ball possession", "possession"]),
     shotsPerMatch: values(ownStats, ["total shots", "shots"]),
+    firstHalfShotsPerMatch: periodValues(ownStats, "first", ["total shots", "shots"]),
+    secondHalfShotsPerMatch: periodValues(ownStats, "second", ["total shots", "shots"]),
     shotsOnTargetPerMatch: values(ownStats, ["shots on goal", "shots on target"]),
+    firstHalfShotsOnTargetPerMatch: periodValues(ownStats, "first", ["shots on goal", "shots on target"]),
+    secondHalfShotsOnTargetPerMatch: periodValues(ownStats, "second", ["shots on goal", "shots on target"]),
     passesPerMatch: values(ownStats, ["total passes", "passes"]),
+    firstHalfPassesPerMatch: periodValues(ownStats, "first", ["total passes", "passes"]),
+    secondHalfPassesPerMatch: periodValues(ownStats, "second", ["total passes", "passes"]),
+    firstHalfStatSampleCount: firstHalfStats.filter((stats) => stats.length > 0).length,
+    secondHalfStatSampleCount: secondHalfStats.filter((stats) => stats.length > 0).length,
     shotsInsideBoxPerMatch: values(ownStats, ["shots inside box", "shots inside the box", "shots insidebox"]),
     boxTouchesPerMatch: values(ownStats, ["touches in opposition box", "touches in opponent box"]),
     bigChancesPerMatch: values(ownStats, ["big chances"]),
