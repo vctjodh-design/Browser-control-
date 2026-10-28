@@ -12,6 +12,8 @@ import {
   GetFootballMatchTmpResponse,
   GetFootballFixturesQueryParams,
   GetFootballFixturesResponse,
+  GetFootballLiveActionQueryParams,
+  GetFootballLiveActionResponse,
 } from "@workspace/api-zod";
 import {
   getKickoffScoreMatchDetails,
@@ -26,6 +28,8 @@ import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
 import { UpstreamRateLimitError } from "../lib/upstream-rate-limit";
 import {
   get365ScoresMatchReplay,
+  get365ScoresLiveAction,
+  LiveActionSourceUrlError,
   MatchReplayNotFoundError,
   MatchReplaySourceError,
 } from "../lib/365scores-match-replay";
@@ -171,6 +175,45 @@ router.get(
       );
       res.status(502).json({
         error: "The match replay could not be built right now. Please try again.",
+      });
+    }
+  },
+);
+
+router.get(
+  "/football/365scores/live-action",
+  async (req, res): Promise<void> => {
+    const query = GetFootballLiveActionQueryParams.safeParse(req.query);
+    if (!query.success) {
+      res.status(400).json({
+        error: "Enter a valid 365Scores football match link.",
+      });
+      return;
+    }
+
+    try {
+      const liveAction = await get365ScoresLiveAction(query.data.sourceUrl);
+      res.json(GetFootballLiveActionResponse.parse(liveAction));
+    } catch (error) {
+      if (error instanceof LiveActionSourceUrlError) {
+        res.status(400).json({ error: error.message });
+        return;
+      }
+      if (error instanceof MatchReplaySourceError) {
+        req.log.warn(
+          { errorName: error.name },
+          "365Scores live action data could not be collected",
+        );
+        res.status(502).json({ error: error.message });
+        return;
+      }
+
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not build the 365Scores live action snapshot",
+      );
+      res.status(502).json({
+        error: "365Scores live action data could not be read right now.",
       });
     }
   },

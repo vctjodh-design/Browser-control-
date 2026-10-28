@@ -1550,6 +1550,35 @@ export interface FootballMatchReplay {
   sections: FootballMatchReplaySection[];
 }
 
+export interface FootballLiveAction {
+  sourceMatchUrl: string;
+  /** @minimum 1 */
+  gameId: number;
+  competition: string;
+  status: string;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  elapsedMinute: number | null;
+  homeTeam: string;
+  awayTeam: string;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  homeScore: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  awayScore: number | null;
+  observedAt: string;
+  events: FootballMatchReplayEvent[];
+  shotEvents: FootballMatchReplayShotEvent[];
+  formationPlayers: FootballMatchReplayFormationPlayer[];
+}
+
 export interface FootballFixtureError {
   error: string;
 }
@@ -1787,4 +1816,12 @@ export const GetFootballTesterMatchPayloadSection = {
   lastFive: 'lastFive',
   tmp: 'tmp',
 } as const;
+
+export type GetFootballLiveActionParams = {
+/**
+ * 365Scores football match URL containing its match and matchup identifiers
+ * @maxLength 2048
+ */
+sourceUrl: string;
+};
 

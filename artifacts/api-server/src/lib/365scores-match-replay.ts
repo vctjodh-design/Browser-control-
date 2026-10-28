@@ -1,4 +1,5 @@
 import type {
+  FootballLiveAction,
   FootballMatchDetails,
   FootballMatchReplayFormationPlayer,
   FootballMatchReplay,
@@ -89,6 +90,9 @@ type SourceGame = {
   id?: number;
   competitionId?: number;
   competitionDisplayName?: string;
+  statusText?: string;
+  shortStatusText?: string;
+  gameTime?: number;
   startTime?: string;
   date?: string;
   homeCompetitor?: SourceTeam;
@@ -146,6 +150,19 @@ const replayCache = new Map<
   number,
   { expiresAt: number; replay: FootballMatchReplay }
 >();
+const LIVE_ACTION_CACHE_TTL_MS = 8_000;
+const liveActionCache = new Map<
+  string,
+  { expiresAt: number; snapshot: FootballLiveAction }
+>();
+const liveActionRequests = new Map<string, Promise<FootballLiveAction>>();
+
+export class LiveActionSourceUrlError extends Error {
+  constructor(message = "Provide a valid 365Scores football match link.") {
+    super(message);
+    this.name = "LiveActionSourceUrlError";
+  }
+}
 
 function isLiveMatchStatus(status: string): boolean {
   return /\b(live|in play|in progress|first half|second half|1st half|2nd half|1h|2h|half[ -]?time|halftime)\b/i.test(
@@ -890,6 +907,204 @@ async function readSourceJson(
     throw new MatchReplaySourceError();
   }
   return response.document;
+}
+
+function liveActionSourceIdentifiers(value: string): {
+  sourceMatchUrl: string;
+  gameId: number;
+  teamIds: [number, number];
+  competitionId: number;
+  matchupId: string;
+} {
+  let sourceUrl: URL;
+  try {
+    sourceUrl = new URL(value);
+  } catch {
+    throw new LiveActionSourceUrlError();
+  }
+  if (
+    sourceUrl.protocol !== "https:" ||
+    !["www.365scores.com", "365scores.com"].includes(sourceUrl.hostname) ||
+    sourceUrl.port ||
+    sourceUrl.username ||
+    sourceUrl.password ||
+    !sourceUrl.pathname.startsWith("/football/match/")
+  ) {
+    throw new LiveActionSourceUrlError(
+      "Use a 365Scores football match link from the official site.",
+    );
+  }
+
+  const gameIdValue =
+    new URLSearchParams(sourceUrl.hash.replace(/^#/, "")).get("id") ??
+    sourceUrl.searchParams.get("id");
+  const matchup = sourceUrl.pathname
+    .split("/")
+    .at(-1)
+    ?.match(/-(\d+)-(\d+)-(\d+)$/);
+  const gameId = Number(gameIdValue);
+  const teamIdOne = Number(matchup?.[1]);
+  const teamIdTwo = Number(matchup?.[2]);
+  const competitionId = Number(matchup?.[3]);
+  if (
+    !gameIdValue ||
+    !/^\d+$/.test(gameIdValue) ||
+    !Number.isSafeInteger(gameId) ||
+    gameId < 1 ||
+    !Number.isSafeInteger(teamIdOne) ||
+    !Number.isSafeInteger(teamIdTwo) ||
+    teamIdOne < 1 ||
+    teamIdTwo < 1 ||
+    teamIdOne === teamIdTwo ||
+    !Number.isSafeInteger(competitionId) ||
+    competitionId < 1
+  ) {
+    throw new LiveActionSourceUrlError(
+      "The 365Scores match link is missing a valid game or matchup ID.",
+    );
+  }
+
+  return {
+    sourceMatchUrl: sourceUrl.toString(),
+    gameId,
+    teamIds: [teamIdOne, teamIdTwo],
+    competitionId,
+    matchupId: `${teamIdOne}-${teamIdTwo}-${competitionId}`,
+  };
+}
+
+function liveActionGameApiUrl(gameId: number, matchupId: string): string {
+  const url = new URL("https://webws.365scores.com/web/game/");
+  url.searchParams.set("appTypeId", "5");
+  url.searchParams.set("langId", "1");
+  url.searchParams.set("timezoneName", "UTC");
+  url.searchParams.set("userCountryId", "355");
+  url.searchParams.set("gameId", String(gameId));
+  url.searchParams.set("matchupId", matchupId);
+  return url.toString();
+}
+
+function sourceNonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0
+    ? value
+    : null;
+}
+
+export async function get365ScoresLiveAction(
+  sourceUrl: string,
+): Promise<FootballLiveAction> {
+  const identifiers = liveActionSourceIdentifiers(sourceUrl);
+  const cacheKey = `${identifiers.gameId}:${identifiers.matchupId}`;
+  const cached = liveActionCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.snapshot;
+  const inFlight = liveActionRequests.get(cacheKey);
+  if (inFlight) return inFlight;
+
+  const request = (async (): Promise<FootballLiveAction> => {
+    let sessionId: string | null = null;
+    try {
+      const session = await createBrowserSession();
+      sessionId = session.sessionId;
+      const gamePayload = sourceObject(
+        await readSourceJson(
+          sessionId,
+          liveActionGameApiUrl(identifiers.gameId, identifiers.matchupId),
+        ),
+      );
+      const game = sourceObject(gamePayload?.game) as SourceGame | null;
+      const homeId = game?.homeCompetitor?.id;
+      const awayId = game?.awayCompetitor?.id;
+      const sourceTeamsMatch =
+        typeof homeId === "number" &&
+        typeof awayId === "number" &&
+        homeId !== awayId &&
+        identifiers.teamIds.includes(homeId) &&
+        identifiers.teamIds.includes(awayId);
+      if (
+        !game ||
+        game.id !== identifiers.gameId ||
+        game.competitionId !== identifiers.competitionId ||
+        !sourceTeamsMatch
+      ) {
+        throw new LiveActionSourceUrlError(
+          "The match IDs in this link do not match the data returned by 365Scores.",
+        );
+      }
+
+      const homeTeam = game.homeCompetitor?.longName?.trim() ||
+        game.homeCompetitor?.name?.trim();
+      const awayTeam = game.awayCompetitor?.longName?.trim() ||
+        game.awayCompetitor?.name?.trim();
+      if (!homeTeam || !awayTeam) {
+        throw new MatchReplaySourceError(
+          "365Scores did not return both team names for this match.",
+        );
+      }
+
+      let feed: SourceFeedResponse = {};
+      if (game.playByPlay?.feedURL) {
+        feed =
+          (sourceObject(
+            await readSourceJson(sessionId, game.playByPlay.feedURL),
+          ) as SourceFeedResponse | null) ?? {};
+      }
+      const comments = formatCommentary(feed);
+      const snapshot: FootballLiveAction = {
+        sourceMatchUrl: identifiers.sourceMatchUrl,
+        gameId: identifiers.gameId,
+        competition:
+          game.competitionDisplayName?.trim() || "Competition unavailable",
+        status:
+          game.statusText?.trim() ||
+          game.shortStatusText?.trim() ||
+          "Status unavailable",
+        elapsedMinute:
+          typeof game.gameTime === "number" &&
+          Number.isFinite(game.gameTime) &&
+          game.gameTime >= 0
+            ? Math.floor(game.gameTime)
+            : null,
+        homeTeam,
+        awayTeam,
+        homeScore: sourceNonNegativeInteger(game.homeCompetitor?.score),
+        awayScore: sourceNonNegativeInteger(game.awayCompetitor?.score),
+        observedAt: new Date(),
+        events: comments.events,
+        shotEvents: replayShotEvents(game),
+        formationPlayers: replayFormationPlayers(game),
+      };
+      liveActionCache.set(cacheKey, {
+        snapshot,
+        expiresAt: Date.now() + LIVE_ACTION_CACHE_TTL_MS,
+      });
+      if (liveActionCache.size > MAX_REPLAY_CACHE_ENTRIES) {
+        const oldestKey = liveActionCache.keys().next().value;
+        if (oldestKey !== undefined) liveActionCache.delete(oldestKey);
+      }
+      return snapshot;
+    } catch (error) {
+      if (
+        error instanceof LiveActionSourceUrlError ||
+        error instanceof MatchReplaySourceError
+      ) {
+        throw error;
+      }
+      throw new MatchReplaySourceError(
+        "365Scores live action data could not be read. Please try again shortly.",
+      );
+    } finally {
+      if (sessionId) await closeBrowserSession(sessionId).catch(() => undefined);
+    }
+  })();
+
+  liveActionRequests.set(cacheKey, request);
+  try {
+    return await request;
+  } finally {
+    liveActionRequests.delete(cacheKey);
+  }
 }
 
 function statsApiUrl(gameId: number, filterId?: number): URL {

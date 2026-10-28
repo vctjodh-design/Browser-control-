@@ -34,6 +34,7 @@ import type {
   FootballFairAiTeamsResponse,
   FootballFixtureError,
   FootballFixtures,
+  FootballLiveAction,
   FootballMatchCenter,
   FootballMatchDetails,
   FootballMatchLastFive,
@@ -55,6 +56,7 @@ import type {
   FootballTesterMatches,
   GetFootballFairAiTeamsParams,
   GetFootballFixturesParams,
+  GetFootballLiveActionParams,
   GetFootballProcessedMatchPayloadParams,
   GetFootballProcessedMatchesParams,
   GetFootballProcessingForDateParams,
@@ -2427,6 +2429,91 @@ export function useGetFootballMatchReplay<TData = Awaited<ReturnType<typeof getF
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetFootballMatchReplayQueryOptions(fixtureId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFootballLiveActionUrl = (params: GetFootballLiveActionParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/football/365scores/live-action?${stringifiedParams}` : `/api/football/365scores/live-action`
+}
+
+/**
+ * Returns source-reported commentary, shot coordinates, and lineup positions for a validated 365Scores football match URL
+ * @summary Read live action data from a 365Scores match link
+ */
+export const getFootballLiveAction = async (params: GetFootballLiveActionParams, options?: Parameters<typeof customFetch>[1]): Promise<FootballLiveAction> => {
+
+  return customFetch<FootballLiveAction>(getGetFootballLiveActionUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFootballLiveActionQueryKey = (params?: GetFootballLiveActionParams,) => {
+    return [
+    `/api/football/365scores/live-action`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetFootballLiveActionQueryOptions = <TData = Awaited<ReturnType<typeof getFootballLiveAction>>, TError = ErrorType<FootballFixtureError>>(params: GetFootballLiveActionParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballLiveAction>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFootballLiveActionQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFootballLiveAction>>> = ({ signal }) => getFootballLiveAction(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFootballLiveAction>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFootballLiveActionQueryResult = NonNullable<Awaited<ReturnType<typeof getFootballLiveAction>>>
+export type GetFootballLiveActionQueryError = ErrorType<FootballFixtureError>
+
+
+/**
+ * @summary Read live action data from a 365Scores match link
+ */
+
+export function useGetFootballLiveAction<TData = Awaited<ReturnType<typeof getFootballLiveAction>>, TError = ErrorType<FootballFixtureError>>(
+ params: GetFootballLiveActionParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFootballLiveAction>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFootballLiveActionQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

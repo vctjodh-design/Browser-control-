@@ -21,6 +21,7 @@ import FairAiSourceDataPanel from '@/components/fair-ai-source-data-panel';
 import FairAiSimulationPanel from '@/components/fair-ai-simulation-panel';
 import { MatchReplayPanel } from '@/components/match-replay-panel';
 import { MatchCenterPanel } from '@/components/match-center-panel';
+import { LiveActionSourcePanel } from '@/components/live-action-source-panel';
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -34,11 +35,12 @@ import {
   Trophy,
 } from 'lucide-react';
 
-type MatchTab = 'table' | 'fair-ai' | 'match-center' | 'replay' | 'odds' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
+type MatchTab = 'table' | 'fair-ai' | 'match-center' | 'live-action' | 'replay' | 'odds' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
 const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'table', label: 'Table', short: '01' },
   { id: 'fair-ai', label: 'FAIR AI', short: '02' },
   { id: 'match-center', label: 'Match centre', short: '12' },
+  { id: 'live-action', label: 'Live action', short: '13' },
   { id: 'replay', label: 'Match replay', short: '11' },
   { id: 'odds', label: 'Odds', short: '03' },
   { id: 'form', label: 'Team form', short: '04' },
@@ -324,7 +326,9 @@ export default function MatchDetailsPage() {
       refetchIntervalInBackground: false,
     },
   });
-  const visibleTabs = isComplete ? tabs : tabs.filter((tab) => tab.id !== 'replay');
+  const visibleTabs = tabs.filter((tab) =>
+    tab.id === 'replay' ? isComplete : tab.id === 'live-action' ? isLive : true,
+  );
 
   return (
     <main className="screen-noise min-h-[100dvh] bg-[#f2f0e8] text-[#243443]">
@@ -431,6 +435,9 @@ export default function MatchDetailsPage() {
                     shotFeedError={replayQuery.error}
                     onRetryShotFeed={() => { void replayQuery.refetch(); }}
                   />
+                )}
+                {activeTab === 'live-action' && isLive && (
+                  <LiveActionSourcePanel key={match.fixtureId} match={match} />
                 )}
                 {activeTab === 'replay' && isComplete && (
                   <MatchReplayPanel

@@ -1915,6 +1915,84 @@ export const GetFootballMatchReplayResponse = zod.object({
 
 
 /**
+ * Returns source-reported commentary, shot coordinates, and lineup positions for a validated 365Scores football match URL
+ * @summary Read live action data from a 365Scores match link
+ */
+export const getFootballLiveActionQuerySourceUrlMax = 2048;
+
+
+
+export const GetFootballLiveActionQueryParams = zod.object({
+  "sourceUrl": zod.coerce.string().url().max(getFootballLiveActionQuerySourceUrlMax).describe('365Scores football match URL containing its match and matchup identifiers')
+})
+
+
+export const getFootballLiveActionResponseElapsedMinuteMin = 0;
+
+export const getFootballLiveActionResponseHomeScoreMin = 0;
+
+export const getFootballLiveActionResponseAwayScoreMin = 0;
+
+export const getFootballLiveActionResponseEventsItemSourceOrderMin = 0;
+
+export const getFootballLiveActionResponseShotEventsItemXMin = 0;
+export const getFootballLiveActionResponseShotEventsItemXMax = 100;
+
+export const getFootballLiveActionResponseShotEventsItemYMin = 0;
+export const getFootballLiveActionResponseShotEventsItemYMax = 100;
+
+export const getFootballLiveActionResponseShotEventsItemSourceOrderMin = 0;
+
+export const getFootballLiveActionResponseFormationPlayersItemXMin = 0;
+export const getFootballLiveActionResponseFormationPlayersItemXMax = 100;
+
+export const getFootballLiveActionResponseFormationPlayersItemYMin = 0;
+export const getFootballLiveActionResponseFormationPlayersItemYMax = 100;
+
+
+
+export const GetFootballLiveActionResponse = zod.object({
+  "sourceMatchUrl": zod.string().url(),
+  "gameId": zod.number().int().min(1),
+  "competition": zod.string(),
+  "status": zod.string(),
+  "elapsedMinute": zod.number().int().min(getFootballLiveActionResponseElapsedMinuteMin).nullable(),
+  "homeTeam": zod.string(),
+  "awayTeam": zod.string(),
+  "homeScore": zod.number().int().min(getFootballLiveActionResponseHomeScoreMin).nullable(),
+  "awayScore": zod.number().int().min(getFootballLiveActionResponseAwayScoreMin).nullable(),
+  "observedAt": zod.coerce.date(),
+  "events": zod.array(zod.object({
+  "minute": zod.string(),
+  "kind": zod.string(),
+  "title": zod.string(),
+  "detail": zod.string(),
+  "sourceOrder": zod.number().int().min(getFootballLiveActionResponseEventsItemSourceOrderMin)
+})),
+  "shotEvents": zod.array(zod.object({
+  "minute": zod.string(),
+  "teamSide": zod.enum(['home', 'away']),
+  "playerName": zod.string().nullable(),
+  "outcome": zod.string().nullable(),
+  "bodyPart": zod.string().nullable(),
+  "xg": zod.string().nullable(),
+  "xgot": zod.string().nullable(),
+  "x": zod.number().min(getFootballLiveActionResponseShotEventsItemXMin).max(getFootballLiveActionResponseShotEventsItemXMax).nullable(),
+  "y": zod.number().min(getFootballLiveActionResponseShotEventsItemYMin).max(getFootballLiveActionResponseShotEventsItemYMax).nullable(),
+  "sourceOrder": zod.number().int().min(getFootballLiveActionResponseShotEventsItemSourceOrderMin)
+})),
+  "formationPlayers": zod.array(zod.object({
+  "teamSide": zod.enum(['home', 'away']),
+  "playerName": zod.string(),
+  "shirtNumber": zod.number().int().nullable(),
+  "position": zod.string().nullable(),
+  "x": zod.number().min(getFootballLiveActionResponseFormationPlayersItemXMin).max(getFootballLiveActionResponseFormationPlayersItemXMax),
+  "y": zod.number().min(getFootballLiveActionResponseFormationPlayersItemYMin).max(getFootballLiveActionResponseFormationPlayersItemYMax)
+}))
+})
+
+
+/**
  * Returns historical market expectations and latest available season tables for recent matches
  * @summary Get historical odds and standings context for match TMP
  */
