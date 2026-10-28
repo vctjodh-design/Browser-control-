@@ -16,6 +16,7 @@ import {
   RefreshCw,
   ScanLine,
 } from 'lucide-react';
+import { LiveScreenCapture } from './live-screen-capture';
 import { RecordedEventPitch } from './recorded-event-pitch';
 
 const CEARA_GOIAS_SOURCE_URL = 'https://www.365scores.com/football/match/brasileirao-serie-b-superbet-116/ceara-goias-1217-1781-116#id=4669926';
@@ -178,17 +179,19 @@ export function LiveActionSourcePanel({
         <div className="flex items-start gap-2.5">
           <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[#f1e8d5] text-[#8b7251]"><Eye size={14} /></span>
           <div>
-            <p className="text-[10px] font-extrabold text-[#6f5d42]">Feed analysis prototype — computer vision is not active</p>
+            <p className="text-[10px] font-extrabold text-[#6f5d42]">Source feed and visual capture are separate</p>
             <p className="mt-1 text-[9px] leading-5 text-[#7d6c4d]">
-              365Scores displays a continuous animated pitch while matches are live. This panel currently reads the event and shot feed, not those rendered frames, so visual ball and player tracking is not active yet.
+              365Scores embeds its live pitch in a tracker widget. The source feed below reports incidents; the opt-in capture prototype can locally follow a ball marker, but it is not trained AI or player tracking.
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5 text-[8px] font-bold">
               <span className="rounded-full border border-[#d9dfd5] bg-[#f8faf5] px-2 py-1 text-[#58705e]">Current input: events + shot locations</span>
-              <span className="rounded-full border border-[#e5d8bd] bg-[#fffaf0] px-2 py-1 text-[#8a7654]">CV needs: accessible frames + labels</span>
+              <span className="rounded-full border border-[#e5d8bd] bg-[#fffaf0] px-2 py-1 text-[#8a7654]">Visual prototype: local template tracking</span>
             </div>
           </div>
         </div>
       </section>
+
+      <LiveScreenCapture />
 
       {!activeSourceUrl && (
         <p className="rounded-lg border border-dashed border-[#deddd4] bg-[#f7f6f0] px-3 py-4 text-[9px] leading-5 text-[#858982]" data-testid="status-live-action-source-empty">
