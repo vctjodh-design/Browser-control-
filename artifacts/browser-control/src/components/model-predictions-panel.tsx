@@ -263,6 +263,8 @@ function modelPredictionContext(
     awayRecent: compactMatches(details.awayRecent),
     homeLastFive: compactLastFive(lastFive?.home.matches ?? []),
     awayLastFive: compactLastFive(lastFive?.away.matches ?? []),
+    homeHistoricalStats: Array(14).fill(0),
+    awayHistoricalStats: Array(14).fill(0),
     homeStanding: homeStanding
       ? {
           rank: homeStanding.rank,

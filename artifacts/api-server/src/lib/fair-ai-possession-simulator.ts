@@ -1,4 +1,7 @@
 import type {
+  FootballFairAiActionEvidence,
+  FootballFairAiActionTeamEvidence,
+  FootballFairAiOddsBaseline,
   FootballFairAiSimulation,
   FootballFairAiTeam,
 } from "@workspace/api-zod";
@@ -77,6 +80,37 @@ type CurrentGameState = {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function emptyActionTeamEvidence(): FootballFairAiActionTeamEvidence {
+  return {
+    matchesAnalyzed: 0,
+    matchesUnavailable: 0,
+    commentaryEvents: 0,
+    goals: 0,
+    substitutions: 0,
+    cards: 0,
+    shots: 0,
+    firstHalfShots: 0,
+    secondHalfShots: 0,
+    shotsOnTarget: 0,
+    shotsOffTarget: 0,
+    averageXgPerShot: null,
+    averageXgotPerShot: null,
+    averageXgotMinusXg: null,
+    averageShotX: null,
+    players: [],
+    keyEvents: [],
+  };
+}
+
+function emptyActionEvidence(): FootballFairAiActionEvidence {
+  return {
+    source: "365Scores commentary and shot feed",
+    home: emptyActionTeamEvidence(),
+    away: emptyActionTeamEvidence(),
+    note: "No matched 365Scores recent-match shot reports were supplied.",
+  };
 }
 
 export function evaluateStandingsPerformance(
@@ -280,6 +314,7 @@ function teamCounters(): TeamCounter {
     shotQualityEvents: 0,
     shotXgSources: {
       playerProfile: 0,
+      "365Scores": 0,
       teamStatistics: 0,
       recentResults: 0,
       neutralPrior: 0,
@@ -414,6 +449,34 @@ function expectedShotBudget(
   const reliability = clamp(sampleCount / (sampleCount + 10), 0, 0.55);
   const fullMatchBudget = clamp(11.5 + (recentScoreRate - 1.35) * 3 * reliability, 6, 18);
   return half ? fullMatchBudget / 2 : fullMatchBudget;
+}
+
+function marketShotBudgetScale(
+  team: FootballFairAiTeam,
+  opponent: FootballFairAiTeam,
+  oddsExpectedGoals: number | undefined,
+): number {
+  if (oddsExpectedGoals === undefined || oddsExpectedGoals <= 0) return 1;
+  const ownGoalRate = team.teamStats?.expectedGoalsFor ??
+    (team.recentMatchCount > 0 ? team.avgGoalsFor : null);
+  const opponentConcededRate = opponent.teamStats?.expectedGoalsAgainst ??
+    (opponent.recentMatchCount > 0 ? opponent.avgGoalsAgainst : null);
+  const availableRates = [ownGoalRate, opponentConcededRate]
+    .filter((value): value is number => value !== null && value !== undefined && value > 0);
+  const archiveProjection = average(availableRates);
+  if (archiveProjection === null || archiveProjection <= 0) return 1;
+  return clamp(Math.pow(oddsExpectedGoals / archiveProjection, 0.62), 0.68, 1.42);
+}
+
+function actionPhaseShotScale(
+  evidence: FootballFairAiActionTeamEvidence,
+  half: MatchHalf,
+): number {
+  const totalShots = evidence.firstHalfShots + evidence.secondHalfShots;
+  if (evidence.matchesAnalyzed === 0 || totalShots < 6) return 1;
+  const observedShare = (half === "first" ? evidence.firstHalfShots : evidence.secondHalfShots) /
+    totalShots;
+  return clamp(1 + (observedShare - 0.5) * 0.24, 0.88, 1.12);
 }
 
 function finishingMultiplier(
@@ -648,6 +711,7 @@ function shotExpectedGoals(
   y: number,
   attackingStandingsStrength: number,
   defendingStandingsStrength: number,
+  actionEvidence: FootballFairAiActionTeamEvidence,
 ): { value: number; source: ShotXgSource } {
   const playerBase = player && player.shotsPer90 > 0 && player.expectedGoalsPer90 > 0
     ? player.expectedGoalsPer90 / player.shotsPer90
@@ -662,15 +726,25 @@ function shotExpectedGoals(
   const recentResultsBase = recentScoreRate === null
     ? null
     : recentScoreRate / expectedShots;
-  const source: ShotXgSource = playerBase !== null
+  const archivedBase = playerBase ?? teamBase ?? recentResultsBase ?? 0.105;
+  const observed365Base = actionEvidence.shots >= 4
+    ? actionEvidence.averageXgPerShot
+    : null;
+  const source: ShotXgSource = observed365Base !== null
+    ? "365Scores"
+    : playerBase !== null
     ? "playerProfile"
     : teamBase !== null
       ? "teamStatistics"
       : recentResultsBase !== null
         ? "recentResults"
         : "neutralPrior";
+  const observed365Weight = observed365Base === null
+    ? 0
+    : clamp(actionEvidence.shots / (actionEvidence.shots + 16), 0.12, 0.42);
   const base = clamp(
-    playerBase ?? teamBase ?? recentResultsBase ?? 0.105,
+    archivedBase * (1 - observed365Weight) +
+      (observed365Base ?? archivedBase) * observed365Weight,
     0.035,
     0.36,
   );
@@ -701,10 +775,20 @@ function shotExpectedGoals(
   const defensiveFactor = source === "recentResults" || opponentGoalsAllowed === null
     ? 1
     : clamp(1 + (opponentGoalsAllowed - 1.35) * 0.045, 0.88, 1.12);
+  const placementReliability = actionEvidence.shots >= 4
+    ? clamp(actionEvidence.shots / (actionEvidence.shots + 12), 0.15, 0.62)
+    : 0;
+  const placementFactor = actionEvidence.averageXgotMinusXg === null
+    ? 1
+    : clamp(
+        1 + actionEvidence.averageXgotMinusXg * placementReliability * 0.38,
+        0.9,
+        1.1,
+      );
   return {
     value: clamp(
       base * locationFactor * insideBoxFactor * bigChanceFactor *
-        missedChanceFactor * ratingFactor * defensiveFactor +
+        missedChanceFactor * ratingFactor * defensiveFactor * placementFactor +
         (attackingStandingsStrength - defendingStandingsStrength) * 0.012,
       0.015,
       0.48,
@@ -736,6 +820,7 @@ function wilsonInterval(
 function inputAuditForTeam(
   team: FootballFairAiTeam,
   counters: TeamCounter,
+  actionEvidence: FootballFairAiActionTeamEvidence,
 ): FootballFairAiSimulation["inputAudit"]["home"] {
   const players = team.players ?? [];
   const detailedMatchStatSamples = team.teamStats?.matchStatSampleCount ?? 0;
@@ -760,6 +845,13 @@ function inputAuditForTeam(
   }
   if (counters.shotXgSources.neutralPrior > 0) {
     warnings.push("Some shot xG proxies use the neutral 0.105-per-shot prior.");
+  }
+  if (actionEvidence.matchesAnalyzed > 0) {
+    warnings.push(
+      `Recent 365Scores reports contributed ${actionEvidence.shots} shot events across ${actionEvidence.matchesAnalyzed} matched matches; their xGOT−xG effect is a bounded placement proxy.`,
+    );
+  } else {
+    warnings.push("No matched 365Scores recent-match shot reports were available for this team.");
   }
   const coverage = detailedMatchStatSamples >= 5 && players.length >= 11
     ? "broad"
@@ -979,10 +1071,151 @@ function matchupTeamAnalysis(
   };
 }
 
+function fairAiForecastWeight(
+  home: FootballFairAiTeam,
+  away: FootballFairAiTeam,
+  actionEvidence: FootballFairAiActionEvidence,
+): number {
+  const recentCoverage = clamp(
+    (home.recentMatchCount + away.recentMatchCount) / 10,
+    0,
+    1,
+  );
+  const statCoverage = clamp(
+    ((home.teamStats?.matchStatSampleCount ?? 0) +
+      (away.teamStats?.matchStatSampleCount ?? 0)) / 10,
+    0,
+    1,
+  );
+  const playerCoverage = clamp(
+    ((home.players?.length ?? 0) + (away.players?.length ?? 0)) / 22,
+    0,
+    1,
+  );
+  const reportCoverage = clamp(
+    (actionEvidence.home.matchesAnalyzed + actionEvidence.away.matchesAnalyzed) / 4,
+    0,
+    1,
+  );
+  const shotCoverage = clamp(
+    (actionEvidence.home.shots + actionEvidence.away.shots) / 24,
+    0,
+    1,
+  );
+  const evidenceStrength =
+    recentCoverage * 0.2 +
+    statCoverage * 0.25 +
+    playerCoverage * 0.15 +
+    reportCoverage * 0.25 +
+    shotCoverage * 0.15;
+  return clamp(0.4 + evidenceStrength * 0.35, 0.4, 0.75);
+}
+
+function blendedScorelines(
+  simulated: { homeGoals: number; awayGoals: number; count: number }[],
+  iterations: number,
+  oddsBaseline: FootballFairAiOddsBaseline | undefined,
+  fairAiWeight: number,
+): {
+  scorelines: { homeGoals: number; awayGoals: number; count: number; probability: number }[];
+  oddsWeight: number;
+  fairAiWeight: number;
+} {
+  const simulatedProbabilities = new Map<string, number>();
+  for (const scoreline of simulated) {
+    simulatedProbabilities.set(
+      `${scoreline.homeGoals}-${scoreline.awayGoals}`,
+      scoreline.count / iterations,
+    );
+  }
+  const baselineProbabilities = new Map<string, number>();
+  let baselineMass = 0;
+  for (const scoreline of oddsBaseline?.scorelineDistribution ?? []) {
+    if (
+      !Number.isInteger(scoreline.homeGoals) ||
+      !Number.isInteger(scoreline.awayGoals) ||
+      !Number.isFinite(scoreline.probability) ||
+      scoreline.probability < 0
+    ) {
+      continue;
+    }
+    const key = `${scoreline.homeGoals}-${scoreline.awayGoals}`;
+    baselineProbabilities.set(
+      key,
+      (baselineProbabilities.get(key) ?? 0) + scoreline.probability,
+    );
+    baselineMass += scoreline.probability;
+  }
+
+  if (baselineMass <= 0) {
+    return {
+      scorelines: simulated.map((scoreline) => ({
+        ...scoreline,
+        probability: scoreline.count / iterations,
+      })),
+      oddsWeight: 0,
+      fairAiWeight: 1,
+    };
+  }
+
+  const oddsWeight = 1 - fairAiWeight;
+  const keys = new Set([
+    ...simulatedProbabilities.keys(),
+    ...baselineProbabilities.keys(),
+  ]);
+  const blended = [...keys].map((key) => {
+    const [homeGoals, awayGoals] = key.split("-").map(Number);
+    const probability =
+      oddsWeight * (baselineProbabilities.get(key) ?? 0) / baselineMass +
+      fairAiWeight * (simulatedProbabilities.get(key) ?? 0);
+    return { homeGoals, awayGoals, probability, count: 0 };
+  });
+  const totalProbability = blended.reduce(
+    (sum, scoreline) => sum + scoreline.probability,
+    0,
+  );
+  if (totalProbability <= 0) {
+    return {
+      scorelines: simulated.map((scoreline) => ({
+        ...scoreline,
+        probability: scoreline.count / iterations,
+      })),
+      oddsWeight: 0,
+      fairAiWeight: 1,
+    };
+  }
+  for (const scoreline of blended) {
+    scoreline.probability /= totalProbability;
+  }
+
+  const roundedCounts = blended.map((scoreline) => {
+    const exactCount = scoreline.probability * iterations;
+    return { scoreline, count: Math.floor(exactCount), remainder: exactCount % 1 };
+  });
+  let remaining = iterations - roundedCounts.reduce((sum, row) => sum + row.count, 0);
+  for (const row of [...roundedCounts].sort((left, right) => right.remainder - left.remainder)) {
+    if (remaining <= 0) break;
+    row.count += 1;
+    remaining -= 1;
+  }
+
+  return {
+    scorelines: roundedCounts
+      .map(({ scoreline, count }) => ({ ...scoreline, count }))
+      .sort((left, right) => right.probability - left.probability),
+    oddsWeight,
+    fairAiWeight,
+  };
+}
+
 export function runFairAiPossessionSimulation(
   home: FootballFairAiTeam,
   away: FootballFairAiTeam,
   requestedIterations: number,
+  context: {
+    oddsBaseline?: FootballFairAiOddsBaseline;
+    actionEvidence: FootballFairAiActionEvidence;
+  } = { actionEvidence: emptyActionEvidence() },
 ): FootballFairAiSimulation {
   const iterations = clamp(Math.floor(requestedIterations), 1_000, 50_000);
   const homeShare = possessionShare(home, away);
@@ -1002,6 +1235,18 @@ export function runFairAiPossessionSimulation(
     [home.teamKey, adjustmentsApplied ? homeStandings.strengthScore ?? 0 : 0],
     [away.teamKey, adjustmentsApplied ? awayStandings.strengthScore ?? 0 : 0],
   ]);
+  const homeActionEvidence = context.actionEvidence.home;
+  const awayActionEvidence = context.actionEvidence.away;
+  const homeMarketScale = marketShotBudgetScale(
+    home,
+    away,
+    context.oddsBaseline?.expectedHomeGoals,
+  );
+  const awayMarketScale = marketShotBudgetScale(
+    away,
+    home,
+    context.oddsBaseline?.expectedAwayGoals,
+  );
   const samples: SimulatedPossession[] = [];
   const sampledByTeam = new Map<string, number>([[home.teamKey, 0], [away.teamKey, 0]]);
   const possessionResolutions = {
@@ -1029,15 +1274,31 @@ export function runFairAiPossessionSimulation(
       [
         home.teamKey,
         {
-          first: samplePoisson(expectedShotBudget(home, away, "first")),
-          second: samplePoisson(expectedShotBudget(home, away, "second")),
+          first: samplePoisson(
+            expectedShotBudget(home, away, "first") *
+              homeMarketScale *
+              actionPhaseShotScale(homeActionEvidence, "first"),
+          ),
+          second: samplePoisson(
+            expectedShotBudget(home, away, "second") *
+              homeMarketScale *
+              actionPhaseShotScale(homeActionEvidence, "second"),
+          ),
         },
       ],
       [
         away.teamKey,
         {
-          first: samplePoisson(expectedShotBudget(away, home, "first")),
-          second: samplePoisson(expectedShotBudget(away, home, "second")),
+          first: samplePoisson(
+            expectedShotBudget(away, home, "first") *
+              awayMarketScale *
+              actionPhaseShotScale(awayActionEvidence, "first"),
+          ),
+          second: samplePoisson(
+            expectedShotBudget(away, home, "second") *
+              awayMarketScale *
+              actionPhaseShotScale(awayActionEvidence, "second"),
+          ),
         },
       ],
     ]);
@@ -1111,7 +1372,10 @@ export function runFairAiPossessionSimulation(
         let turnover = false;
 
         if (action === "shot") {
-          shotBudgets.set(attacking.teamKey, Math.max(0, shotBudget - 1));
+          const currentShotBudget = shotBudgets.get(attacking.teamKey);
+          if (currentShotBudget) {
+            currentShotBudget[half] = Math.max(0, currentShotBudget[half] - 1);
+          }
           attackingTotals.shots += 1;
           attackingTotals.gameStates[gameState.key].shots += 1;
           if (iteration === 0) sampleMatchAudit.shots += 1;
@@ -1124,6 +1388,9 @@ export function runFairAiPossessionSimulation(
             y,
             attackingStandingsStrength,
             defendingStandingsStrength,
+            attacking.teamKey === home.teamKey
+              ? homeActionEvidence
+              : awayActionEvidence,
           );
           const shotXg = shotEstimate.value;
           attackingTotals.shotXgSources[shotEstimate.source] += 1;
@@ -1353,44 +1620,85 @@ export function runFairAiPossessionSimulation(
     },
     { home: 0, draw: 0, away: 0 },
   );
-  const bttsYesCount = scorelineEntries.reduce(
+  const hasOddsScorelineBaseline = Boolean(
+    context.oddsBaseline?.scorelineDistribution.length,
+  );
+  const requestedFairAiWeight = fairAiForecastWeight(
+    home,
+    away,
+    context.actionEvidence,
+  );
+  const forecast = blendedScorelines(
+    scorelineEntries,
+    iterations,
+    hasOddsScorelineBaseline ? context.oddsBaseline : undefined,
+    requestedFairAiWeight,
+  );
+  const forecastOutcomes = forecast.scorelines.reduce(
+    (counts, scoreline) => {
+      if (scoreline.homeGoals > scoreline.awayGoals) counts.home += scoreline.count;
+      else if (scoreline.homeGoals === scoreline.awayGoals) counts.draw += scoreline.count;
+      else counts.away += scoreline.count;
+      return counts;
+    },
+    { home: 0, draw: 0, away: 0 },
+  );
+  const forecastProbabilities = forecast.scorelines.reduce(
+    (probabilities, scoreline) => {
+      if (scoreline.homeGoals > scoreline.awayGoals) probabilities.home += scoreline.probability;
+      else if (scoreline.homeGoals === scoreline.awayGoals) probabilities.draw += scoreline.probability;
+      else probabilities.away += scoreline.probability;
+      return probabilities;
+    },
+    { home: 0, draw: 0, away: 0 },
+  );
+  const forecastBttsYesProbability = forecast.scorelines.reduce(
     (sum, scoreline) =>
-      sum + (scoreline.homeGoals > 0 && scoreline.awayGoals > 0 ? scoreline.count : 0),
+      sum + (scoreline.homeGoals > 0 && scoreline.awayGoals > 0
+        ? scoreline.probability
+        : 0),
     0,
   );
+  const forecastExpectedHomeGoals = forecast.scorelines.reduce(
+    (sum, scoreline) => sum + scoreline.homeGoals * scoreline.probability,
+    0,
+  );
+  const forecastExpectedAwayGoals = forecast.scorelines.reduce(
+    (sum, scoreline) => sum + scoreline.awayGoals * scoreline.probability,
+    0,
+  );
+  const bttsYesCount = Math.round(forecastBttsYesProbability * iterations);
   const goalMarkets = {
     bttsYesCount,
     bttsNoCount: iterations - bttsYesCount,
-    bttsYesProbability: bttsYesCount / iterations,
-    bttsNoProbability: (iterations - bttsYesCount) / iterations,
+    bttsYesProbability: forecastBttsYesProbability,
+    bttsNoProbability: 1 - forecastBttsYesProbability,
     totals: [1.5, 2.5, 3.5].map((line) => {
-      const overCount = scorelineEntries.reduce(
+      const overProbability = forecast.scorelines.reduce(
         (sum, scoreline) =>
-          sum + (scoreline.homeGoals + scoreline.awayGoals > line ? scoreline.count : 0),
+          sum + (scoreline.homeGoals + scoreline.awayGoals > line
+            ? scoreline.probability
+            : 0),
         0,
       );
+      const overCount = Math.round(overProbability * iterations);
       return {
         line,
         overCount,
         underCount: iterations - overCount,
-        overProbability: overCount / iterations,
-        underProbability: (iterations - overCount) / iterations,
+        overProbability,
+        underProbability: 1 - overProbability,
       };
     }),
   };
-  const scorelineDistribution = scorelineEntries
-    .map((scoreline) => ({
-      ...scoreline,
-      probability: scoreline.count / iterations,
-    }))
-    .sort((left, right) => right.count - left.count);
+  const scorelineDistribution = forecast.scorelines;
   const shotSourceCount = Object.values(homeTotals.shotXgSources)
     .reduce((sum, count) => sum + count, 0) +
     Object.values(awayTotals.shotXgSources)
       .reduce((sum, count) => sum + count, 0);
   const inputAudit = {
-    home: inputAuditForTeam(home, homeTotals),
-    away: inputAuditForTeam(away, awayTotals),
+    home: inputAuditForTeam(home, homeTotals, homeActionEvidence),
+    away: inputAuditForTeam(away, awayTotals, awayActionEvidence),
   };
   const uncertainty = {
     samplingMethod: "95% Wilson score interval; captures Monte Carlo sampling variability only.",
@@ -1401,6 +1709,7 @@ export function runFairAiPossessionSimulation(
     modelNotes: [
       "Model error and predictive calibration have not been quantified against chronological held-out matches.",
       "A larger iteration count narrows simulation sampling intervals but does not reduce error from missing inputs or model assumptions.",
+      "When an odds baseline is supplied, final scoreline probabilities blend the normalized market distribution and the FAIR AI event simulation at the reported weights; these intervals describe the raw FAIR AI run only.",
     ],
   };
   if (
@@ -1424,8 +1733,8 @@ export function runFairAiPossessionSimulation(
   ) {
     throw new Error("Simulation counters failed consistency checks.");
   }
-  const averageHomeGoals = homeTotals.goals / iterations;
-  const averageAwayGoals = awayTotals.goals / iterations;
+  const averageHomeGoals = forecastExpectedHomeGoals;
+  const averageAwayGoals = forecastExpectedAwayGoals;
   const averageHomeXg = homeTotals.expectedGoals / iterations;
   const averageAwayXg = awayTotals.expectedGoals / iterations;
   const contributions: PlayerContribution[] = [...playerTotals.values()]
@@ -1448,11 +1757,11 @@ export function runFairAiPossessionSimulation(
     expectedAwayGoals: averageAwayGoals,
     expectedHomeXg: averageHomeXg,
     expectedAwayXg: averageAwayXg,
-    outcomes,
+    outcomes: forecastOutcomes,
     probabilities: {
-      home: outcomes.home / iterations,
-      draw: outcomes.draw / iterations,
-      away: outcomes.away / iterations,
+      home: forecastProbabilities.home,
+      draw: forecastProbabilities.draw,
+      away: forecastProbabilities.away,
     },
     diagnostics,
     goalMarkets,
@@ -1465,6 +1774,15 @@ export function runFairAiPossessionSimulation(
       home: homeStandings,
       away: awayStandings,
     },
+    ...(context.oddsBaseline ? { oddsBaseline: context.oddsBaseline } : {}),
+    forecastBlend: {
+      oddsWeight: forecast.oddsWeight,
+      fairAiWeight: forecast.fairAiWeight,
+      method: forecast.oddsWeight > 0
+        ? "Final scoreline probabilities are a normalized weighted blend of the odds-implied distribution and the FAIR AI event simulation. The FAIR AI share increases with recent match, player, team-stat, and 365Scores shot coverage."
+        : "No valid odds scoreline distribution was supplied; the forecast uses the FAIR AI event simulation only.",
+    },
+    actionEvidence: context.actionEvidence,
     matchupAnalysis: {
       home: matchupTeamAnalysis(
         home,
@@ -1494,13 +1812,16 @@ export function runFairAiPossessionSimulation(
       away: possessionSummary(away, awayShare, awayTotals, iterations),
       sampledPossessions: samples,
     },
-    method: `Possession-by-possession Monte Carlo over ${iterations.toLocaleString()} simulated matches. Simulated goals are generated by shot events; 1X2, BTTS, totals, and scoreline probabilities are derived from those same final scores. Shot xG is a proxy: player xG/shot is preferred, then team xG/shot, then (attacking recent goals-for + defending recent goals-against) / 2 divided by the expected shot budget, and finally a neutral 0.105-per-shot prior. Synthetic location and available shot-quality factors adjust that base. Finishing and keeper factors adjust goal conversion separately from xG. Pass completion changes through a bounded buildup-versus-pressing proxy, and attacking shot urgency and action risk respond to simulated score state. When both teams have fresh standings snapshots, normalized rank, points-per-game, goal difference and form add small bounded execution and shot-quality adjustments.`,
+    method: `Possession-by-possession Monte Carlo over ${iterations.toLocaleString()} simulated matches. When full-time odds are available, their complete scoreline distribution is the initial forecast baseline and their expected goals calibrate simulated shot volume against the teams' recent archive rates. The final scoreline probabilities blend that normalized market distribution with the FAIR AI event simulation; the reported weights rise with the coverage of recent matches, player profiles, team statistics, and 365Scores shot reports. Fresh 365Scores commentary and shot records can adjust phase shot volume, shot xG, and shot-placement conversion within bounded limits. Possession paths and diagnostics remain the raw event simulation. Remaining xG proxies prefer player xG/shot, then 365Scores shot xG, then team xG/shot, recent scores, and finally a neutral 0.105-per-shot prior. Finishing and keeper factors adjust goal conversion separately from xG. Pass completion changes through a bounded buildup-versus-pressing proxy, and action risk responds to simulated score state. When both teams have fresh standings snapshots, normalized rank, points-per-game, goal difference and form add small bounded execution and shot-quality adjustments.`,
     limitations: [
       "Player roles and action profiles are aggregated from recent archived lineups and match statistics; the latest observed starting XI is not a confirmed future lineup.",
       "Tactical compatibility is represented by bounded proxies from archived passing, long-ball, defensive-action, and formation data. The archive does not establish pressing triggers, defensive-line height, width/space exploitation, or event-level tactical changes.",
       "Leading, level, and trailing shot rates come from this simulation's own score-aware rules. They are not evidence of observed psychological behavior, substitutions, or proven in-match adaptability.",
       "Finishing and goalkeeper effects are shrunk proxies from small archived samples when available. Goals relative to xG are noisy; shot placement and pressure-specific finishing data are unavailable.",
       "Recent score records can inform a clearly labeled shot-xG proxy when detailed statistics are absent; this is not observed or validated xG and does not replace missing match-stat samples.",
+      "365Scores evidence covers at most the two latest completed reports per selected team in each run. It is source-reported commentary and shot data, not continuous ball/player tracking; reports that cannot be matched are excluded and counted as unavailable.",
+      "Odds-derived expected goals calibrate shot volume before the possession simulation; this is not a trained market-to-model posterior, and market quote timestamps are not verified.",
+      "When odds are supplied, the final result probabilities blend market and FAIR AI scoreline distributions. Outcome and scoreline counts are run-equivalent counts for that blend; possession diagnostics and uncertainty intervals describe the raw FAIR AI simulation.",
       "The confidence intervals report Monte Carlo sampling variability only. Predictive model error is not quantified, and chronological held-out validation has not been completed.",
       "The 12 × 8 pitch path, action locations, and estimated value-added deltas are generated from tactical roles and aggregate rates. They are model proxies, not observed coordinates, measured spatial xT/EVA, or a trained reinforcement-learning policy.",
       "Player age, height, preferred foot, contract, market value, full season histories, club average age/squad value/founding year, and manager biography are not part of these archived fixture records and are not inferred.",

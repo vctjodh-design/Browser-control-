@@ -397,7 +397,7 @@ export default function MatchDetailsPage() {
                       <p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">Player-level decision analysis</p>
                       <h2 id="fair-ai-match-title" className="mt-1 text-[14px] font-extrabold text-[#344550]">FAIR AI data for {match.home.name} vs {match.away.name}</h2>
                       <p className="mt-1 text-[9px] leading-5 text-[#727973]">
-                        This tab shows the source-data coverage available for this match and the archive. KickoffScore provides aggregate match and lineup records here, but no pitch coordinates or player tracking, so spatial xT/EVA evaluation is not available yet.
+                        This tab shows source coverage from odds, recent team and player records, and matched 365Scores reports. Shot origins may be available for recent completed matches, but continuous player/ball tracking and measured spatial xT/EVA are not.
                       </p>
                     </div>
                     {!isUpcomingPreMatch && (
@@ -417,6 +417,7 @@ export default function MatchDetailsPage() {
                         awayTeamId: match.away.id,
                         homeTeamName: match.home.name,
                         awayTeamName: match.away.name,
+                        oddsMarkets: details?.oddsMarkets ?? [],
                       }}
                       autoRunOnOpen={isUpcomingPreMatch}
                       allowSimulation={canRunFairAiSimulation}

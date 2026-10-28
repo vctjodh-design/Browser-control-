@@ -3,11 +3,13 @@ name: FAIR AI target
 description: The user's interaction-first target for football simulation and the data boundary that must remain explicit.
 ---
 
-The user is building an interaction-first football simulator: explain how player roles and tactical systems interact, how that changes chance creation/prevention, how conversion affects outcomes, and how behavior changes by score state. Form and odds are context/calibration, not the primary explanation. Do not claim an exact proprietary FAIR AI replica unless that is verified. The current match-result models are not the FAIR reinforcement-learning simulator.
+The user is building an interaction-first football simulator: start from the odds-translation scoreline and goals baseline, then explain how player roles, tactical systems, opponent strength, chance quality, and score phase support or contradict it. Keep the market baseline visible beside the FAIR AI adjustment and identify the evidence and coverage behind changes. Do not claim an exact proprietary FAIR AI replica unless that is verified. The current match-result models are not the FAIR reinforcement-learning simulator.
 
 The simulation must fetch the selected teams' latest completed match records directly from KickoffScore before each run. If fresh source data is unavailable, stop rather than silently using stale archive records.
 
 The current pre-match simulation may use standings only when both teams have snapshots with valid, non-future observation timestamps no more than 30 days old. Normalize rank, points per game, goal difference, and recent league form into small bounded heuristic adjustments; do not use these snapshots in historical training. The source observation time is not guaranteed to be the table's effective date.
+
+Use the complete available odds scoreline distribution as an explicit forecast prior, not merely as a shot-volume input. Keep FAIR AI's action simulation distinct, combine the two transparently, and let FAIR AI influence grow only with relevant evidence coverage. Show source gaps. 365Scores replay evidence must be matched by fixture date, teams, and score; commentary and shot-origin data do not establish continuous player tracking. xGOT−xG is only a placement-quality proxy, not measured miss distance.
 
 **Why:** The user’s technical audit directs us not to overclaim an exact proprietary replication. The current archive also does not provide tracked pitch coordinates or action trajectories as model inputs.
 

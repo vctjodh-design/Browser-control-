@@ -5,6 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { FootballFairAiActionEvidence } from './footballFairAiActionEvidence';
+import type { FootballFairAiForecastBlend } from './footballFairAiForecastBlend';
+import type { FootballFairAiOddsBaseline } from './footballFairAiOddsBaseline';
 import type { FootballFairAiPossessionModel } from './footballFairAiPossessionModel';
 import type { FootballFairAiSimulationContribution } from './footballFairAiSimulationContribution';
 import type { FootballFairAiSimulationDiagnostics } from './footballFairAiSimulationDiagnostics';
@@ -36,6 +39,9 @@ export interface FootballFairAiSimulation {
   uncertainty: FootballFairAiSimulationUncertainty;
   sampleMatchAudit: FootballFairAiSimulationSampleMatchAudit;
   standingsContext: FootballFairAiSimulationStandingsContext;
+  oddsBaseline?: FootballFairAiOddsBaseline;
+  forecastBlend: FootballFairAiForecastBlend;
+  actionEvidence: FootballFairAiActionEvidence;
   matchupAnalysis: FootballFairAiSimulationMatchupAnalysis;
   topScorelines: FootballFairAiSimulationScoreline[];
   playerContributions: FootballFairAiSimulationContribution[];

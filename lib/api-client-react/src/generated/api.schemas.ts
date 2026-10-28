@@ -199,11 +199,31 @@ export interface FootballFairAiTeamStats {
   /** @nullable */
   possessionPct: number | null;
   /** @nullable */
+  firstHalfPossessionPct?: number | null;
+  /** @nullable */
+  secondHalfPossessionPct?: number | null;
+  /** @nullable */
   shotsPerMatch: number | null;
+  /** @nullable */
+  firstHalfShotsPerMatch?: number | null;
+  /** @nullable */
+  secondHalfShotsPerMatch?: number | null;
   /** @nullable */
   shotsOnTargetPerMatch: number | null;
   /** @nullable */
+  firstHalfShotsOnTargetPerMatch?: number | null;
+  /** @nullable */
+  secondHalfShotsOnTargetPerMatch?: number | null;
+  /** @nullable */
   passesPerMatch: number | null;
+  /** @nullable */
+  firstHalfPassesPerMatch?: number | null;
+  /** @nullable */
+  secondHalfPassesPerMatch?: number | null;
+  /** @minimum 0 */
+  firstHalfStatSampleCount?: number;
+  /** @minimum 0 */
+  secondHalfStatSampleCount?: number;
   /** @nullable */
   shotsInsideBoxPerMatch: number | null;
   /** @nullable */
@@ -326,6 +346,46 @@ export interface FootballFairAiTeamsResponse {
   teams: FootballFairAiTeam[];
 }
 
+export interface FootballFairAiOddsScoreline {
+  /**
+     * @minimum 0
+     * @maximum 10
+     */
+  homeGoals: number;
+  /**
+     * @minimum 0
+     * @maximum 10
+     */
+  awayGoals: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  probability: number;
+}
+
+export interface FootballFairAiOddsBaseline {
+  /**
+     * @minimum 0
+     * @maximum 10
+     */
+  expectedHomeGoals: number;
+  /**
+     * @minimum 0
+     * @maximum 10
+     */
+  expectedAwayGoals: number;
+  /** @maxItems 121 */
+  scorelineDistribution: FootballFairAiOddsScoreline[];
+  /** @minimum 0 */
+  marketSourceCount: number;
+  /** @minimum 0 */
+  signalCount: number;
+  /** @nullable */
+  fitErrorPoints: number | null;
+  scoreMarketSeeded: boolean;
+}
+
 export interface FootballFairAiSimulationInput {
   /** @minLength 1 */
   homeTeamKey: string;
@@ -336,6 +396,83 @@ export interface FootballFairAiSimulationInput {
      * @maximum 50000
      */
   iterations?: number;
+  oddsBaseline?: FootballFairAiOddsBaseline;
+}
+
+export interface FootballFairAiForecastBlend {
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  oddsWeight: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  fairAiWeight: number;
+  method: string;
+}
+
+export interface FootballFairAiActionPlayerEvidence {
+  playerName: string;
+  /** @minimum 0 */
+  shots: number;
+  /** @minimum 0 */
+  goals: number;
+  /** @nullable */
+  averageXg: number | null;
+}
+
+export interface FootballFairAiActionEvent {
+  /** @minimum 1 */
+  fixtureId: number;
+  minute: string;
+  kind: string;
+  title: string;
+  detail: string;
+}
+
+export interface FootballFairAiActionTeamEvidence {
+  /** @minimum 0 */
+  matchesAnalyzed: number;
+  /** @minimum 0 */
+  matchesUnavailable: number;
+  /** @minimum 0 */
+  commentaryEvents: number;
+  /** @minimum 0 */
+  goals: number;
+  /** @minimum 0 */
+  substitutions: number;
+  /** @minimum 0 */
+  cards: number;
+  /** @minimum 0 */
+  shots: number;
+  /** @minimum 0 */
+  firstHalfShots: number;
+  /** @minimum 0 */
+  secondHalfShots: number;
+  /** @minimum 0 */
+  shotsOnTarget: number;
+  /** @minimum 0 */
+  shotsOffTarget: number;
+  /** @nullable */
+  averageXgPerShot: number | null;
+  /** @nullable */
+  averageXgotPerShot: number | null;
+  /** @nullable */
+  averageXgotMinusXg: number | null;
+  /** @nullable */
+  averageShotX: number | null;
+  players: FootballFairAiActionPlayerEvidence[];
+  /** @maxItems 10 */
+  keyEvents: FootballFairAiActionEvent[];
+}
+
+export interface FootballFairAiActionEvidence {
+  source: string;
+  home: FootballFairAiActionTeamEvidence;
+  away: FootballFairAiActionTeamEvidence;
+  note: string;
 }
 
 export interface FootballFairAiSimulationOutcome {
@@ -378,6 +515,7 @@ export interface FootballFairAiSimulationDiagnostics {
 
 export interface FootballFairAiSimulationShotXgSources {
   playerProfile: number;
+  '365Scores': number;
   teamStatistics: number;
   recentResults: number;
   neutralPrior: number;
@@ -704,6 +842,9 @@ export interface FootballFairAiSimulation {
   uncertainty: FootballFairAiSimulationUncertainty;
   sampleMatchAudit: FootballFairAiSimulationSampleMatchAudit;
   standingsContext: FootballFairAiSimulationStandingsContext;
+  oddsBaseline?: FootballFairAiOddsBaseline;
+  forecastBlend: FootballFairAiForecastBlend;
+  actionEvidence: FootballFairAiActionEvidence;
   matchupAnalysis: FootballFairAiSimulationMatchupAnalysis;
   topScorelines: FootballFairAiSimulationScoreline[];
   playerContributions: FootballFairAiSimulationContribution[];
@@ -872,6 +1013,20 @@ export interface FootballModelPredictionContextInput {
   homeLastFive: FootballModelFormMatchInput[];
   /** @maxItems 5 */
   awayLastFive: FootballModelFormMatchInput[];
+  /**
+     * @minItems 14
+     * @maxItems 14
+     * @items.minimum 0
+     * @items.maximum 1
+     */
+  homeHistoricalStats: number[];
+  /**
+     * @minItems 14
+     * @maxItems 14
+     * @items.minimum 0
+     * @items.maximum 1
+     */
+  awayHistoricalStats: number[];
   homeStanding: FootballModelStandingInput | null;
   awayStanding: FootballModelStandingInput | null;
   /** @minimum 0 */
