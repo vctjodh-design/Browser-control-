@@ -55,6 +55,7 @@ type SourceTeam = {
   id?: number;
   name?: string;
   longName?: string;
+  nameForURL?: string;
   score?: number;
   lineups?: {
     status?: string;
@@ -86,7 +87,10 @@ type SourceShot = {
 
 type SourceGame = {
   id?: number;
+  competitionId?: number;
+  competitionDisplayName?: string;
   startTime?: string;
+  date?: string;
   homeCompetitor?: SourceTeam;
   awayCompetitor?: SourceTeam;
   members?: SourcePlayer[] | Record<string, SourcePlayer>;
@@ -162,6 +166,21 @@ const teamAliases: string[][] = [
   ["barcelona", "fc barcelona", "barça", "barca"],
 ];
 
+const sourceCompetitionIds: Array<{ id: number; names: string[] }> = [
+  { id: 7, names: ["premier league"] },
+  { id: 8, names: ["fa cup"] },
+  { id: 9, names: ["efl cup", "carabao cup"] },
+  { id: 11, names: ["laliga", "la liga"] },
+  { id: 13, names: ["copa del rey"] },
+  { id: 17, names: ["serie a"] },
+  { id: 18, names: ["serie b"] },
+  { id: 25, names: ["bundesliga"] },
+  { id: 28, names: ["liga portugal", "primeira liga"] },
+  { id: 35, names: ["ligue 1"] },
+  { id: 37, names: ["eredivisie"] },
+  { id: 104, names: ["mls", "major league soccer"] },
+];
+
 export class MatchReplayNotFoundError extends Error {
   constructor(message = "No matching 365Scores report was found for this match date.") {
     super(message);
@@ -185,6 +204,20 @@ function normalizeText(value: string): string {
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+function sourceCompetitionId(value: string): number | null {
+  const normalized = normalizeText(value);
+  const competition = sourceCompetitionIds.find(({ names }) =>
+    names.some((name) => {
+      const normalizedName = normalizeText(name);
+      return (
+        normalized === normalizedName ||
+        normalized.endsWith(` ${normalizedName}`)
+      );
+    }),
+  );
+  return competition?.id ?? null;
 }
 
 function variantsForTeam(name: string): string[] {
@@ -748,17 +781,32 @@ function formatTimeDetails(
   return lines.length ? lines.join("\n") : null;
 }
 
-function gameApiUrl(sourceMatchUrl: URL): URL {
-  const hashParams = new URLSearchParams(sourceMatchUrl.hash.replace(/^#/, ""));
-  const rawGameId =
-    hashParams.get("id") ?? sourceMatchUrl.searchParams.get("id");
-  const rawMatchupId = sourceMatchUrl.pathname
-    .split("/")
-    .at(-1)
-    ?.match(/(\d+-\d+-\d+)$/)?.[1];
-  if (!rawGameId || !/^\d+$/.test(rawGameId) || !rawMatchupId) {
+function gamesListApiUrl(date: string, competitionId: number): URL {
+  const url = new URL("https://webws.365scores.com/web/games/results/");
+  url.searchParams.set("appTypeId", "5");
+  url.searchParams.set("langId", "1");
+  url.searchParams.set("timezoneName", "UTC");
+  url.searchParams.set("userCountryId", "355");
+  url.searchParams.set("date", date);
+  url.searchParams.set("competitions", String(competitionId));
+  return url;
+}
+
+function gameApiUrl(game: SourceGame): URL {
+  const homeId = game.homeCompetitor?.id;
+  const awayId = game.awayCompetitor?.id;
+  if (
+    typeof game.id !== "number" ||
+    !Number.isInteger(game.id) ||
+    typeof game.competitionId !== "number" ||
+    !Number.isInteger(game.competitionId) ||
+    typeof homeId !== "number" ||
+    !Number.isInteger(homeId) ||
+    typeof awayId !== "number" ||
+    !Number.isInteger(awayId)
+  ) {
     throw new MatchReplayNotFoundError(
-      "The 365Scores results link did not include a verifiable match identifier.",
+      "The 365Scores match list did not include a verifiable match identifier.",
     );
   }
 
@@ -767,9 +815,44 @@ function gameApiUrl(sourceMatchUrl: URL): URL {
   url.searchParams.set("langId", "1");
   url.searchParams.set("timezoneName", "UTC");
   url.searchParams.set("userCountryId", "355");
-  url.searchParams.set("gameId", rawGameId);
-  url.searchParams.set("matchupId", rawMatchupId);
+  url.searchParams.set("gameId", String(game.id));
+  url.searchParams.set(
+    "matchupId",
+    `${awayId}-${homeId}-${game.competitionId}`,
+  );
   return url;
+}
+
+function sourceMatchPageUrl(
+  game: SourceGame,
+  details: FootballMatchDetails,
+): string {
+  const home = game.homeCompetitor;
+  const away = game.awayCompetitor;
+  if (
+    typeof game.id !== "number" ||
+    typeof game.competitionId !== "number" ||
+    typeof home?.id !== "number" ||
+    typeof away?.id !== "number"
+  ) {
+    throw new MatchReplayNotFoundError(
+      "The 365Scores match list did not include a verifiable match identifier.",
+    );
+  }
+
+  const competitionName =
+    game.competitionDisplayName ??
+    details.match.competition.split(":").at(-1)?.trim() ??
+    "football";
+  const competitionSlug = normalizeText(competitionName).replace(/\s+/g, "-");
+  const awaySlug =
+    away.nameForURL ?? normalizeText(away.name ?? "").replace(/\s+/g, "-");
+  const homeSlug =
+    home.nameForURL ?? normalizeText(home.name ?? "").replace(/\s+/g, "-");
+  const path = `/football/match/${competitionSlug}-${game.competitionId}/${awaySlug}-${homeSlug}-${away.id}-${home.id}-${game.competitionId}`;
+  const url = new URL(path, "https://www.365scores.com");
+  url.hash = `id=${game.id}`;
+  return url.toString();
 }
 
 async function readSourceJson(
@@ -825,10 +908,11 @@ function gameMatchesFixture(
   details: FootballMatchDetails,
   fixtureDate: Date,
 ): boolean {
-  if (!game.startTime || !game.homeCompetitor || !game.awayCompetitor) {
+  const gameDate = game.startTime ?? game.date;
+  if (!gameDate || !game.homeCompetitor || !game.awayCompetitor) {
     return false;
   }
-  const sourceDate = new Date(game.startTime);
+  const sourceDate = new Date(gameDate);
   if (
     !Number.isFinite(sourceDate.getTime()) ||
     matchDate(sourceDate) !== matchDate(fixtureDate)
@@ -873,57 +957,132 @@ export async function get365ScoresMatchReplay(
   dayListUrl.searchParams.set("date", date);
   const resultsListUrl = new URL(RESULTS_LIST_URL);
   resultsListUrl.searchParams.set("date", date);
+  const competitionId = sourceCompetitionId(details.match.competition);
+  const initialUrl =
+    competitionId !== null
+      ? gamesListApiUrl(date, competitionId).toString()
+      : dayListUrl.toString();
 
   try {
-    const listState = await createBrowserSession(dayListUrl.toString());
+    const listState = await createBrowserSession(initialUrl);
     sessionId = listState.sessionId;
-    await waitForBrowserPage(sessionId, PAGE_LOAD_SETTLE_MS);
-    let snapshot = await getBrowserState(sessionId);
     let sourceDateListUrl = dayListUrl.toString();
-    let candidates = listCandidates(snapshot, details);
+    let matchedGame: SourceGame | null = null;
+    let initialMatchArea = "";
 
-    if (!candidates.length) {
-      await navigateBrowser(sessionId, resultsListUrl.toString());
+    if (competitionId !== null) {
+      try {
+        const listPayload = sourceObject(
+          await readSourceJson(
+            sessionId,
+            gamesListApiUrl(date, competitionId).toString(),
+          ),
+        );
+        const games = sourceEntries(
+          listPayload?.games as
+            | SourceGame[]
+            | Record<string, SourceGame>
+            | undefined,
+        );
+        const matches = games.filter((candidate) =>
+          gameMatchesFixture(candidate, details, fixtureDate),
+        );
+        if (matches.length > 1) {
+          throw new MatchReplayNotFoundError(
+            "More than one 365Scores result matched this date, teams, and score. The replay was stopped to avoid attaching the wrong match.",
+          );
+        }
+        matchedGame = matches[0] ?? null;
+      } catch (error) {
+        if (error instanceof MatchReplayNotFoundError) throw error;
+      }
+    }
+
+    if (!matchedGame) {
+      await navigateBrowser(sessionId, dayListUrl.toString());
       await waitForBrowserPage(sessionId, PAGE_LOAD_SETTLE_MS);
-      snapshot = await getBrowserState(sessionId);
-      sourceDateListUrl = resultsListUrl.toString();
-      candidates = listCandidates(snapshot, details);
+      let snapshot = await getBrowserState(sessionId);
+      let candidates = listCandidates(snapshot, details);
+
+      if (!candidates.length) {
+        await navigateBrowser(sessionId, resultsListUrl.toString());
+        await waitForBrowserPage(sessionId, PAGE_LOAD_SETTLE_MS);
+        snapshot = await getBrowserState(sessionId);
+        sourceDateListUrl = resultsListUrl.toString();
+        candidates = listCandidates(snapshot, details);
+      }
+
+      if (!candidates.length) throw new MatchReplayNotFoundError();
+      if (candidates.length > 1) {
+        throw new MatchReplayNotFoundError(
+          "More than one 365Scores result matched these teams. The replay was stopped to avoid attaching the wrong match.",
+        );
+      }
+
+      const candidate = candidates[0];
+      if (!candidate) throw new MatchReplayNotFoundError();
+      const sourceUrl = new URL(candidate.url);
+      if (!isAllowedMatchUrl(sourceUrl.toString())) {
+        throw new MatchReplaySourceError();
+      }
+
+      await navigateBrowser(sessionId, sourceUrl.toString());
+      await waitForBrowserPage(sessionId, PAGE_LOAD_SETTLE_MS);
+      const matchSnapshot = await getBrowserState(sessionId);
+      initialMatchArea = extractMatchArea(matchSnapshot.pageContent.text);
+      if (!reportDateMatches(fixtureDate, matchSnapshot.title, initialMatchArea)) {
+        throw new MatchReplayNotFoundError(
+          "365Scores returned a result from a different date. No replay was attached.",
+        );
+      }
+
+      const candidateId = new URLSearchParams(
+        sourceUrl.hash.replace(/^#/, ""),
+      ).get("id");
+      const matchupId = sourceUrl.pathname
+        .split("/")
+        .at(-1)
+        ?.match(/(\d+-\d+-\d+)$/)?.[1];
+      if (!candidateId || !matchupId) {
+        throw new MatchReplayNotFoundError(
+          "The 365Scores results link did not include a verifiable match identifier.",
+        );
+      }
+      const fallbackGameUrl = new URL("https://webws.365scores.com/web/game/");
+      fallbackGameUrl.searchParams.set("appTypeId", "5");
+      fallbackGameUrl.searchParams.set("langId", "1");
+      fallbackGameUrl.searchParams.set("timezoneName", "UTC");
+      fallbackGameUrl.searchParams.set("userCountryId", "355");
+      fallbackGameUrl.searchParams.set("gameId", candidateId);
+      fallbackGameUrl.searchParams.set("matchupId", matchupId);
+      const gamePayload = sourceObject(
+        await readSourceJson(sessionId, fallbackGameUrl.toString()),
+      );
+      matchedGame = sourceObject(gamePayload?.game) as SourceGame | null;
     }
 
-    if (!candidates.length) throw new MatchReplayNotFoundError();
-    if (candidates.length > 1) {
+    if (
+      !matchedGame ||
+      !gameMatchesFixture(matchedGame, details, fixtureDate) ||
+      typeof matchedGame.id !== "number" ||
+      !Number.isInteger(matchedGame.id)
+    ) {
       throw new MatchReplayNotFoundError(
-        "More than one 365Scores result matched these teams. The replay was stopped to avoid attaching the wrong match.",
+        "365Scores match data did not confirm the same date, teams, and score. No replay was attached.",
       );
     }
 
-    const candidate = candidates[0];
-    if (!candidate) throw new MatchReplayNotFoundError();
-    const sourceMatchUrl = new URL(candidate.url);
-    if (!isAllowedMatchUrl(sourceMatchUrl.toString())) {
-      throw new MatchReplaySourceError();
-    }
-
-    await navigateBrowser(sessionId, sourceMatchUrl.toString());
-    await waitForBrowserPage(sessionId, PAGE_LOAD_SETTLE_MS);
-    const matchSnapshot = await getBrowserState(sessionId);
-    const initialMatchArea = extractMatchArea(matchSnapshot.pageContent.text);
-    if (!reportDateMatches(fixtureDate, matchSnapshot.title, initialMatchArea)) {
-      throw new MatchReplayNotFoundError(
-        "365Scores returned a result from a different date. No replay was attached.",
-      );
-    }
-
-    const gameUrl = gameApiUrl(sourceMatchUrl);
+    const sourceMatchUrl = sourceMatchPageUrl(matchedGame, details);
+    const gameUrl = gameApiUrl(matchedGame);
     const gamePayload = sourceObject(
       await readSourceJson(sessionId, gameUrl.toString()),
     );
-    const rawGame = gamePayload?.game;
-    const game = sourceObject(rawGame) as SourceGame | null;
+    const game = sourceObject(gamePayload?.game) as SourceGame | null;
     if (
       !game ||
       !gameMatchesFixture(game, details, fixtureDate) ||
-      typeof game.id !== "number"
+      typeof game.id !== "number" ||
+      !Number.isInteger(game.id)
     ) {
       throw new MatchReplayNotFoundError(
         "365Scores match data did not confirm the same date, teams, and score. No replay was attached.",
@@ -986,8 +1145,11 @@ export async function get365ScoresMatchReplay(
       sectionText("shot-map", "Shot map details", shotMapText ?? ""),
       sectionText("time-details", "Playing time and stoppages", timeDetailsText ?? ""),
     ];
-    const dateListText = snapshot.pageContent.text;
-    if (!dateListText) throw new MatchReplaySourceError();
+    const halfTimeScore =
+      details.match.home.halfTimeScore !== null &&
+      details.match.away.halfTimeScore !== null
+        ? `${details.match.home.halfTimeScore}–${details.match.away.halfTimeScore}`
+        : null;
 
     const replay: FootballMatchReplay = {
       fixtureId: details.match.fixtureId,
@@ -997,7 +1159,7 @@ export async function get365ScoresMatchReplay(
       awayTeam: details.match.away.name,
       homeScore: details.match.home.score,
       awayScore: details.match.away.score,
-      halfTimeScore: parseHalfTimeScore(initialMatchArea),
+      halfTimeScore: parseHalfTimeScore(initialMatchArea) ?? halfTimeScore,
       actualPlayTime,
       totalDuration,
       sourceDateListUrl,
