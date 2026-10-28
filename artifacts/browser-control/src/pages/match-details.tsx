@@ -22,6 +22,7 @@ import FairAiSimulationPanel from '@/components/fair-ai-simulation-panel';
 import { MatchReplayPanel } from '@/components/match-replay-panel';
 import { MatchCenterPanel } from '@/components/match-center-panel';
 import { LiveActionSourcePanel } from '@/components/live-action-source-panel';
+import { OddsTranslationPanel } from '@/components/odds-translation-panel';
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -35,7 +36,7 @@ import {
   Trophy,
 } from 'lucide-react';
 
-type MatchTab = 'table' | 'fair-ai' | 'match-center' | 'live-action' | 'replay' | 'odds' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
+type MatchTab = 'table' | 'fair-ai' | 'match-center' | 'live-action' | 'replay' | 'odds' | 'odds-translation' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
 const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'table', label: 'Table', short: '01' },
   { id: 'fair-ai', label: 'FAIR AI', short: '02' },
@@ -43,6 +44,7 @@ const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'live-action', label: 'Live action', short: '13' },
   { id: 'replay', label: 'Match replay', short: '11' },
   { id: 'odds', label: 'Odds', short: '03' },
+  { id: 'odds-translation', label: 'Odds translation', short: '14' },
   { id: 'form', label: 'Team form', short: '04' },
   { id: 'lastfive', label: 'Last five', short: '05' },
   { id: 'h2h', label: 'Head to head', short: '06' },
@@ -450,6 +452,7 @@ export default function MatchDetailsPage() {
                   />
                 )}
                 {activeTab === 'odds' && <OddsPanel details={details} />}
+                {activeTab === 'odds-translation' && <OddsTranslationPanel markets={details.oddsMarkets} homeName={match.home.name} awayName={match.away.name} />}
                 {activeTab === 'form' && <FormPanel details={details} />}
                 {activeTab === 'h2h' && <HeadToHeadPanel details={details} />}
                 {activeTab === 'tmp' && <MatchTmpPanel details={details} context={tmpQuery.data} isLoading={tmpQuery.isLoading} isError={tmpQuery.isError} error={tmpQuery.error} onRetry={() => { void tmpQuery.refetch(); }} />}
