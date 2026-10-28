@@ -7,3 +7,4 @@
 - [Fixture return navigation](fixture-return-navigation.md) — keep the clicked league as a return position, not an automatic competition filter.
 - [365Scores replay lookup](365scores-replay-lookup.md) — use the results API for dated historical match lookup; the generic games endpoint may return current fixtures instead.
 - [365Scores live tracker](365scores-live-tracker.md) — the live pitch is an embedded Sportradar widget; public match APIs expose events, not continuous positions.
+- [Odds translation scope](odds-translation-scope.md) — combine complete full-time score markets into one bookmaker read while retaining every returned market.
