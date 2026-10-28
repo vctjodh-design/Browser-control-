@@ -2085,6 +2085,168 @@ components:
         note:
           type: string
       required: [source, home, away, note]
+    FootballFairAiTacticalResults:
+      type: object
+      properties:
+        wins:
+          type: integer
+          minimum: 0
+        draws:
+          type: integer
+          minimum: 0
+        losses:
+          type: integer
+          minimum: 0
+      required: [wins, draws, losses]
+    FootballFairAiTacticalAdjustment:
+      type: object
+      properties:
+        firstHalfShotScale:
+          type: number
+          minimum: 0.9
+          maximum: 1.1
+        secondHalfShotScale:
+          type: number
+          minimum: 0.9
+          maximum: 1.1
+        attackVsDefenseXgScale:
+          type: number
+          minimum: 0.9
+          maximum: 1.1
+        buildupVsDefensePassAdjustmentPct:
+          type: number
+          minimum: -2
+          maximum: 2
+      required:
+        - firstHalfShotScale
+        - secondHalfShotScale
+        - attackVsDefenseXgScale
+        - buildupVsDefensePassAdjustmentPct
+    FootballFairAiTacticalTeamProfile:
+      type: object
+      properties:
+        teamName:
+          type: string
+        matchesExpected:
+          type: integer
+          minimum: 0
+        matchesAnalyzed:
+          type: integer
+          minimum: 0
+        results:
+          $ref: "#/components/schemas/FootballFairAiTacticalResults"
+        bttsMatches:
+          type: integer
+          minimum: 0
+        over25Matches:
+          type: integer
+          minimum: 0
+        over35Matches:
+          type: integer
+          minimum: 0
+        averageGoalsFor:
+          type: ["number", "null"]
+        averageGoalsAgainst:
+          type: ["number", "null"]
+        firstHalfGoalsFor:
+          type: ["number", "null"]
+        secondHalfGoalsFor:
+          type: ["number", "null"]
+        averagePossessionPct:
+          type: ["number", "null"]
+        averageShotsFor:
+          type: ["number", "null"]
+        averageShotsAgainst:
+          type: ["number", "null"]
+        averageShotsOnTargetFor:
+          type: ["number", "null"]
+        averageShotsOnTargetAgainst:
+          type: ["number", "null"]
+        averagePassCompletionPct:
+          type: ["number", "null"]
+        averageLongBallCompletionPct:
+          type: ["number", "null"]
+        averageFinalThirdPassCompletionPct:
+          type: ["number", "null"]
+        averageDefensiveActions:
+          type: ["number", "null"]
+        averageRecoveries:
+          type: ["number", "null"]
+        statisticMatchCount:
+          type: integer
+          minimum: 0
+        phaseShotMatchCount:
+          type: integer
+          minimum: 0
+        buildupMatchCount:
+          type: integer
+          minimum: 0
+        defensiveActivityMatchCount:
+          type: integer
+          minimum: 0
+        formationSamples:
+          type: integer
+          minimum: 0
+        observedFormations:
+          type: array
+          items:
+            type: string
+        adjustment:
+          $ref: "#/components/schemas/FootballFairAiTacticalAdjustment"
+      required:
+        - teamName
+        - matchesExpected
+        - matchesAnalyzed
+        - results
+        - bttsMatches
+        - over25Matches
+        - over35Matches
+        - averageGoalsFor
+        - averageGoalsAgainst
+        - firstHalfGoalsFor
+        - secondHalfGoalsFor
+        - averagePossessionPct
+        - averageShotsFor
+        - averageShotsAgainst
+        - averageShotsOnTargetFor
+        - averageShotsOnTargetAgainst
+        - averagePassCompletionPct
+        - averageLongBallCompletionPct
+        - averageFinalThirdPassCompletionPct
+        - averageDefensiveActions
+        - averageRecoveries
+        - statisticMatchCount
+        - phaseShotMatchCount
+        - buildupMatchCount
+        - defensiveActivityMatchCount
+        - formationSamples
+        - observedFormations
+        - adjustment
+    FootballFairAiTacticalForensics:
+      type: object
+      properties:
+        source:
+          type: string
+        home:
+          $ref: "#/components/schemas/FootballFairAiTacticalTeamProfile"
+        away:
+          $ref: "#/components/schemas/FootballFairAiTacticalTeamProfile"
+        opponentRecentStrengthStatus:
+          type: string
+          enum: [unavailable]
+        matchupNote:
+          type: string
+        limitations:
+          type: array
+          items:
+            type: string
+      required:
+        - source
+        - home
+        - away
+        - opponentRecentStrengthStatus
+        - matchupNote
+        - limitations
     FootballFairAiSimulationOutcome:
       type: object
       properties:
@@ -2499,6 +2661,8 @@ components:
           $ref: "#/components/schemas/FootballFairAiForecastBlend"
         actionEvidence:
           $ref: "#/components/schemas/FootballFairAiActionEvidence"
+        tacticalForensics:
+          $ref: "#/components/schemas/FootballFairAiTacticalForensics"
         matchupAnalysis:
           $ref: "#/components/schemas/FootballFairAiSimulationMatchupAnalysis"
         topScorelines:
@@ -2536,6 +2700,7 @@ components:
         - standingsContext
         - forecastBlend
         - actionEvidence
+        - tacticalForensics
         - matchupAnalysis
         - topScorelines
         - playerContributions

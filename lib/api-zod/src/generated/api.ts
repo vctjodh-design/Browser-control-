@@ -494,6 +494,82 @@ export const runFootballFairAiSimulationResponseActionEvidenceAwayPlayersItemGoa
 
 export const runFootballFairAiSimulationResponseActionEvidenceAwayKeyEventsMax = 10;
 
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeMatchesExpectedMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeMatchesAnalyzedMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeResultsWinsMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeResultsDrawsMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeResultsLossesMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeBttsMatchesMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeOver25MatchesMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeOver35MatchesMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeStatisticMatchCountMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomePhaseShotMatchCountMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeBuildupMatchCountMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeDefensiveActivityMatchCountMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeFormationSamplesMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentFirstHalfShotScaleMin = 0.9;
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentFirstHalfShotScaleMax = 1.1;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentSecondHalfShotScaleMin = 0.9;
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentSecondHalfShotScaleMax = 1.1;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentAttackVsDefenseXgScaleMin = 0.9;
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentAttackVsDefenseXgScaleMax = 1.1;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentBuildupVsDefensePassAdjustmentPctMin = -2;
+export const runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentBuildupVsDefensePassAdjustmentPctMax = 2;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayMatchesExpectedMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayMatchesAnalyzedMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayResultsWinsMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayResultsDrawsMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayResultsLossesMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayBttsMatchesMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayOver25MatchesMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayOver35MatchesMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayStatisticMatchCountMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayPhaseShotMatchCountMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayBuildupMatchCountMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayDefensiveActivityMatchCountMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayFormationSamplesMin = 0;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentFirstHalfShotScaleMin = 0.9;
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentFirstHalfShotScaleMax = 1.1;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentSecondHalfShotScaleMin = 0.9;
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentSecondHalfShotScaleMax = 1.1;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentAttackVsDefenseXgScaleMin = 0.9;
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentAttackVsDefenseXgScaleMax = 1.1;
+
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentBuildupVsDefensePassAdjustmentPctMin = -2;
+export const runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentBuildupVsDefensePassAdjustmentPctMax = 2;
+
 
 
 export const RunFootballFairAiSimulationResponse = zod.object({
@@ -899,6 +975,90 @@ export const RunFootballFairAiSimulationResponse = zod.object({
 })).max(runFootballFairAiSimulationResponseActionEvidenceAwayKeyEventsMax)
 }),
   "note": zod.string()
+}),
+  "tacticalForensics": zod.object({
+  "source": zod.string(),
+  "home": zod.object({
+  "teamName": zod.string(),
+  "matchesExpected": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsHomeMatchesExpectedMin),
+  "matchesAnalyzed": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsHomeMatchesAnalyzedMin),
+  "results": zod.object({
+  "wins": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsHomeResultsWinsMin),
+  "draws": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsHomeResultsDrawsMin),
+  "losses": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsHomeResultsLossesMin)
+}),
+  "bttsMatches": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsHomeBttsMatchesMin),
+  "over25Matches": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsHomeOver25MatchesMin),
+  "over35Matches": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsHomeOver35MatchesMin),
+  "averageGoalsFor": zod.number().nullable(),
+  "averageGoalsAgainst": zod.number().nullable(),
+  "firstHalfGoalsFor": zod.number().nullable(),
+  "secondHalfGoalsFor": zod.number().nullable(),
+  "averagePossessionPct": zod.number().nullable(),
+  "averageShotsFor": zod.number().nullable(),
+  "averageShotsAgainst": zod.number().nullable(),
+  "averageShotsOnTargetFor": zod.number().nullable(),
+  "averageShotsOnTargetAgainst": zod.number().nullable(),
+  "averagePassCompletionPct": zod.number().nullable(),
+  "averageLongBallCompletionPct": zod.number().nullable(),
+  "averageFinalThirdPassCompletionPct": zod.number().nullable(),
+  "averageDefensiveActions": zod.number().nullable(),
+  "averageRecoveries": zod.number().nullable(),
+  "statisticMatchCount": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsHomeStatisticMatchCountMin),
+  "phaseShotMatchCount": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsHomePhaseShotMatchCountMin),
+  "buildupMatchCount": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsHomeBuildupMatchCountMin),
+  "defensiveActivityMatchCount": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsHomeDefensiveActivityMatchCountMin),
+  "formationSamples": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsHomeFormationSamplesMin),
+  "observedFormations": zod.array(zod.string()),
+  "adjustment": zod.object({
+  "firstHalfShotScale": zod.number().min(runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentFirstHalfShotScaleMin).max(runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentFirstHalfShotScaleMax),
+  "secondHalfShotScale": zod.number().min(runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentSecondHalfShotScaleMin).max(runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentSecondHalfShotScaleMax),
+  "attackVsDefenseXgScale": zod.number().min(runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentAttackVsDefenseXgScaleMin).max(runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentAttackVsDefenseXgScaleMax),
+  "buildupVsDefensePassAdjustmentPct": zod.number().min(runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentBuildupVsDefensePassAdjustmentPctMin).max(runFootballFairAiSimulationResponseTacticalForensicsHomeAdjustmentBuildupVsDefensePassAdjustmentPctMax)
+})
+}),
+  "away": zod.object({
+  "teamName": zod.string(),
+  "matchesExpected": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsAwayMatchesExpectedMin),
+  "matchesAnalyzed": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsAwayMatchesAnalyzedMin),
+  "results": zod.object({
+  "wins": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsAwayResultsWinsMin),
+  "draws": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsAwayResultsDrawsMin),
+  "losses": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsAwayResultsLossesMin)
+}),
+  "bttsMatches": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsAwayBttsMatchesMin),
+  "over25Matches": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsAwayOver25MatchesMin),
+  "over35Matches": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsAwayOver35MatchesMin),
+  "averageGoalsFor": zod.number().nullable(),
+  "averageGoalsAgainst": zod.number().nullable(),
+  "firstHalfGoalsFor": zod.number().nullable(),
+  "secondHalfGoalsFor": zod.number().nullable(),
+  "averagePossessionPct": zod.number().nullable(),
+  "averageShotsFor": zod.number().nullable(),
+  "averageShotsAgainst": zod.number().nullable(),
+  "averageShotsOnTargetFor": zod.number().nullable(),
+  "averageShotsOnTargetAgainst": zod.number().nullable(),
+  "averagePassCompletionPct": zod.number().nullable(),
+  "averageLongBallCompletionPct": zod.number().nullable(),
+  "averageFinalThirdPassCompletionPct": zod.number().nullable(),
+  "averageDefensiveActions": zod.number().nullable(),
+  "averageRecoveries": zod.number().nullable(),
+  "statisticMatchCount": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsAwayStatisticMatchCountMin),
+  "phaseShotMatchCount": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsAwayPhaseShotMatchCountMin),
+  "buildupMatchCount": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsAwayBuildupMatchCountMin),
+  "defensiveActivityMatchCount": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsAwayDefensiveActivityMatchCountMin),
+  "formationSamples": zod.number().int().min(runFootballFairAiSimulationResponseTacticalForensicsAwayFormationSamplesMin),
+  "observedFormations": zod.array(zod.string()),
+  "adjustment": zod.object({
+  "firstHalfShotScale": zod.number().min(runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentFirstHalfShotScaleMin).max(runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentFirstHalfShotScaleMax),
+  "secondHalfShotScale": zod.number().min(runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentSecondHalfShotScaleMin).max(runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentSecondHalfShotScaleMax),
+  "attackVsDefenseXgScale": zod.number().min(runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentAttackVsDefenseXgScaleMin).max(runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentAttackVsDefenseXgScaleMax),
+  "buildupVsDefensePassAdjustmentPct": zod.number().min(runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentBuildupVsDefensePassAdjustmentPctMin).max(runFootballFairAiSimulationResponseTacticalForensicsAwayAdjustmentBuildupVsDefensePassAdjustmentPctMax)
+})
+}),
+  "opponentRecentStrengthStatus": zod.enum(['unavailable']),
+  "matchupNote": zod.string(),
+  "limitations": zod.array(zod.string())
 }),
   "matchupAnalysis": zod.object({
   "home": zod.object({

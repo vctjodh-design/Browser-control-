@@ -475,6 +475,109 @@ export interface FootballFairAiActionEvidence {
   note: string;
 }
 
+export interface FootballFairAiTacticalResults {
+  /** @minimum 0 */
+  wins: number;
+  /** @minimum 0 */
+  draws: number;
+  /** @minimum 0 */
+  losses: number;
+}
+
+export interface FootballFairAiTacticalAdjustment {
+  /**
+     * @minimum 0.9
+     * @maximum 1.1
+     */
+  firstHalfShotScale: number;
+  /**
+     * @minimum 0.9
+     * @maximum 1.1
+     */
+  secondHalfShotScale: number;
+  /**
+     * @minimum 0.9
+     * @maximum 1.1
+     */
+  attackVsDefenseXgScale: number;
+  /**
+     * @minimum -2
+     * @maximum 2
+     */
+  buildupVsDefensePassAdjustmentPct: number;
+}
+
+export interface FootballFairAiTacticalTeamProfile {
+  teamName: string;
+  /** @minimum 0 */
+  matchesExpected: number;
+  /** @minimum 0 */
+  matchesAnalyzed: number;
+  results: FootballFairAiTacticalResults;
+  /** @minimum 0 */
+  bttsMatches: number;
+  /** @minimum 0 */
+  over25Matches: number;
+  /** @minimum 0 */
+  over35Matches: number;
+  /** @nullable */
+  averageGoalsFor: number | null;
+  /** @nullable */
+  averageGoalsAgainst: number | null;
+  /** @nullable */
+  firstHalfGoalsFor: number | null;
+  /** @nullable */
+  secondHalfGoalsFor: number | null;
+  /** @nullable */
+  averagePossessionPct: number | null;
+  /** @nullable */
+  averageShotsFor: number | null;
+  /** @nullable */
+  averageShotsAgainst: number | null;
+  /** @nullable */
+  averageShotsOnTargetFor: number | null;
+  /** @nullable */
+  averageShotsOnTargetAgainst: number | null;
+  /** @nullable */
+  averagePassCompletionPct: number | null;
+  /** @nullable */
+  averageLongBallCompletionPct: number | null;
+  /** @nullable */
+  averageFinalThirdPassCompletionPct: number | null;
+  /** @nullable */
+  averageDefensiveActions: number | null;
+  /** @nullable */
+  averageRecoveries: number | null;
+  /** @minimum 0 */
+  statisticMatchCount: number;
+  /** @minimum 0 */
+  phaseShotMatchCount: number;
+  /** @minimum 0 */
+  buildupMatchCount: number;
+  /** @minimum 0 */
+  defensiveActivityMatchCount: number;
+  /** @minimum 0 */
+  formationSamples: number;
+  observedFormations: string[];
+  adjustment: FootballFairAiTacticalAdjustment;
+}
+
+export type FootballFairAiTacticalForensicsOpponentRecentStrengthStatus = typeof FootballFairAiTacticalForensicsOpponentRecentStrengthStatus[keyof typeof FootballFairAiTacticalForensicsOpponentRecentStrengthStatus];
+
+
+export const FootballFairAiTacticalForensicsOpponentRecentStrengthStatus = {
+  unavailable: 'unavailable',
+} as const;
+
+export interface FootballFairAiTacticalForensics {
+  source: string;
+  home: FootballFairAiTacticalTeamProfile;
+  away: FootballFairAiTacticalTeamProfile;
+  opponentRecentStrengthStatus: FootballFairAiTacticalForensicsOpponentRecentStrengthStatus;
+  matchupNote: string;
+  limitations: string[];
+}
+
 export interface FootballFairAiSimulationOutcome {
   home: number;
   draw: number;
@@ -845,6 +948,7 @@ export interface FootballFairAiSimulation {
   oddsBaseline?: FootballFairAiOddsBaseline;
   forecastBlend: FootballFairAiForecastBlend;
   actionEvidence: FootballFairAiActionEvidence;
+  tacticalForensics: FootballFairAiTacticalForensics;
   matchupAnalysis: FootballFairAiSimulationMatchupAnalysis;
   topScorelines: FootballFairAiSimulationScoreline[];
   playerContributions: FootballFairAiSimulationContribution[];

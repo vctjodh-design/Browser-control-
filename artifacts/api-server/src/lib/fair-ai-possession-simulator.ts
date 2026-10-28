@@ -3,8 +3,10 @@ import type {
   FootballFairAiActionTeamEvidence,
   FootballFairAiOddsBaseline,
   FootballFairAiSimulation,
+  FootballFairAiTacticalForensics,
   FootballFairAiTeam,
 } from "@workspace/api-zod";
+import { buildFairAiTacticalForensics } from "./fair-ai-tactical-forensics";
 
 const GRID_COLUMNS = 12;
 const GRID_ROWS = 8;
@@ -632,6 +634,7 @@ function passCompletionProbability(
   teamStandingsStrength: number,
   opponentStandingsStrength: number,
   gameState: CurrentGameState,
+  tacticalAdjustmentPct: number,
 ): number {
   const playerAccuracy = player?.passCompletionPct === null || player?.passCompletionPct === undefined
     ? teamPassAccuracy(team)
@@ -669,7 +672,8 @@ function passCompletionProbability(
   return clamp(
     playerAccuracy + progressionSkill + coachEdge + fatigue + longBallBonus +
       teamStandingsStrength * 0.012 -
-      cardDisciplinePenalty + matchupAdjustment + gameStateRisk,
+      cardDisciplinePenalty + matchupAdjustment + gameStateRisk +
+      tacticalAdjustmentPct / 100,
     0.54,
     0.97,
   );
@@ -712,6 +716,7 @@ function shotExpectedGoals(
   attackingStandingsStrength: number,
   defendingStandingsStrength: number,
   actionEvidence: FootballFairAiActionTeamEvidence,
+  tacticalScale: number,
 ): { value: number; source: ShotXgSource } {
   const playerBase = player && player.shotsPer90 > 0 && player.expectedGoalsPer90 > 0
     ? player.expectedGoalsPer90 / player.shotsPer90
@@ -788,7 +793,8 @@ function shotExpectedGoals(
   return {
     value: clamp(
       base * locationFactor * insideBoxFactor * bigChanceFactor *
-        missedChanceFactor * ratingFactor * defensiveFactor * placementFactor +
+        missedChanceFactor * ratingFactor * defensiveFactor * placementFactor *
+        tacticalScale +
         (attackingStandingsStrength - defendingStandingsStrength) * 0.012,
       0.015,
       0.48,
@@ -1215,9 +1221,16 @@ export function runFairAiPossessionSimulation(
   context: {
     oddsBaseline?: FootballFairAiOddsBaseline;
     actionEvidence: FootballFairAiActionEvidence;
+    tacticalForensics?: FootballFairAiTacticalForensics;
   } = { actionEvidence: emptyActionEvidence() },
 ): FootballFairAiSimulation {
   const iterations = clamp(Math.floor(requestedIterations), 1_000, 50_000);
+  const tacticalForensics = context.tacticalForensics ??
+    buildFairAiTacticalForensics([], {}, 0, 0, home.name, away.name);
+  const tacticalAdjustments = new Map([
+    [home.teamKey, tacticalForensics.home.adjustment],
+    [away.teamKey, tacticalForensics.away.adjustment],
+  ]);
   const homeShare = possessionShare(home, away);
   const awayShare = 100 - homeShare;
   const totals = new Map<string, TeamCounter>([
@@ -1277,12 +1290,14 @@ export function runFairAiPossessionSimulation(
           first: samplePoisson(
             expectedShotBudget(home, away, "first") *
               homeMarketScale *
-              actionPhaseShotScale(homeActionEvidence, "first"),
+              actionPhaseShotScale(homeActionEvidence, "first") *
+              tacticalForensics.home.adjustment.firstHalfShotScale,
           ),
           second: samplePoisson(
             expectedShotBudget(home, away, "second") *
               homeMarketScale *
-              actionPhaseShotScale(homeActionEvidence, "second"),
+              actionPhaseShotScale(homeActionEvidence, "second") *
+              tacticalForensics.home.adjustment.secondHalfShotScale,
           ),
         },
       ],
@@ -1292,12 +1307,14 @@ export function runFairAiPossessionSimulation(
           first: samplePoisson(
             expectedShotBudget(away, home, "first") *
               awayMarketScale *
-              actionPhaseShotScale(awayActionEvidence, "first"),
+              actionPhaseShotScale(awayActionEvidence, "first") *
+              tacticalForensics.away.adjustment.firstHalfShotScale,
           ),
           second: samplePoisson(
             expectedShotBudget(away, home, "second") *
               awayMarketScale *
-              actionPhaseShotScale(awayActionEvidence, "second"),
+              actionPhaseShotScale(awayActionEvidence, "second") *
+              tacticalForensics.away.adjustment.secondHalfShotScale,
           ),
         },
       ],
@@ -1391,6 +1408,7 @@ export function runFairAiPossessionSimulation(
             attacking.teamKey === home.teamKey
               ? homeActionEvidence
               : awayActionEvidence,
+            tacticalAdjustments.get(attacking.teamKey)?.attackVsDefenseXgScale ?? 1,
           );
           const shotXg = shotEstimate.value;
           attackingTotals.shotXgSources[shotEstimate.source] += 1;
@@ -1455,6 +1473,8 @@ export function runFairAiPossessionSimulation(
                 attackingStandingsStrength,
                 defendingStandingsStrength,
                 gameState,
+                tacticalAdjustments.get(attacking.teamKey)
+                  ?.buildupVsDefensePassAdjustmentPct ?? 0,
               )
             : carryCompletionProbability(
                 attacking,
@@ -1783,6 +1803,7 @@ export function runFairAiPossessionSimulation(
         : "No valid odds scoreline distribution was supplied; the forecast uses the FAIR AI event simulation only.",
     },
     actionEvidence: context.actionEvidence,
+    tacticalForensics,
     matchupAnalysis: {
       home: matchupTeamAnalysis(
         home,
@@ -1798,7 +1819,7 @@ export function runFairAiPossessionSimulation(
         iterations,
         standingsStrengths.get(home.teamKey) ?? 0,
       ),
-      evidenceNote: "Tactical effects are bounded proxies from archived formations, passing, long-ball and defensive-action rates. Score-state responses are generated by a simple synthetic policy, not learned from observed substitutions or player tracking. Archived starters are not confirmed future lineups; finishing and keeper adjustments are noisy source estimates, not validated skill ratings.",
+      evidenceNote: "Tactical effects combine the fresh five-match score/stat sample with archived formations, passing, long-ball and defensive-action rates. Score-state responses are generated by a simple synthetic policy, not learned from observed substitutions or player tracking. Archived starters are not confirmed future lineups; finishing and keeper adjustments are noisy source estimates, not validated skill ratings.",
     },
     topScorelines: scorelineDistribution
       .slice(0, 6)
@@ -1812,10 +1833,11 @@ export function runFairAiPossessionSimulation(
       away: possessionSummary(away, awayShare, awayTotals, iterations),
       sampledPossessions: samples,
     },
-    method: `Possession-by-possession Monte Carlo over ${iterations.toLocaleString()} simulated matches. When full-time odds are available, their complete scoreline distribution is the initial forecast baseline and their expected goals calibrate simulated shot volume against the teams' recent archive rates. The final scoreline probabilities blend that normalized market distribution with the FAIR AI event simulation; the reported weights rise with the coverage of recent matches, player profiles, team statistics, and 365Scores shot reports. Fresh 365Scores commentary and shot records can adjust phase shot volume, shot xG, and shot-placement conversion within bounded limits. Possession paths and diagnostics remain the raw event simulation. Remaining xG proxies prefer player xG/shot, then 365Scores shot xG, then team xG/shot, recent scores, and finally a neutral 0.105-per-shot prior. Finishing and keeper factors adjust goal conversion separately from xG. Pass completion changes through a bounded buildup-versus-pressing proxy, and action risk responds to simulated score state. When both teams have fresh standings snapshots, normalized rank, points-per-game, goal difference and form add small bounded execution and shot-quality adjustments.`,
+    method: `Possession-by-possession Monte Carlo over ${iterations.toLocaleString()} simulated matches. When full-time odds are available, their complete scoreline distribution is the initial forecast baseline and their expected goals calibrate simulated shot volume against the teams' recent archive rates. The final scoreline probabilities blend that normalized market distribution with the FAIR AI event simulation; the reported weights rise with the coverage of recent matches, player profiles, team statistics, and 365Scores shot reports. Fresh 365Scores commentary and shot records can adjust phase shot volume, shot xG, and shot-placement conversion within bounded limits. The fresh five-match tactical comparison also applies bounded half-specific shot timing, buildup-versus-defensive-activity pass success, and opponent shot-concession exposure adjustments before the market blend. Possession paths and diagnostics remain the raw event simulation. Remaining xG proxies prefer player xG/shot, then 365Scores shot xG, then team xG/shot, recent scores, and finally a neutral 0.105-per-shot prior. Finishing and keeper factors adjust goal conversion separately from xG. Pass completion changes through bounded matchup proxies, and action risk responds to simulated score state. When both teams have fresh standings snapshots, normalized rank, points-per-game, goal difference and form add small bounded execution and shot-quality adjustments.`,
     limitations: [
       "Player roles and action profiles are aggregated from recent archived lineups and match statistics; the latest observed starting XI is not a confirmed future lineup.",
       "Tactical compatibility is represented by bounded proxies from archived passing, long-ball, defensive-action, and formation data. The archive does not establish pressing triggers, defensive-line height, width/space exploitation, or event-level tactical changes.",
+      "The five-match tactical forensics use aggregate source scores, match statistics, half-period samples, and formations. They do not establish pressing efficiency, rest-defense shape, tactical intent, or opponent recent strength at the historical match date.",
       "Leading, level, and trailing shot rates come from this simulation's own score-aware rules. They are not evidence of observed psychological behavior, substitutions, or proven in-match adaptability.",
       "Finishing and goalkeeper effects are shrunk proxies from small archived samples when available. Goals relative to xG are noisy; shot placement and pressure-specific finishing data are unavailable.",
       "Recent score records can inform a clearly labeled shot-xG proxy when detailed statistics are absent; this is not observed or validated xG and does not replace missing match-stat samples.",
