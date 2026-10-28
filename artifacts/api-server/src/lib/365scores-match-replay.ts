@@ -1,6 +1,5 @@
 import type {
   FootballLiveAction,
-  FootballMatchDetails,
   FootballMatchReplayFormationPlayer,
   FootballMatchReplay,
   FootballMatchReplayEvent,
@@ -26,6 +25,16 @@ const MAX_REPLAY_CACHE_ENTRIES = 60;
 
 type BrowserSnapshot = Awaited<ReturnType<typeof getBrowserState>>;
 type SectionKey = FootballMatchReplaySection["key"];
+type ReplayFixtureContext = {
+  match: {
+    fixtureId: number;
+    date: string | Date;
+    competition: string;
+    status: string;
+    home: { name: string; score: number | null; halfTimeScore: number | null };
+    away: { name: string; score: number | null; halfTimeScore: number | null };
+  };
+};
 
 type SourcePlayerStat = {
   name?: string;
@@ -274,7 +283,7 @@ function isAllowedMatchUrl(value: string): boolean {
 
 function listCandidates(
   snapshot: BrowserSnapshot,
-  details: FootballMatchDetails,
+  details: ReplayFixtureContext,
 ): Array<{ url: string; text: string }> {
   const match = details.match;
   const potential = snapshot.pageContent.links.flatMap((link) => {
@@ -842,7 +851,7 @@ function gameApiUrl(game: SourceGame): URL {
 
 function sourceMatchPageUrl(
   game: SourceGame,
-  details: FootballMatchDetails,
+  details: ReplayFixtureContext,
 ): string {
   const home = game.homeCompetitor;
   const away = game.awayCompetitor;
@@ -1120,7 +1129,7 @@ function statsApiUrl(gameId: number, filterId?: number): URL {
 
 function gameMatchesFixture(
   game: SourceGame,
-  details: FootballMatchDetails,
+  details: ReplayFixtureContext,
   fixtureDate: Date,
 ): boolean {
   const gameDate = game.startTime ?? game.date;
@@ -1155,7 +1164,7 @@ function gameMatchesFixture(
 }
 
 export async function get365ScoresMatchReplay(
-  details: FootballMatchDetails,
+  details: ReplayFixtureContext,
 ): Promise<FootballMatchReplay> {
   const cached = replayCache.get(details.match.fixtureId);
   if (cached && cached.expiresAt > Date.now()) return cached.replay;

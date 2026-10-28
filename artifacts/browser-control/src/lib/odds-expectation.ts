@@ -433,6 +433,7 @@ export type OddsExpectationReport = {
   btts: { label: string; probability: number }[];
   totals: { line: number; over: number; under: number; sources: number }[];
   topScores: { homeGoals: number; awayGoals: number; probability: number }[];
+  scorelineDistribution: { homeGoals: number; awayGoals: number; probability: number }[];
   expectedHomeGoals: number;
   expectedAwayGoals: number;
   marketSourceCount: number;
@@ -497,6 +498,11 @@ export function analyzeOddsExpectation(
     btts,
     totals,
     topScores,
+    scorelineDistribution: scoreCells.map((cell) => ({
+      homeGoals: cell.homeGoals,
+      awayGoals: cell.awayGoals,
+      probability: distribution[cell.index] ?? 0,
+    })),
     expectedHomeGoals,
     expectedAwayGoals,
     marketSourceCount: marketIds.size,

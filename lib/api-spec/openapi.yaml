@@ -1906,7 +1906,185 @@ components:
           minimum: 1000
           maximum: 50000
           default: 10000
+        oddsBaseline:
+          $ref: "#/components/schemas/FootballFairAiOddsBaseline"
       required: [homeTeamKey, awayTeamKey]
+    FootballFairAiOddsScoreline:
+      type: object
+      properties:
+        homeGoals:
+          type: integer
+          minimum: 0
+          maximum: 10
+        awayGoals:
+          type: integer
+          minimum: 0
+          maximum: 10
+        probability:
+          type: number
+          minimum: 0
+          maximum: 1
+      required: [homeGoals, awayGoals, probability]
+    FootballFairAiOddsBaseline:
+      type: object
+      properties:
+        expectedHomeGoals:
+          type: number
+          minimum: 0
+          maximum: 10
+        expectedAwayGoals:
+          type: number
+          minimum: 0
+          maximum: 10
+        scorelineDistribution:
+          type: array
+          maxItems: 121
+          items:
+            $ref: "#/components/schemas/FootballFairAiOddsScoreline"
+        marketSourceCount:
+          type: integer
+          minimum: 0
+        signalCount:
+          type: integer
+          minimum: 0
+        fitErrorPoints:
+          type: ["number", "null"]
+        scoreMarketSeeded:
+          type: boolean
+      required:
+        - expectedHomeGoals
+        - expectedAwayGoals
+        - scorelineDistribution
+        - marketSourceCount
+        - signalCount
+        - fitErrorPoints
+        - scoreMarketSeeded
+    FootballFairAiForecastBlend:
+      type: object
+      properties:
+        oddsWeight:
+          type: number
+          minimum: 0
+          maximum: 1
+        fairAiWeight:
+          type: number
+          minimum: 0
+          maximum: 1
+        method:
+          type: string
+      required: [oddsWeight, fairAiWeight, method]
+    FootballFairAiActionPlayerEvidence:
+      type: object
+      properties:
+        playerName:
+          type: string
+        shots:
+          type: integer
+          minimum: 0
+        goals:
+          type: integer
+          minimum: 0
+        averageXg:
+          type: ["number", "null"]
+      required: [playerName, shots, goals, averageXg]
+    FootballFairAiActionEvent:
+      type: object
+      properties:
+        fixtureId:
+          type: integer
+          minimum: 1
+        minute:
+          type: string
+        kind:
+          type: string
+        title:
+          type: string
+        detail:
+          type: string
+      required: [fixtureId, minute, kind, title, detail]
+    FootballFairAiActionTeamEvidence:
+      type: object
+      properties:
+        matchesAnalyzed:
+          type: integer
+          minimum: 0
+        matchesUnavailable:
+          type: integer
+          minimum: 0
+        commentaryEvents:
+          type: integer
+          minimum: 0
+        goals:
+          type: integer
+          minimum: 0
+        substitutions:
+          type: integer
+          minimum: 0
+        cards:
+          type: integer
+          minimum: 0
+        shots:
+          type: integer
+          minimum: 0
+        firstHalfShots:
+          type: integer
+          minimum: 0
+        secondHalfShots:
+          type: integer
+          minimum: 0
+        shotsOnTarget:
+          type: integer
+          minimum: 0
+        shotsOffTarget:
+          type: integer
+          minimum: 0
+        averageXgPerShot:
+          type: ["number", "null"]
+        averageXgotPerShot:
+          type: ["number", "null"]
+        averageXgotMinusXg:
+          type: ["number", "null"]
+        averageShotX:
+          type: ["number", "null"]
+        players:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFairAiActionPlayerEvidence"
+        keyEvents:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/FootballFairAiActionEvent"
+      required:
+        - matchesAnalyzed
+        - matchesUnavailable
+        - commentaryEvents
+        - goals
+        - substitutions
+        - cards
+        - shots
+        - firstHalfShots
+        - secondHalfShots
+        - shotsOnTarget
+        - shotsOffTarget
+        - averageXgPerShot
+        - averageXgotPerShot
+        - averageXgotMinusXg
+        - averageShotX
+        - players
+        - keyEvents
+    FootballFairAiActionEvidence:
+      type: object
+      properties:
+        source:
+          type: string
+        home:
+          $ref: "#/components/schemas/FootballFairAiActionTeamEvidence"
+        away:
+          $ref: "#/components/schemas/FootballFairAiActionTeamEvidence"
+        note:
+          type: string
+      required: [source, home, away, note]
     FootballFairAiSimulationOutcome:
       type: object
       properties:
@@ -1986,13 +2164,15 @@ components:
       properties:
         playerProfile:
           type: integer
+        365Scores:
+          type: integer
         teamStatistics:
           type: integer
         recentResults:
           type: integer
         neutralPrior:
           type: integer
-      required: [playerProfile, teamStatistics, recentResults, neutralPrior]
+      required: [playerProfile, 365Scores, teamStatistics, recentResults, neutralPrior]
     FootballFairAiSimulationInputAuditTeam:
       type: object
       properties:
@@ -2313,6 +2493,12 @@ components:
           $ref: "#/components/schemas/FootballFairAiSimulationSampleMatchAudit"
         standingsContext:
           $ref: "#/components/schemas/FootballFairAiSimulationStandingsContext"
+        oddsBaseline:
+          $ref: "#/components/schemas/FootballFairAiOddsBaseline"
+        forecastBlend:
+          $ref: "#/components/schemas/FootballFairAiForecastBlend"
+        actionEvidence:
+          $ref: "#/components/schemas/FootballFairAiActionEvidence"
         matchupAnalysis:
           $ref: "#/components/schemas/FootballFairAiSimulationMatchupAnalysis"
         topScorelines:
@@ -2348,6 +2534,8 @@ components:
         - uncertainty
         - sampleMatchAudit
         - standingsContext
+        - forecastBlend
+        - actionEvidence
         - matchupAnalysis
         - topScorelines
         - playerContributions

@@ -100,11 +100,11 @@ function goalkeeper(savesPer90) {
   };
 }
 
-function simulateWithSeed(home, away, seed, iterations = 1_000) {
+function simulateWithSeed(home, away, seed, iterations = 1_000, context) {
   const originalRandom = Math.random;
   try {
     Math.random = seededRandom(seed);
-    return runFairAiPossessionSimulation(home, away, iterations);
+    return runFairAiPossessionSimulation(home, away, iterations, context);
   } finally {
     Math.random = originalRandom;
   }
@@ -445,4 +445,63 @@ test("simulation reports when both teams have valid standings adjustments", () =
   );
   assert.notDeepEqual(result.outcomes, baseline.outcomes);
   assert.notEqual(result.expectedHomeGoals, baseline.expectedHomeGoals);
+});
+
+test("odds scorelines anchor the forecast and stronger evidence increases FAIR AI weight", () => {
+  const home = team("home-odds", "Celtic", 54);
+  const away = team("away-odds", "Celta Vigo", 46);
+  const oddsBaseline = {
+    expectedHomeGoals: 1.2,
+    expectedAwayGoals: 0.8,
+    scorelineDistribution: [{ homeGoals: 0, awayGoals: 0, probability: 1 }],
+    marketSourceCount: 3,
+    signalCount: 6,
+    fitErrorPoints: 2.1,
+    scoreMarketSeeded: true,
+  };
+  const noOdds = simulateWithSeed(home, away, 0x0DD5, 500);
+  const lowEvidence = simulateWithSeed(home, away, 0x0DD5, 500, {
+    oddsBaseline,
+    actionEvidence: noOdds.actionEvidence,
+  });
+  const highEvidence = {
+    ...noOdds.actionEvidence,
+    home: {
+      ...noOdds.actionEvidence.home,
+      matchesAnalyzed: 2,
+      shots: 12,
+    },
+    away: {
+      ...noOdds.actionEvidence.away,
+      matchesAnalyzed: 2,
+      shots: 12,
+    },
+  };
+  const highCoverage = simulateWithSeed(home, away, 0x0DD5, 500, {
+    oddsBaseline,
+    actionEvidence: highEvidence,
+  });
+
+  const blendedZeroZero = lowEvidence.scorelineDistribution.find(
+    (scoreline) => scoreline.homeGoals === 0 && scoreline.awayGoals === 0,
+  );
+
+  assert.ok(blendedZeroZero);
+  assert.ok(lowEvidence.forecastBlend.oddsWeight > 0);
+  assert.ok(highCoverage.forecastBlend.fairAiWeight > lowEvidence.forecastBlend.fairAiWeight);
+  assert.ok(
+    blendedZeroZero.probability + 1e-9 >= lowEvidence.forecastBlend.oddsWeight,
+  );
+  assert.ok(
+    Math.abs(
+      lowEvidence.scorelineDistribution.reduce(
+        (sum, scoreline) => sum + scoreline.probability,
+        0,
+      ) - 1,
+    ) < 1e-9,
+  );
+  assert.equal(
+    lowEvidence.outcomes.home + lowEvidence.outcomes.draw + lowEvidence.outcomes.away,
+    lowEvidence.iterations,
+  );
 });

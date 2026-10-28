@@ -14,11 +14,31 @@ export interface FootballFairAiTeamStats {
   /** @nullable */
   possessionPct: number | null;
   /** @nullable */
+  firstHalfPossessionPct?: number | null;
+  /** @nullable */
+  secondHalfPossessionPct?: number | null;
+  /** @nullable */
   shotsPerMatch: number | null;
+  /** @nullable */
+  firstHalfShotsPerMatch?: number | null;
+  /** @nullable */
+  secondHalfShotsPerMatch?: number | null;
   /** @nullable */
   shotsOnTargetPerMatch: number | null;
   /** @nullable */
+  firstHalfShotsOnTargetPerMatch?: number | null;
+  /** @nullable */
+  secondHalfShotsOnTargetPerMatch?: number | null;
+  /** @nullable */
   passesPerMatch: number | null;
+  /** @nullable */
+  firstHalfPassesPerMatch?: number | null;
+  /** @nullable */
+  secondHalfPassesPerMatch?: number | null;
+  /** @minimum 0 */
+  firstHalfStatSampleCount?: number;
+  /** @minimum 0 */
+  secondHalfStatSampleCount?: number;
   /** @nullable */
   shotsInsideBoxPerMatch: number | null;
   /** @nullable */

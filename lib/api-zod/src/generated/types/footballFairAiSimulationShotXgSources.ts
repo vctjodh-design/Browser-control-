@@ -8,6 +8,7 @@
 
 export interface FootballFairAiSimulationShotXgSources {
   playerProfile: number;
+  '365Scores': number;
   teamStatistics: number;
   recentResults: number;
   neutralPrior: number;

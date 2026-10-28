@@ -239,6 +239,12 @@ export const GetFootballFairAiTeamsQueryParams = zod.object({
   "search": zod.coerce.string().max(getFootballFairAiTeamsQuerySearchMax).optional()
 })
 
+export const getFootballFairAiTeamsResponseTeamsItemTeamStatsFirstHalfStatSampleCountMin = 0;
+
+export const getFootballFairAiTeamsResponseTeamsItemTeamStatsSecondHalfStatSampleCountMin = 0;
+
+
+
 export const GetFootballFairAiTeamsResponse = zod.object({
   "teams": zod.array(zod.object({
   "teamKey": zod.string(),
@@ -253,9 +259,19 @@ export const GetFootballFairAiTeamsResponse = zod.object({
   "expectedGoalsFor": zod.number().nullable(),
   "expectedGoalsAgainst": zod.number().nullable(),
   "possessionPct": zod.number().nullable(),
+  "firstHalfPossessionPct": zod.number().nullish(),
+  "secondHalfPossessionPct": zod.number().nullish(),
   "shotsPerMatch": zod.number().nullable(),
+  "firstHalfShotsPerMatch": zod.number().nullish(),
+  "secondHalfShotsPerMatch": zod.number().nullish(),
   "shotsOnTargetPerMatch": zod.number().nullable(),
+  "firstHalfShotsOnTargetPerMatch": zod.number().nullish(),
+  "secondHalfShotsOnTargetPerMatch": zod.number().nullish(),
   "passesPerMatch": zod.number().nullable(),
+  "firstHalfPassesPerMatch": zod.number().nullish(),
+  "secondHalfPassesPerMatch": zod.number().nullish(),
+  "firstHalfStatSampleCount": zod.number().int().min(getFootballFairAiTeamsResponseTeamsItemTeamStatsFirstHalfStatSampleCountMin).optional(),
+  "secondHalfStatSampleCount": zod.number().int().min(getFootballFairAiTeamsResponseTeamsItemTeamStatsSecondHalfStatSampleCountMin).optional(),
   "shotsInsideBoxPerMatch": zod.number().nullable(),
   "boxTouchesPerMatch": zod.number().nullable(),
   "bigChancesPerMatch": zod.number().nullable(),
@@ -334,13 +350,55 @@ export const runFootballFairAiSimulationBodyIterationsDefault = 10000;
 export const runFootballFairAiSimulationBodyIterationsMin = 1000;
 export const runFootballFairAiSimulationBodyIterationsMax = 50000;
 
+export const runFootballFairAiSimulationBodyOddsBaselineExpectedHomeGoalsMin = 0;
+export const runFootballFairAiSimulationBodyOddsBaselineExpectedHomeGoalsMax = 10;
+
+export const runFootballFairAiSimulationBodyOddsBaselineExpectedAwayGoalsMin = 0;
+export const runFootballFairAiSimulationBodyOddsBaselineExpectedAwayGoalsMax = 10;
+
+export const runFootballFairAiSimulationBodyOddsBaselineScorelineDistributionItemHomeGoalsMin = 0;
+export const runFootballFairAiSimulationBodyOddsBaselineScorelineDistributionItemHomeGoalsMax = 10;
+
+export const runFootballFairAiSimulationBodyOddsBaselineScorelineDistributionItemAwayGoalsMin = 0;
+export const runFootballFairAiSimulationBodyOddsBaselineScorelineDistributionItemAwayGoalsMax = 10;
+
+export const runFootballFairAiSimulationBodyOddsBaselineScorelineDistributionItemProbabilityMin = 0;
+export const runFootballFairAiSimulationBodyOddsBaselineScorelineDistributionItemProbabilityMax = 1;
+
+export const runFootballFairAiSimulationBodyOddsBaselineScorelineDistributionMax = 121;
+
+export const runFootballFairAiSimulationBodyOddsBaselineMarketSourceCountMin = 0;
+
+export const runFootballFairAiSimulationBodyOddsBaselineSignalCountMin = 0;
+
 
 
 export const RunFootballFairAiSimulationBody = zod.object({
   "homeTeamKey": zod.string().min(1),
   "awayTeamKey": zod.string().min(1),
-  "iterations": zod.number().int().min(runFootballFairAiSimulationBodyIterationsMin).max(runFootballFairAiSimulationBodyIterationsMax).default(runFootballFairAiSimulationBodyIterationsDefault)
+  "iterations": zod.number().int().min(runFootballFairAiSimulationBodyIterationsMin).max(runFootballFairAiSimulationBodyIterationsMax).default(runFootballFairAiSimulationBodyIterationsDefault),
+  "oddsBaseline": zod.object({
+  "expectedHomeGoals": zod.number().min(runFootballFairAiSimulationBodyOddsBaselineExpectedHomeGoalsMin).max(runFootballFairAiSimulationBodyOddsBaselineExpectedHomeGoalsMax),
+  "expectedAwayGoals": zod.number().min(runFootballFairAiSimulationBodyOddsBaselineExpectedAwayGoalsMin).max(runFootballFairAiSimulationBodyOddsBaselineExpectedAwayGoalsMax),
+  "scorelineDistribution": zod.array(zod.object({
+  "homeGoals": zod.number().int().min(runFootballFairAiSimulationBodyOddsBaselineScorelineDistributionItemHomeGoalsMin).max(runFootballFairAiSimulationBodyOddsBaselineScorelineDistributionItemHomeGoalsMax),
+  "awayGoals": zod.number().int().min(runFootballFairAiSimulationBodyOddsBaselineScorelineDistributionItemAwayGoalsMin).max(runFootballFairAiSimulationBodyOddsBaselineScorelineDistributionItemAwayGoalsMax),
+  "probability": zod.number().min(runFootballFairAiSimulationBodyOddsBaselineScorelineDistributionItemProbabilityMin).max(runFootballFairAiSimulationBodyOddsBaselineScorelineDistributionItemProbabilityMax)
+})).max(runFootballFairAiSimulationBodyOddsBaselineScorelineDistributionMax),
+  "marketSourceCount": zod.number().int().min(runFootballFairAiSimulationBodyOddsBaselineMarketSourceCountMin),
+  "signalCount": zod.number().int().min(runFootballFairAiSimulationBodyOddsBaselineSignalCountMin),
+  "fitErrorPoints": zod.number().nullable(),
+  "scoreMarketSeeded": zod.boolean()
+}).optional()
 })
+
+export const runFootballFairAiSimulationResponseHomeTeamStatsFirstHalfStatSampleCountMin = 0;
+
+export const runFootballFairAiSimulationResponseHomeTeamStatsSecondHalfStatSampleCountMin = 0;
+
+export const runFootballFairAiSimulationResponseAwayTeamStatsFirstHalfStatSampleCountMin = 0;
+
+export const runFootballFairAiSimulationResponseAwayTeamStatsSecondHalfStatSampleCountMin = 0;
 
 export const runFootballFairAiSimulationResponseProbabilitiesHomeMin = 0;
 export const runFootballFairAiSimulationResponseProbabilitiesHomeMax = 1;
@@ -350,6 +408,91 @@ export const runFootballFairAiSimulationResponseProbabilitiesDrawMax = 1;
 
 export const runFootballFairAiSimulationResponseProbabilitiesAwayMin = 0;
 export const runFootballFairAiSimulationResponseProbabilitiesAwayMax = 1;
+
+export const runFootballFairAiSimulationResponseOddsBaselineExpectedHomeGoalsMin = 0;
+export const runFootballFairAiSimulationResponseOddsBaselineExpectedHomeGoalsMax = 10;
+
+export const runFootballFairAiSimulationResponseOddsBaselineExpectedAwayGoalsMin = 0;
+export const runFootballFairAiSimulationResponseOddsBaselineExpectedAwayGoalsMax = 10;
+
+export const runFootballFairAiSimulationResponseOddsBaselineScorelineDistributionItemHomeGoalsMin = 0;
+export const runFootballFairAiSimulationResponseOddsBaselineScorelineDistributionItemHomeGoalsMax = 10;
+
+export const runFootballFairAiSimulationResponseOddsBaselineScorelineDistributionItemAwayGoalsMin = 0;
+export const runFootballFairAiSimulationResponseOddsBaselineScorelineDistributionItemAwayGoalsMax = 10;
+
+export const runFootballFairAiSimulationResponseOddsBaselineScorelineDistributionItemProbabilityMin = 0;
+export const runFootballFairAiSimulationResponseOddsBaselineScorelineDistributionItemProbabilityMax = 1;
+
+export const runFootballFairAiSimulationResponseOddsBaselineScorelineDistributionMax = 121;
+
+export const runFootballFairAiSimulationResponseOddsBaselineMarketSourceCountMin = 0;
+
+export const runFootballFairAiSimulationResponseOddsBaselineSignalCountMin = 0;
+
+export const runFootballFairAiSimulationResponseForecastBlendOddsWeightMin = 0;
+export const runFootballFairAiSimulationResponseForecastBlendOddsWeightMax = 1;
+
+export const runFootballFairAiSimulationResponseForecastBlendFairAiWeightMin = 0;
+export const runFootballFairAiSimulationResponseForecastBlendFairAiWeightMax = 1;
+
+export const runFootballFairAiSimulationResponseActionEvidenceHomeMatchesAnalyzedMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceHomeMatchesUnavailableMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceHomeCommentaryEventsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceHomeGoalsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceHomeSubstitutionsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceHomeCardsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceHomeShotsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceHomeFirstHalfShotsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceHomeSecondHalfShotsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceHomeShotsOnTargetMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceHomeShotsOffTargetMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceHomePlayersItemShotsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceHomePlayersItemGoalsMin = 0;
+
+
+export const runFootballFairAiSimulationResponseActionEvidenceHomeKeyEventsMax = 10;
+
+export const runFootballFairAiSimulationResponseActionEvidenceAwayMatchesAnalyzedMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceAwayMatchesUnavailableMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceAwayCommentaryEventsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceAwayGoalsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceAwaySubstitutionsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceAwayCardsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceAwayShotsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceAwayFirstHalfShotsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceAwaySecondHalfShotsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceAwayShotsOnTargetMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceAwayShotsOffTargetMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceAwayPlayersItemShotsMin = 0;
+
+export const runFootballFairAiSimulationResponseActionEvidenceAwayPlayersItemGoalsMin = 0;
+
+
+export const runFootballFairAiSimulationResponseActionEvidenceAwayKeyEventsMax = 10;
 
 
 
@@ -368,9 +511,19 @@ export const RunFootballFairAiSimulationResponse = zod.object({
   "expectedGoalsFor": zod.number().nullable(),
   "expectedGoalsAgainst": zod.number().nullable(),
   "possessionPct": zod.number().nullable(),
+  "firstHalfPossessionPct": zod.number().nullish(),
+  "secondHalfPossessionPct": zod.number().nullish(),
   "shotsPerMatch": zod.number().nullable(),
+  "firstHalfShotsPerMatch": zod.number().nullish(),
+  "secondHalfShotsPerMatch": zod.number().nullish(),
   "shotsOnTargetPerMatch": zod.number().nullable(),
+  "firstHalfShotsOnTargetPerMatch": zod.number().nullish(),
+  "secondHalfShotsOnTargetPerMatch": zod.number().nullish(),
   "passesPerMatch": zod.number().nullable(),
+  "firstHalfPassesPerMatch": zod.number().nullish(),
+  "secondHalfPassesPerMatch": zod.number().nullish(),
+  "firstHalfStatSampleCount": zod.number().int().min(runFootballFairAiSimulationResponseHomeTeamStatsFirstHalfStatSampleCountMin).optional(),
+  "secondHalfStatSampleCount": zod.number().int().min(runFootballFairAiSimulationResponseHomeTeamStatsSecondHalfStatSampleCountMin).optional(),
   "shotsInsideBoxPerMatch": zod.number().nullable(),
   "boxTouchesPerMatch": zod.number().nullable(),
   "bigChancesPerMatch": zod.number().nullable(),
@@ -450,9 +603,19 @@ export const RunFootballFairAiSimulationResponse = zod.object({
   "expectedGoalsFor": zod.number().nullable(),
   "expectedGoalsAgainst": zod.number().nullable(),
   "possessionPct": zod.number().nullable(),
+  "firstHalfPossessionPct": zod.number().nullish(),
+  "secondHalfPossessionPct": zod.number().nullish(),
   "shotsPerMatch": zod.number().nullable(),
+  "firstHalfShotsPerMatch": zod.number().nullish(),
+  "secondHalfShotsPerMatch": zod.number().nullish(),
   "shotsOnTargetPerMatch": zod.number().nullable(),
+  "firstHalfShotsOnTargetPerMatch": zod.number().nullish(),
+  "secondHalfShotsOnTargetPerMatch": zod.number().nullish(),
   "passesPerMatch": zod.number().nullable(),
+  "firstHalfPassesPerMatch": zod.number().nullish(),
+  "secondHalfPassesPerMatch": zod.number().nullish(),
+  "firstHalfStatSampleCount": zod.number().int().min(runFootballFairAiSimulationResponseAwayTeamStatsFirstHalfStatSampleCountMin).optional(),
+  "secondHalfStatSampleCount": zod.number().int().min(runFootballFairAiSimulationResponseAwayTeamStatsSecondHalfStatSampleCountMin).optional(),
   "shotsInsideBoxPerMatch": zod.number().nullable(),
   "boxTouchesPerMatch": zod.number().nullable(),
   "bigChancesPerMatch": zod.number().nullable(),
@@ -575,6 +738,7 @@ export const RunFootballFairAiSimulationResponse = zod.object({
   "goalkeeperProfiles": zod.number().int(),
   "shotXgSources": zod.object({
   "playerProfile": zod.number().int(),
+  "365Scores": zod.number().int(),
   "teamStatistics": zod.number().int(),
   "recentResults": zod.number().int(),
   "neutralPrior": zod.number().int()
@@ -589,6 +753,7 @@ export const RunFootballFairAiSimulationResponse = zod.object({
   "goalkeeperProfiles": zod.number().int(),
   "shotXgSources": zod.object({
   "playerProfile": zod.number().int(),
+  "365Scores": zod.number().int(),
   "teamStatistics": zod.number().int(),
   "recentResults": zod.number().int(),
   "neutralPrior": zod.number().int()
@@ -652,6 +817,88 @@ export const RunFootballFairAiSimulationResponse = zod.object({
   "teamCount": zod.number().int(),
   "strengthScore": zod.number().nullable()
 })
+}),
+  "oddsBaseline": zod.object({
+  "expectedHomeGoals": zod.number().min(runFootballFairAiSimulationResponseOddsBaselineExpectedHomeGoalsMin).max(runFootballFairAiSimulationResponseOddsBaselineExpectedHomeGoalsMax),
+  "expectedAwayGoals": zod.number().min(runFootballFairAiSimulationResponseOddsBaselineExpectedAwayGoalsMin).max(runFootballFairAiSimulationResponseOddsBaselineExpectedAwayGoalsMax),
+  "scorelineDistribution": zod.array(zod.object({
+  "homeGoals": zod.number().int().min(runFootballFairAiSimulationResponseOddsBaselineScorelineDistributionItemHomeGoalsMin).max(runFootballFairAiSimulationResponseOddsBaselineScorelineDistributionItemHomeGoalsMax),
+  "awayGoals": zod.number().int().min(runFootballFairAiSimulationResponseOddsBaselineScorelineDistributionItemAwayGoalsMin).max(runFootballFairAiSimulationResponseOddsBaselineScorelineDistributionItemAwayGoalsMax),
+  "probability": zod.number().min(runFootballFairAiSimulationResponseOddsBaselineScorelineDistributionItemProbabilityMin).max(runFootballFairAiSimulationResponseOddsBaselineScorelineDistributionItemProbabilityMax)
+})).max(runFootballFairAiSimulationResponseOddsBaselineScorelineDistributionMax),
+  "marketSourceCount": zod.number().int().min(runFootballFairAiSimulationResponseOddsBaselineMarketSourceCountMin),
+  "signalCount": zod.number().int().min(runFootballFairAiSimulationResponseOddsBaselineSignalCountMin),
+  "fitErrorPoints": zod.number().nullable(),
+  "scoreMarketSeeded": zod.boolean()
+}).optional(),
+  "forecastBlend": zod.object({
+  "oddsWeight": zod.number().min(runFootballFairAiSimulationResponseForecastBlendOddsWeightMin).max(runFootballFairAiSimulationResponseForecastBlendOddsWeightMax),
+  "fairAiWeight": zod.number().min(runFootballFairAiSimulationResponseForecastBlendFairAiWeightMin).max(runFootballFairAiSimulationResponseForecastBlendFairAiWeightMax),
+  "method": zod.string()
+}),
+  "actionEvidence": zod.object({
+  "source": zod.string(),
+  "home": zod.object({
+  "matchesAnalyzed": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceHomeMatchesAnalyzedMin),
+  "matchesUnavailable": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceHomeMatchesUnavailableMin),
+  "commentaryEvents": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceHomeCommentaryEventsMin),
+  "goals": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceHomeGoalsMin),
+  "substitutions": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceHomeSubstitutionsMin),
+  "cards": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceHomeCardsMin),
+  "shots": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceHomeShotsMin),
+  "firstHalfShots": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceHomeFirstHalfShotsMin),
+  "secondHalfShots": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceHomeSecondHalfShotsMin),
+  "shotsOnTarget": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceHomeShotsOnTargetMin),
+  "shotsOffTarget": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceHomeShotsOffTargetMin),
+  "averageXgPerShot": zod.number().nullable(),
+  "averageXgotPerShot": zod.number().nullable(),
+  "averageXgotMinusXg": zod.number().nullable(),
+  "averageShotX": zod.number().nullable(),
+  "players": zod.array(zod.object({
+  "playerName": zod.string(),
+  "shots": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceHomePlayersItemShotsMin),
+  "goals": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceHomePlayersItemGoalsMin),
+  "averageXg": zod.number().nullable()
+})),
+  "keyEvents": zod.array(zod.object({
+  "fixtureId": zod.number().int().min(1),
+  "minute": zod.string(),
+  "kind": zod.string(),
+  "title": zod.string(),
+  "detail": zod.string()
+})).max(runFootballFairAiSimulationResponseActionEvidenceHomeKeyEventsMax)
+}),
+  "away": zod.object({
+  "matchesAnalyzed": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceAwayMatchesAnalyzedMin),
+  "matchesUnavailable": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceAwayMatchesUnavailableMin),
+  "commentaryEvents": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceAwayCommentaryEventsMin),
+  "goals": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceAwayGoalsMin),
+  "substitutions": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceAwaySubstitutionsMin),
+  "cards": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceAwayCardsMin),
+  "shots": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceAwayShotsMin),
+  "firstHalfShots": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceAwayFirstHalfShotsMin),
+  "secondHalfShots": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceAwaySecondHalfShotsMin),
+  "shotsOnTarget": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceAwayShotsOnTargetMin),
+  "shotsOffTarget": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceAwayShotsOffTargetMin),
+  "averageXgPerShot": zod.number().nullable(),
+  "averageXgotPerShot": zod.number().nullable(),
+  "averageXgotMinusXg": zod.number().nullable(),
+  "averageShotX": zod.number().nullable(),
+  "players": zod.array(zod.object({
+  "playerName": zod.string(),
+  "shots": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceAwayPlayersItemShotsMin),
+  "goals": zod.number().int().min(runFootballFairAiSimulationResponseActionEvidenceAwayPlayersItemGoalsMin),
+  "averageXg": zod.number().nullable()
+})),
+  "keyEvents": zod.array(zod.object({
+  "fixtureId": zod.number().int().min(1),
+  "minute": zod.string(),
+  "kind": zod.string(),
+  "title": zod.string(),
+  "detail": zod.string()
+})).max(runFootballFairAiSimulationResponseActionEvidenceAwayKeyEventsMax)
+}),
+  "note": zod.string()
 }),
   "matchupAnalysis": zod.object({
   "home": zod.object({
@@ -1257,6 +1504,18 @@ export const predictFootballMatchBodyHomeLastFiveMax = 5;
 
 export const predictFootballMatchBodyAwayLastFiveMax = 5;
 
+export const predictFootballMatchBodyHomeHistoricalStatsItemMin = 0;
+export const predictFootballMatchBodyHomeHistoricalStatsItemMax = 1;
+
+export const predictFootballMatchBodyHomeHistoricalStatsMin = 14;
+export const predictFootballMatchBodyHomeHistoricalStatsMax = 14;
+
+export const predictFootballMatchBodyAwayHistoricalStatsItemMin = 0;
+export const predictFootballMatchBodyAwayHistoricalStatsItemMax = 1;
+
+export const predictFootballMatchBodyAwayHistoricalStatsMin = 14;
+export const predictFootballMatchBodyAwayHistoricalStatsMax = 14;
+
 
 export const predictFootballMatchBodyHomeStandingOnePlayedMin = 0;
 
@@ -1324,6 +1583,8 @@ export const PredictFootballMatchBody = zod.object({
   "homeScore": zod.number().int().nullable(),
   "awayScore": zod.number().int().nullable()
 })).max(predictFootballMatchBodyAwayLastFiveMax),
+  "homeHistoricalStats": zod.array(zod.number().min(predictFootballMatchBodyHomeHistoricalStatsItemMin).max(predictFootballMatchBodyHomeHistoricalStatsItemMax)).min(predictFootballMatchBodyHomeHistoricalStatsMin).max(predictFootballMatchBodyHomeHistoricalStatsMax),
+  "awayHistoricalStats": zod.array(zod.number().min(predictFootballMatchBodyAwayHistoricalStatsItemMin).max(predictFootballMatchBodyAwayHistoricalStatsItemMax)).min(predictFootballMatchBodyAwayHistoricalStatsMin).max(predictFootballMatchBodyAwayHistoricalStatsMax),
   "homeStanding": zod.union([zod.object({
   "rank": zod.number().int().min(1),
   "played": zod.number().int().min(predictFootballMatchBodyHomeStandingOnePlayedMin),

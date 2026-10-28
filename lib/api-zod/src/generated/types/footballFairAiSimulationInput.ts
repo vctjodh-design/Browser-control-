@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { FootballFairAiOddsBaseline } from './footballFairAiOddsBaseline';
 
 export interface FootballFairAiSimulationInput {
   /** @minLength 1 */
@@ -16,4 +17,5 @@ export interface FootballFairAiSimulationInput {
      * @maximum 50000
      */
   iterations?: number;
+  oddsBaseline?: FootballFairAiOddsBaseline;
 }

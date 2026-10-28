@@ -39,6 +39,7 @@ import {
   trainArchivedModel,
 } from "../lib/model-training-engine";
 import { logger } from "../lib/logger";
+import { summarizeRecentMatchStatFeatures } from "../lib/recent-match-stat-features";
 
 const router: IRouter = Router();
 const MINIMUM_MATCH_COUNT = 30;
@@ -241,6 +242,16 @@ function testerTargetWithSavedContext(
     awayRecent,
     homeLastFive: homeLastFive.length ? homeLastFive : homeRecent.slice(0, 5),
     awayLastFive: awayLastFive.length ? awayLastFive : awayRecent.slice(0, 5),
+    homeHistoricalStats: summarizeRecentMatchStatFeatures(
+      lastFive,
+      "home",
+      target.matchDate,
+    ),
+    awayHistoricalStats: summarizeRecentMatchStatFeatures(
+      lastFive,
+      "away",
+      target.matchDate,
+    ),
     homeStanding,
     awayStanding,
     standingTeamCount: standings.length,
@@ -421,6 +432,8 @@ function targetFromPredictionContext(
       ...match,
       date: match.date.toISOString(),
     })),
+    homeHistoricalStats: input.homeHistoricalStats,
+    awayHistoricalStats: input.awayHistoricalStats,
     homeStanding: input.homeStanding,
     awayStanding: input.awayStanding,
     standingTeamCount: input.standingTeamCount,

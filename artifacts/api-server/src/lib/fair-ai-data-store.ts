@@ -1,4 +1,8 @@
 import type {
+  FootballFairAiActionEvent,
+  FootballFairAiActionEvidence,
+  FootballFairAiActionPlayerEvidence,
+  FootballFairAiActionTeamEvidence,
   FootballFairAiSimulation,
   FootballFairAiSimulationInput,
   FootballFairAiSimulationPlayer,
@@ -6,11 +10,13 @@ import type {
   FootballFairAiTeamStats,
   FootballMatchDetails,
   FootballMatchLastFive,
+  FootballMatchReplay,
   FootballProcessedMatchSummary,
 } from "@workspace/api-zod";
 import { database } from "./processed-match-store";
 import { runFairAiPossessionSimulation } from "./fair-ai-possession-simulator";
 import { getFreshKickoffScoreFairAiSnapshots } from "./kickoffscore-last-five";
+import { get365ScoresMatchReplay } from "./365scores-match-replay";
 
 type JsonObject = Record<string, unknown>;
 type SqlRow = Record<string, unknown>;
@@ -796,7 +802,14 @@ function saveFreshFairAiSourceSnapshot(
   );
 }
 
-async function refreshFairAiTeamsFromSource(teamKeys: string[]): Promise<void> {
+async function refreshFairAiTeamsFromSource(teamKeys: string[]): Promise<{
+  sourceTeamIds: number[];
+  recentFixtureIdsByTeam: Record<number, number[]>;
+  snapshotsByFixture: Map<
+    number,
+    NonNullable<Awaited<ReturnType<typeof getFreshKickoffScoreFairAiSnapshots>>["snapshots"][number]>
+  >;
+}> {
   const selectedTeams = [...new Set(teamKeys)].map((key) => {
     const row = database
       .prepare("SELECT source_team_id FROM fair_ai_teams WHERE team_key = ?")
@@ -811,6 +824,253 @@ async function refreshFairAiTeamsFromSource(teamKeys: string[]): Promise<void> {
   for (const snapshot of refreshed.snapshots) {
     if (snapshot) saveFreshFairAiSourceSnapshot(snapshot.fixtureId, snapshot.details);
   }
+  return {
+    sourceTeamIds: selectedTeams,
+    recentFixtureIdsByTeam: refreshed.recentFixtureIdsByTeam,
+    snapshotsByFixture: new Map(
+      refreshed.snapshots.flatMap((snapshot) => snapshot ? [[snapshot.fixtureId, snapshot]] : []),
+    ),
+  };
+}
+
+type ActionEvidenceAccumulator = {
+  matchesAnalyzed: number;
+  matchesUnavailable: number;
+  commentaryEvents: number;
+  goals: number;
+  substitutions: number;
+  cards: number;
+  shots: number;
+  firstHalfShots: number;
+  secondHalfShots: number;
+  shotsOnTarget: number;
+  shotsOffTarget: number;
+  xg: number[];
+  xgot: number[];
+  xgotMinusXg: number[];
+  shotX: number[];
+  players: Map<string, { shots: number; goals: number; xg: number[] }>;
+  keyEvents: FootballFairAiActionEvent[];
+};
+
+function newActionEvidenceAccumulator(): ActionEvidenceAccumulator {
+  return {
+    matchesAnalyzed: 0,
+    matchesUnavailable: 0,
+    commentaryEvents: 0,
+    goals: 0,
+    substitutions: 0,
+    cards: 0,
+    shots: 0,
+    firstHalfShots: 0,
+    secondHalfShots: 0,
+    shotsOnTarget: 0,
+    shotsOffTarget: 0,
+    xg: [],
+    xgot: [],
+    xgotMinusXg: [],
+    shotX: [],
+    players: new Map(),
+    keyEvents: [],
+  };
+}
+
+function sourceMetric(value: string | null): number | null {
+  if (value === null) return null;
+  const parsed = Number.parseFloat(value.replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sourceMinute(value: string): number | null {
+  const match = value.match(/^\s*(\d{1,3})/);
+  return match ? Number(match[1]) : null;
+}
+
+function appendReplayEvidence(
+  accumulator: ActionEvidenceAccumulator,
+  replay: FootballMatchReplay,
+  side: "home" | "away",
+): void {
+  accumulator.matchesAnalyzed += 1;
+  accumulator.commentaryEvents += replay.events.length;
+  accumulator.substitutions += replay.events.filter((event) =>
+    /substitution/i.test(`${event.kind} ${event.title}`),
+  ).length;
+  accumulator.cards += replay.events.filter((event) =>
+    /\b(yellow|red)\s+card\b/i.test(`${event.kind} ${event.title}`),
+  ).length;
+  for (const event of replay.events.filter((entry) =>
+    /\b(goal|substitution|penalty|red card|injury|var)\b/i.test(
+      `${entry.kind} ${entry.title}`,
+    ),
+  )) {
+    if (accumulator.keyEvents.length >= 10) break;
+    accumulator.keyEvents.push({
+      fixtureId: replay.fixtureId,
+      minute: event.minute,
+      kind: event.kind,
+      title: event.title,
+      detail: event.detail,
+    });
+  }
+
+  for (const shot of replay.shotEvents.filter((event) => event.teamSide === side)) {
+    accumulator.shots += 1;
+    const minute = sourceMinute(shot.minute);
+    if (minute !== null && minute > 45) accumulator.secondHalfShots += 1;
+    else accumulator.firstHalfShots += 1;
+
+    const outcome = (shot.outcome ?? "").toLowerCase();
+    const isGoal = /\bgoal\b/.test(outcome);
+    if (isGoal) accumulator.goals += 1;
+    if (isGoal || /\b(saved|save|on target|blocked on target)\b/.test(outcome)) {
+      accumulator.shotsOnTarget += 1;
+    } else if (/\b(missed|miss|wide|off target|post|bar)\b/.test(outcome)) {
+      accumulator.shotsOffTarget += 1;
+    }
+
+    const xg = sourceMetric(shot.xg);
+    const xgot = sourceMetric(shot.xgot);
+    if (xg !== null && xg >= 0) accumulator.xg.push(xg);
+    if (xgot !== null && xgot >= 0) accumulator.xgot.push(xgot);
+    if (xg !== null && xgot !== null && xg >= 0 && xgot >= 0) {
+      accumulator.xgotMinusXg.push(xgot - xg);
+    }
+    if (shot.x !== null) accumulator.shotX.push(shot.x);
+
+    if (shot.playerName) {
+      const player = accumulator.players.get(shot.playerName) ?? {
+        shots: 0,
+        goals: 0,
+        xg: [],
+      };
+      player.shots += 1;
+      if (isGoal) player.goals += 1;
+      if (xg !== null && xg >= 0) player.xg.push(xg);
+      accumulator.players.set(shot.playerName, player);
+    }
+  }
+}
+
+function mean(values: number[]): number | null {
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function rounded(value: number | null): number | null {
+  return value === null ? null : Math.round(value * 1_000) / 1_000;
+}
+
+function finishActionEvidence(
+  accumulator: ActionEvidenceAccumulator,
+): FootballFairAiActionTeamEvidence {
+  const players: FootballFairAiActionPlayerEvidence[] = [...accumulator.players]
+    .map(([playerName, player]) => ({
+      playerName,
+      shots: player.shots,
+      goals: player.goals,
+      averageXg: rounded(mean(player.xg)),
+    }))
+    .sort((left, right) => right.shots - left.shots || right.goals - left.goals)
+    .slice(0, 5);
+
+  return {
+    matchesAnalyzed: accumulator.matchesAnalyzed,
+    matchesUnavailable: accumulator.matchesUnavailable,
+    commentaryEvents: accumulator.commentaryEvents,
+    goals: accumulator.goals,
+    substitutions: accumulator.substitutions,
+    cards: accumulator.cards,
+    shots: accumulator.shots,
+    firstHalfShots: accumulator.firstHalfShots,
+    secondHalfShots: accumulator.secondHalfShots,
+    shotsOnTarget: accumulator.shotsOnTarget,
+    shotsOffTarget: accumulator.shotsOffTarget,
+    averageXgPerShot: rounded(mean(accumulator.xg)),
+    averageXgotPerShot: rounded(mean(accumulator.xgot)),
+    averageXgotMinusXg: rounded(mean(accumulator.xgotMinusXg)),
+    averageShotX: rounded(mean(accumulator.shotX)),
+    players,
+    keyEvents: accumulator.keyEvents,
+  };
+}
+
+async function recent365ActionEvidence(
+  refreshed: Awaited<ReturnType<typeof refreshFairAiTeamsFromSource>>,
+  homeTeamId: number,
+  awayTeamId: number,
+): Promise<FootballFairAiActionEvidence> {
+  const teamSelections = [
+    {
+      key: "home" as const,
+      teamId: homeTeamId,
+      fixtureIds: (refreshed.recentFixtureIdsByTeam[homeTeamId] ?? []).slice(0, 2),
+      evidence: newActionEvidenceAccumulator(),
+    },
+    {
+      key: "away" as const,
+      teamId: awayTeamId,
+      fixtureIds: (refreshed.recentFixtureIdsByTeam[awayTeamId] ?? []).slice(0, 2),
+      evidence: newActionEvidenceAccumulator(),
+    },
+  ];
+  const selectedFixtureIds = [...new Set(teamSelections.flatMap((team) => team.fixtureIds))];
+  const replayByFixture = new Map<number, FootballMatchReplay>();
+  let nextFixtureIndex = 0;
+
+  const worker = async () => {
+    while (nextFixtureIndex < selectedFixtureIds.length) {
+      const fixtureId = selectedFixtureIds[nextFixtureIndex++];
+      if (fixtureId === undefined) return;
+      const snapshot = refreshed.snapshotsByFixture.get(fixtureId);
+      if (!snapshot) continue;
+      try {
+        const replay = await get365ScoresMatchReplay(snapshot.details);
+        if (
+          replay.fixtureId === fixtureId &&
+          replay.homeScore === snapshot.details.match.home.score &&
+          replay.awayScore === snapshot.details.match.away.score
+        ) {
+          replayByFixture.set(fixtureId, replay);
+        }
+      } catch {
+        // A missing or temporarily unavailable 365Scores report is surfaced as a coverage gap.
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(2, selectedFixtureIds.length) }, () => worker()),
+  );
+
+  for (const team of teamSelections) {
+    for (const fixtureId of team.fixtureIds) {
+      const snapshot = refreshed.snapshotsByFixture.get(fixtureId);
+      const replay = replayByFixture.get(fixtureId);
+      if (!snapshot || !replay) {
+        team.evidence.matchesUnavailable += 1;
+        continue;
+      }
+      const fixtureHomeId = snapshot.details.match.home.id;
+      const fixtureAwayId = snapshot.details.match.away.id;
+      const side = fixtureHomeId === team.teamId
+        ? "home"
+        : fixtureAwayId === team.teamId
+          ? "away"
+          : null;
+      if (!side) {
+        team.evidence.matchesUnavailable += 1;
+        continue;
+      }
+      appendReplayEvidence(team.evidence, replay, side);
+    }
+  }
+
+  return {
+    source: "365Scores commentary and shot feed",
+    home: finishActionEvidence(teamSelections[0].evidence),
+    away: finishActionEvidence(teamSelections[1].evidence),
+    note: "Recent completed-match reports are matched by fixture date, teams, score, and source fixture ID. Shot x/y values are shot origins; xGOT−xG is a shot-placement proxy, not measured miss distance or player tracking. Missing reports are counted as unavailable.",
+  };
 }
 
 let workerStarted = false;
@@ -1608,13 +1868,26 @@ export async function runFairAiArchiveSimulation(
   const homeBase = fairAiTeamRows("", input.homeTeamKey)[0];
   const awayBase = fairAiTeamRows("", input.awayTeamKey)[0];
   if (!homeBase || !awayBase) return null;
-  await refreshFairAiTeamsFromSource([input.homeTeamKey, input.awayTeamKey]);
+  const refreshed = await refreshFairAiTeamsFromSource([
+    input.homeTeamKey,
+    input.awayTeamKey,
+  ]);
   const refreshedHomeBase = fairAiTeamRows("", input.homeTeamKey)[0];
   const refreshedAwayBase = fairAiTeamRows("", input.awayTeamKey)[0];
   if (!refreshedHomeBase || !refreshedAwayBase) return null;
   const home = simulationTeam(refreshedHomeBase);
   const away = simulationTeam(refreshedAwayBase);
-  return runFairAiPossessionSimulation(home, away, input.iterations ?? 10_000);
+  const actionEvidence = await recent365ActionEvidence(
+    refreshed,
+    refreshed.sourceTeamIds[0] ?? 0,
+    refreshed.sourceTeamIds[1] ?? 0,
+  );
+  return runFairAiPossessionSimulation(
+    home,
+    away,
+    input.iterations ?? 10_000,
+    { oddsBaseline: input.oddsBaseline, actionEvidence },
+  );
 }
 
 export function getFairAiDataSummary(): FairAiDataSummary {

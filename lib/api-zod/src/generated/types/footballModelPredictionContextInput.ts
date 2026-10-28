@@ -29,6 +29,20 @@ export interface FootballModelPredictionContextInput {
   homeLastFive: FootballModelFormMatchInput[];
   /** @maxItems 5 */
   awayLastFive: FootballModelFormMatchInput[];
+  /**
+     * @minItems 14
+     * @maxItems 14
+     * @items.minimum 0
+     * @items.maximum 1
+     */
+  homeHistoricalStats: number[];
+  /**
+     * @minItems 14
+     * @maxItems 14
+     * @items.minimum 0
+     * @items.maximum 1
+     */
+  awayHistoricalStats: number[];
   homeStanding: FootballModelStandingInput | null;
   awayStanding: FootballModelStandingInput | null;
   /** @minimum 0 */

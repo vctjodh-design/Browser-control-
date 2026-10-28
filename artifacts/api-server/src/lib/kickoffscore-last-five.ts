@@ -481,7 +481,11 @@ function parseFairAiSourceSnapshot(value: unknown) {
 export async function getFreshKickoffScoreFairAiSnapshots(
   teamIds: number[],
   matchesPerTeam = 5,
-): Promise<{ snapshots: ReturnType<typeof parseFairAiSourceSnapshot>[]; refreshedTeams: number[] }> {
+): Promise<{
+  snapshots: ReturnType<typeof parseFairAiSourceSnapshot>[];
+  refreshedTeams: number[];
+  recentFixtureIdsByTeam: Record<number, number[]>;
+}> {
   const uniqueTeamIds = [...new Set(teamIds)];
   if (!uniqueTeamIds.length || uniqueTeamIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
     throw new Error("A valid KickoffScore team ID is required to refresh simulation data.");
@@ -532,6 +536,7 @@ export async function getFreshKickoffScoreFairAiSnapshots(
   return {
     snapshots: [...snapshotsByFixture.values()],
     refreshedTeams,
+    recentFixtureIdsByTeam: Object.fromEntries(fixtureIdsByTeam),
   };
 }
 

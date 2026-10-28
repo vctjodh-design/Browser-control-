@@ -5,6 +5,7 @@ import {
   getGetFootballFairAiTeamsQueryKey,
   useGetFootballFairAiTeams,
   useRunFootballFairAiSimulation,
+  type FootballOddsMarket,
   type FootballFairAiTeam,
 } from '@workspace/api-client-react';
 import {
@@ -22,6 +23,7 @@ import {
   Sparkles,
   Target,
 } from 'lucide-react';
+import { analyzeOddsExpectation } from '@/lib/odds-expectation';
 
 function TeamPicker({
   side,
@@ -145,9 +147,38 @@ type MatchFixture = {
   awayTeamId: number;
   homeTeamName: string;
   awayTeamName: string;
+  oddsMarkets?: FootballOddsMarket[];
 };
 
 type TeamSelection = Pick<FootballFairAiTeam, 'teamKey' | 'name' | 'recentMatchCount'>;
+
+function summarizeScorelines(
+  scorelines: { homeGoals: number; awayGoals: number; probability: number }[],
+) {
+  const totalProbability = scorelines.reduce(
+    (sum, scoreline) => sum + Math.max(0, scoreline.probability),
+    0,
+  );
+  if (!totalProbability) return null;
+  const probabilityOf = (matches: (scoreline: typeof scorelines[number]) => boolean) =>
+    scorelines.reduce(
+      (sum, scoreline) =>
+        sum + (matches(scoreline) ? Math.max(0, scoreline.probability) : 0),
+      0,
+    ) / totalProbability;
+  return {
+    home: probabilityOf((scoreline) => scoreline.homeGoals > scoreline.awayGoals),
+    draw: probabilityOf((scoreline) => scoreline.homeGoals === scoreline.awayGoals),
+    away: probabilityOf((scoreline) => scoreline.homeGoals < scoreline.awayGoals),
+    bttsYes: probabilityOf((scoreline) => scoreline.homeGoals > 0 && scoreline.awayGoals > 0),
+    over25: probabilityOf((scoreline) => scoreline.homeGoals + scoreline.awayGoals > 2.5),
+    under35: probabilityOf((scoreline) => scoreline.homeGoals + scoreline.awayGoals < 3.5),
+    topScores: scorelines
+      .filter((scoreline) => scoreline.homeGoals < 10 && scoreline.awayGoals < 10)
+      .sort((left, right) => right.probability - left.probability)
+      .slice(0, 4),
+  };
+}
 
 function PitchGrid({
   team,
@@ -277,8 +308,33 @@ export default function FairAiSimulationPanel({
     if (!selectedHome || !selectedAway || selectedHome.teamKey === selectedAway.teamKey) return;
     if (simulation.isPending) return;
     setSelectedPossession(0);
+    const expectations = fixture?.oddsMarkets?.length
+      ? analyzeOddsExpectation(
+          fixture.oddsMarkets,
+          fixture.homeTeamName,
+          fixture.awayTeamName,
+        )
+      : null;
+    const oddsBaseline = expectations
+      ? {
+          expectedHomeGoals: expectations.expectedHomeGoals,
+          expectedAwayGoals: expectations.expectedAwayGoals,
+          scorelineDistribution: expectations.scorelineDistribution,
+          marketSourceCount: expectations.marketSourceCount,
+          signalCount: expectations.signalCount,
+          fitErrorPoints: expectations.fitErrorPoints,
+          scoreMarketSeeded: expectations.scoreMarketSeeded,
+        }
+      : undefined;
     simulation.mutate(
-      { data: { homeTeamKey: selectedHome.teamKey, awayTeamKey: selectedAway.teamKey, iterations: 10_000 } },
+      {
+        data: {
+          homeTeamKey: selectedHome.teamKey,
+          awayTeamKey: selectedAway.teamKey,
+          iterations: 10_000,
+          ...(oddsBaseline ? { oddsBaseline } : {}),
+        },
+      },
       {
         onSuccess: () => {
           void queryClient.invalidateQueries({
@@ -335,6 +391,10 @@ export default function FairAiSimulationPanel({
     { team: result.away, analysis: result.matchupAnalysis.away },
   ] : [];
   const overTwoGoalsMarket = result?.goalMarkets.totals.find((market) => market.line === 2.5);
+  const baselineForecast = result?.oddsBaseline
+    ? summarizeScorelines(result.oddsBaseline.scorelineDistribution)
+    : null;
+  const fairForecast = result ? summarizeScorelines(result.scorelineDistribution) : null;
 
   return (
     <section
@@ -415,6 +475,80 @@ export default function FairAiSimulationPanel({
 
         {result && (
           <div className="space-y-4 border-t border-[#e4e5da] pt-4" data-testid="result-fair-ai-simulation">
+            {result.oddsBaseline && baselineForecast && fairForecast ? (
+              <section className="overflow-hidden rounded-xl border border-[#d7dfd5] bg-white" aria-labelledby="fair-ai-baseline-title" data-testid="fair-ai-odds-baseline">
+                <div className="flex flex-wrap items-end justify-between gap-2 border-b border-[#e6e8df] bg-[#edf2ec] px-3 py-3">
+                  <div>
+                    <p className="mono text-[7px] uppercase tracking-[.13em] text-[#9b7160]">Odds translation → FAIR AI review</p>
+                    <h3 id="fair-ai-baseline-title" className="mt-1 text-[10px] font-extrabold text-[#40534b]">Market baseline, then action-based adjustment</h3>
+                  </div>
+                  <span className="mono text-[7px] text-[#858982]">
+                    {result.oddsBaseline.marketSourceCount} market sources · {result.oddsBaseline.signalCount} signals
+                    {' · '}odds {Math.round(result.forecastBlend.oddsWeight * 100)}% / FAIR AI {Math.round(result.forecastBlend.fairAiWeight * 100)}%
+                  </span>
+                </div>
+                <p className="px-3 pt-2.5 text-[8px] leading-4 text-[#737c73]">
+                  Odds-implied score probabilities and expected goals set the opening shot-volume baseline. FAIR AI then simulates team matchups, player actions, score phases, and available 365Scores evidence. The result is an experimental scenario, not a guaranteed correction.
+                </p>
+                <div className="overflow-x-auto px-3 pb-2 pt-2">
+                  <table className="w-full min-w-[460px] text-left text-[8px]" aria-label="Odds baseline compared with FAIR AI forecast">
+                    <thead className="text-[7px] uppercase tracking-[.08em] text-[#858982]">
+                      <tr>
+                        <th className="py-2 pr-3">Outcome</th>
+                        <th className="py-2 text-right">Odds baseline</th>
+                        <th className="py-2 text-right">FAIR AI</th>
+                        <th className="py-2 pl-3 text-right">Change</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        [`${result.home.name} win`, baselineForecast.home, fairForecast.home],
+                        ['Draw', baselineForecast.draw, fairForecast.draw],
+                        [`${result.away.name} win`, baselineForecast.away, fairForecast.away],
+                        ['BTTS yes', baselineForecast.bttsYes, fairForecast.bttsYes],
+                        ['Over 2.5', baselineForecast.over25, fairForecast.over25],
+                        ['Under 3.5', baselineForecast.under35, fairForecast.under35],
+                      ].map(([label, baseline, revised]) => (
+                        <tr key={String(label)} className="border-t border-[#eeede6]">
+                          <td className="py-2 pr-3 font-semibold text-[#52615e]">{label}</td>
+                          <td className="mono py-2 text-right text-[#68756d]">{probability(Number(baseline))}</td>
+                          <td className="mono py-2 text-right font-bold text-[#456b58]">{probability(Number(revised))}</td>
+                          <td className={`mono py-2 pl-3 text-right ${Number(revised) - Number(baseline) >= 0 ? 'text-[#4e755c]' : 'text-[#a35f4d]'}`}>
+                            {Number(revised) - Number(baseline) >= 0 ? '+' : ''}{((Number(revised) - Number(baseline)) * 100).toFixed(1)} pp
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="grid gap-2 border-t border-[#eeede6] p-3 sm:grid-cols-2">
+                  {[
+                    { title: 'Odds top scores', scores: baselineForecast.topScores },
+                    { title: 'FAIR AI top scores', scores: fairForecast.topScores },
+                  ].map(({ title, scores }) => (
+                    <div key={title} className="rounded-lg bg-[#f7f7f1] p-2">
+                      <p className="text-[7px] font-extrabold uppercase tracking-[.08em] text-[#858982]">{title}</p>
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {scores.map((score) => (
+                          <span key={`${title}-${score.homeGoals}-${score.awayGoals}`} className="mono rounded-md bg-white px-2 py-1 text-[7px] font-bold text-[#506357]">
+                            {score.homeGoals}–{score.awayGoals} · {probability(score.probability)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="px-3 pb-3 text-[7px] leading-4 text-[#8a785d]">
+                  {result.forecastBlend.method} Market fit gap: {result.oddsBaseline.fitErrorPoints === null ? 'not available' : `${result.oddsBaseline.fitErrorPoints.toFixed(1)} percentage points`}. A complete correct-score market {result.oddsBaseline.scoreMarketSeeded ? 'was included' : 'was not available'}.
+                </p>
+              </section>
+            ) : (
+              <section className="rounded-xl border border-dashed border-[#deddd3] bg-[#f7f6f0] px-3 py-3" data-testid="fair-ai-odds-baseline-unavailable">
+                <p className="text-[9px] font-extrabold text-[#52615e]">Odds baseline unavailable</p>
+                <p className="mt-1 text-[8px] leading-4 text-[#858982]">No complete full-time market expectation was available for this run. FAIR AI used recent team and player evidence without market calibration.</p>
+              </section>
+            )}
+
             <div className="grid gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(240px,.8fr)]">
               <section className="overflow-hidden rounded-xl border border-[#e2e2d8] bg-white" aria-labelledby="possession-summary-title">
                 <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#e9e7df] bg-[#f5f4ed] px-3 py-3">
@@ -496,7 +630,11 @@ export default function FairAiSimulationPanel({
                         <span className={`mono text-[12px] font-semibold ${outcome.tone}`}>{probability(outcome.value)}</span>
                       </div>
                       <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[#e8e7df]"><div className="h-full rounded-full bg-[#79947d]" style={{ width: `${Math.min(100, outcome.value * 100)}%` }} /></div>
-                      <p className="mono mt-1 text-[7px] text-[#92948b]">{outcome.count.toLocaleString()} of {result.iterations.toLocaleString()} runs</p>
+                      <p className="mono mt-1 text-[7px] text-[#92948b]">
+                        {result.oddsBaseline
+                          ? `${outcome.count.toLocaleString()} run-equivalent · odds/FAIR blend`
+                          : `${outcome.count.toLocaleString()} of ${result.iterations.toLocaleString()} runs`}
+                      </p>
                     </div>
                   ))}
                 </div>
@@ -594,6 +732,76 @@ export default function FairAiSimulationPanel({
               </div>
             </section>
 
+            <section className="overflow-hidden rounded-xl border border-[#d8dfd3] bg-white" aria-labelledby="fair-ai-365-evidence-title" data-testid="fair-ai-365-evidence">
+              <div className="border-b border-[#e6e8df] bg-[#edf2ec] px-3 py-3">
+                <p className="mono text-[7px] uppercase tracking-[.13em] text-[#9b7160]">Historical incidents / 365Scores</p>
+                <h3 id="fair-ai-365-evidence-title" className="mt-1 text-[10px] font-extrabold text-[#40534b]">Recent shot phases, execution and commentary</h3>
+                <p className="mt-1 text-[8px] leading-4 text-[#737c73]">{result.actionEvidence.note}</p>
+              </div>
+              <div className="grid gap-2 p-3 lg:grid-cols-2">
+                {[
+                  { name: result.home.name, evidence: result.actionEvidence.home },
+                  { name: result.away.name, evidence: result.actionEvidence.away },
+                ].map(({ name, evidence }) => (
+                  <article key={name} className="min-w-0 rounded-lg border border-[#e6e9e1] bg-[#fbfaf6] p-3">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <h4 className="truncate text-[9px] font-extrabold text-[#4d5f58]">{name}</h4>
+                      <span className="mono text-[7px] text-[#858982]">
+                        {evidence.matchesAnalyzed} analyzed · {evidence.matchesUnavailable} unavailable
+                      </span>
+                    </div>
+                    {evidence.matchesAnalyzed ? (
+                      <>
+                        <p className="mt-2 text-[8px] leading-4 text-[#68766e]">
+                          {evidence.shots} source shots · {evidence.shotsOnTarget} on target · {evidence.shotsOffTarget} off target
+                          {' · '}first half {evidence.firstHalfShots} / second half {evidence.secondHalfShots}
+                        </p>
+                        <p className="mt-1 text-[8px] leading-4 text-[#68766e]">
+                          xG/shot {metricValue(evidence.averageXgPerShot, 3)} · xGOT/shot {metricValue(evidence.averageXgotPerShot, 3)}
+                          {' · '}xGOT−xG {metricValue(evidence.averageXgotMinusXg, 3)}
+                          {' · '}average source shot-origin x {metricValue(evidence.averageShotX, 1)}
+                          {' · '}{evidence.commentaryEvents} timeline events · {evidence.substitutions} substitutions · {evidence.cards} cards
+                        </p>
+                        {evidence.players.length > 0 && (
+                          <div className="mt-2 border-t border-[#e8e7df] pt-2">
+                            <p className="text-[7px] font-extrabold uppercase tracking-[.08em] text-[#858982]">Named shot contributors</p>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {evidence.players.map((player) => (
+                                <span key={`${name}-${player.playerName}`} className="rounded-md bg-white px-2 py-1 text-[7px] text-[#52615e]">
+                                  {player.playerName} · {player.shots} shots · {player.goals} goals · xG {metricValue(player.averageXg, 2)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {evidence.keyEvents.length > 0 && (
+                          <div className="mt-2 border-t border-[#e8e7df] pt-2">
+                            <p className="text-[7px] font-extrabold uppercase tracking-[.08em] text-[#858982]">Recent key timeline entries</p>
+                            <div className="mt-1 space-y-1">
+                              {evidence.keyEvents.slice(0, 5).map((event, index) => (
+                                <p key={`${event.fixtureId}-${event.minute}-${index}`} className="text-[7px] leading-4 text-[#68766e]">
+                                  <span className="mono font-bold text-[#9b7160]">{event.minute}&apos; · </span>
+                                  <span className="font-semibold">{event.title}</span>
+                                  {event.detail ? ` — ${event.detail}` : ''}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <p className="mt-2 text-[8px] leading-4 text-[#858982]">
+                        No source-matched 365Scores report was available. Team statistics and archived player evidence remain separate inputs.
+                      </p>
+                    )}
+                  </article>
+                ))}
+              </div>
+              <p className="px-3 pb-3 text-[7px] leading-4 text-[#8a785d]">
+                At most the two latest completed reports per team are checked. xGOT−xG is a placement-quality proxy; shot-origin coordinates do not describe the ball path or miss direction. This is not player tracking.
+              </p>
+            </section>
+
             <section className="rounded-xl border border-[#e2e2d8] bg-white p-3" aria-labelledby="simulation-diagnostics-title" data-testid="fair-ai-simulation-diagnostics">
               <div className="flex flex-wrap items-end justify-between gap-2">
                 <div>
@@ -685,7 +893,7 @@ export default function FairAiSimulationPanel({
                   ))}
                 </div>
                 <p className="mt-2 text-[7px] leading-4 text-[#858982]">
-                  These intervals cover finite-run sampling only, not predictive accuracy. {result.uncertainty.modelNotes.join(' ')}
+                  These intervals cover raw FAIR AI finite-run sampling only, not predictive accuracy or uncertainty in the odds/model blend. {result.uncertainty.modelNotes.join(' ')}
                 </p>
               </div>
             </section>
