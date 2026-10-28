@@ -6,3 +6,4 @@
 - [FAIR AI target](fair-ai-scope.md) — preserve player-level spatial evaluation, live KickoffScore freshness, and clear limits around match-result models.
 - [Fixture return navigation](fixture-return-navigation.md) — keep the clicked league as a return position, not an automatic competition filter.
 - [365Scores replay lookup](365scores-replay-lookup.md) — use the results API for dated historical match lookup; the generic games endpoint may return current fixtures instead.
+- [365Scores live tracker](365scores-live-tracker.md) — the live pitch is an embedded Sportradar widget; public match APIs expose events, not continuous positions.
