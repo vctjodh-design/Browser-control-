@@ -6,6 +6,7 @@ import type {
   FootballFairAiSimulation,
   FootballFairAiSimulationInput,
   FootballFairAiSimulationPlayer,
+  FootballFairAiTacticalForensics,
   FootballFairAiTeam,
   FootballFairAiTeamStats,
   FootballMatchDetails,
@@ -1883,19 +1884,32 @@ export async function runFairAiArchiveSimulation(
     refreshed.sourceTeamIds[0] ?? 0,
     refreshed.sourceTeamIds[1] ?? 0,
   );
-  const tacticalForensics = buildFairAiTacticalForensics(
-    [...refreshed.snapshotsByFixture.values()],
-    refreshed.recentFixtureIdsByTeam,
-    refreshed.sourceTeamIds[0] ?? 0,
-    refreshed.sourceTeamIds[1] ?? 0,
-    home.name,
-    away.name,
-  );
   return runFairAiPossessionSimulation(
     home,
     away,
     input.iterations ?? 10_000,
-    { oddsBaseline: input.oddsBaseline, actionEvidence, tacticalForensics },
+    { oddsBaseline: input.oddsBaseline, actionEvidence },
+  );
+}
+
+export async function runFairAiArchiveForensics(
+  input: Pick<FootballFairAiSimulationInput, "homeTeamKey" | "awayTeamKey">,
+): Promise<FootballFairAiTacticalForensics | null> {
+  const homeBase = fairAiTeamRows("", input.homeTeamKey)[0];
+  const awayBase = fairAiTeamRows("", input.awayTeamKey)[0];
+  if (!homeBase || !awayBase) return null;
+
+  const refreshed = await refreshFairAiTeamsFromSource([
+    input.homeTeamKey,
+    input.awayTeamKey,
+  ]);
+  return buildFairAiTacticalForensics(
+    [...refreshed.snapshotsByFixture.values()],
+    refreshed.recentFixtureIdsByTeam,
+    refreshed.sourceTeamIds[0] ?? 0,
+    refreshed.sourceTeamIds[1] ?? 0,
+    homeBase.name,
+    awayBase.name,
   );
 }
 

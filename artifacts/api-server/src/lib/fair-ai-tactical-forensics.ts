@@ -4,6 +4,7 @@ type TacticalSnapshot = {
   fixtureId: number;
   details: {
     match: {
+      date: string;
       home: {
         id: number;
         name: string;
@@ -30,6 +31,28 @@ type TacticalSnapshot = {
   };
 };
 
+type MatchEvidence = {
+  fixtureId: number;
+  matchDate: string;
+  opponentName: string;
+  goalsFor: number;
+  goalsAgainst: number;
+  result: "win" | "draw" | "loss";
+  bothTeamsScored: boolean;
+  totalGoals: number;
+  possessionPct: number | null;
+  shotsFor: number | null;
+  shotsAgainst: number | null;
+  shotsOnTargetFor: number | null;
+  shotsOnTargetAgainst: number | null;
+  passCompletionPct: number | null;
+  longBallCompletionPct: number | null;
+  finalThirdPassCompletionPct: number | null;
+  defensiveActions: number | null;
+  recoveries: number | null;
+  formation: string | null;
+};
+
 type TeamSample = {
   matchesExpected: number;
   matchesAnalyzed: number;
@@ -43,8 +66,6 @@ type TeamSample = {
   goalsAgainst: Array<number | null>;
   firstHalfGoalsFor: number[];
   secondHalfGoalsFor: number[];
-  firstHalfShots: number[];
-  secondHalfShots: number[];
   possession: number[];
   shotsFor: number[];
   shotsAgainst: number[];
@@ -56,11 +77,11 @@ type TeamSample = {
   defensiveActions: number[];
   recoveries: number[];
   statisticMatchCount: number;
-  phaseShotMatchCount: number;
   buildupMatchCount: number;
   defensiveActivityMatchCount: number;
   formationSamples: number;
   formations: Set<string>;
+  recentMatches: MatchEvidence[];
 };
 
 function cleanName(value: string): string {
@@ -142,8 +163,6 @@ function newSample(matchesExpected: number): TeamSample {
     goalsAgainst: [],
     firstHalfGoalsFor: [],
     secondHalfGoalsFor: [],
-    firstHalfShots: [],
-    secondHalfShots: [],
     possession: [],
     shotsFor: [],
     shotsAgainst: [],
@@ -155,11 +174,11 @@ function newSample(matchesExpected: number): TeamSample {
     defensiveActions: [],
     recoveries: [],
     statisticMatchCount: 0,
-    phaseShotMatchCount: 0,
     buildupMatchCount: 0,
     defensiveActivityMatchCount: 0,
     formationSamples: 0,
     formations: new Set<string>(),
+    recentMatches: [],
   };
 }
 
@@ -208,19 +227,11 @@ function collectTeamSample(
     const shotsAgainst = statValue(opponentTeamStats, ["total shots", "total shots"]);
     const shotsOnTargetFor = statValue(ownTeamStats, ["shots on goal", "shots on target"]);
     const shotsOnTargetAgainst = statValue(opponentTeamStats, ["shots on goal", "shots on target"]);
-    const firstHalfShots = statValue(ownTeamStats, ["total shots", "total shots"], "first");
-    const secondHalfShots = statValue(ownTeamStats, ["total shots", "total shots"], "second");
     if (possession !== null) sample.possession.push(possession);
     if (shotsFor !== null) sample.shotsFor.push(shotsFor);
     if (shotsAgainst !== null) sample.shotsAgainst.push(shotsAgainst);
     if (shotsOnTargetFor !== null) sample.shotsOnTargetFor.push(shotsOnTargetFor);
     if (shotsOnTargetAgainst !== null) sample.shotsOnTargetAgainst.push(shotsOnTargetAgainst);
-    if (firstHalfShots !== null && secondHalfShots !== null) {
-      sample.phaseShotMatchCount += 1;
-      sample.firstHalfShots.push(firstHalfShots);
-      sample.secondHalfShots.push(secondHalfShots);
-    }
-
     const passCompletion = percentageOrRatio(
       ownTeamStats,
       ["passes %", "pass accuracy", "passes percentage"],
@@ -267,79 +278,42 @@ function collectTeamSample(
       sample.formationSamples += 1;
       if (lineup.formation) sample.formations.add(lineup.formation);
     }
+
+    const result = own.score > opponent.score
+      ? "win"
+      : own.score === opponent.score
+        ? "draw"
+        : "loss";
+    sample.recentMatches.push({
+      fixtureId,
+      matchDate: match.date,
+      opponentName: opponent.name,
+      goalsFor: own.score,
+      goalsAgainst: opponent.score,
+      result,
+      bothTeamsScored: own.score > 0 && opponent.score > 0,
+      totalGoals: own.score + opponent.score,
+      possessionPct: possession,
+      shotsFor,
+      shotsAgainst,
+      shotsOnTargetFor,
+      shotsOnTargetAgainst,
+      passCompletionPct: passCompletion,
+      longBallCompletionPct: longBallCompletion,
+      finalThirdPassCompletionPct: finalThirdPassCompletion,
+      defensiveActions: tackles !== null || interceptions !== null
+        ? (tackles ?? 0) + (interceptions ?? 0)
+        : null,
+      recoveries,
+      formation: lineup?.formation ?? null,
+    });
   }
   return sample;
-}
-
-function adjustmentFor(
-  sample: TeamSample,
-  opponent: TeamSample,
-): FootballFairAiTacticalForensics["home"]["adjustment"] {
-  const latestPhaseShotsAvailable = sample.phaseShotMatchCount >= 3;
-  const firstHalfShots = latestPhaseShotsAvailable
-    ? average(sample.firstHalfShots)
-    : null;
-  const secondHalfShots = latestPhaseShotsAvailable
-    ? average(sample.secondHalfShots)
-    : null;
-  const totalPhaseShots = (firstHalfShots ?? 0) + (secondHalfShots ?? 0);
-  const firstHalfShare = totalPhaseShots > 0
-    ? (firstHalfShots ?? 0) / totalPhaseShots
-    : null;
-  const secondHalfShare = totalPhaseShots > 0
-    ? (secondHalfShots ?? 0) / totalPhaseShots
-    : null;
-  const secondHalfShotScale = secondHalfShare === null
-    ? 1
-    : Math.min(1.08, Math.max(0.92, 1 + (secondHalfShare - 0.5) * 0.24));
-  const firstHalfShotScale = firstHalfShare === null
-    ? 1
-    : Math.min(1.08, Math.max(0.92, 1 + (firstHalfShare - 0.5) * 0.24));
-
-  const opponentShotsFaced = average(opponent.shotsAgainst);
-  const opponentGoalsConceded = average(opponent.goalsAgainst);
-  const attackVsDefenseXgScale =
-    opponent.matchesAnalyzed >= 3 &&
-    (opponentShotsFaced !== null || opponentGoalsConceded !== null)
-      ? Math.min(
-          1.08,
-          Math.max(
-            0.92,
-            1 +
-              ((opponentShotsFaced ?? 11) - 11) * 0.003 +
-              ((opponentGoalsConceded ?? 1.35) - 1.35) * 0.025,
-          ),
-        )
-      : 1;
-
-  const attackPassCompletion = average(sample.passCompletion);
-  const attackLongBallCompletion = average(sample.longBallCompletion);
-  const opposingDefensiveActivity = average(opponent.defensiveActions);
-  const buildupAdjustment = sample.buildupMatchCount >= 3 &&
-      opponent.defensiveActivityMatchCount >= 3
-    ? Math.min(
-        0.02,
-        Math.max(
-          -0.02,
-          ((attackPassCompletion ?? 80) - 80) * 0.00018 +
-            ((attackLongBallCompletion ?? 50) - 50) * 0.00012 -
-            ((opposingDefensiveActivity ?? 90) - 90) * 0.000035,
-        ),
-      )
-    : 0;
-
-  return {
-    firstHalfShotScale,
-    secondHalfShotScale,
-    attackVsDefenseXgScale,
-    buildupVsDefensePassAdjustmentPct: Math.round(buildupAdjustment * 100 * 100) / 100,
-  };
 }
 
 function teamProfile(
   teamName: string,
   sample: TeamSample,
-  opponent: TeamSample,
 ): FootballFairAiTacticalForensics["home"] {
   return {
     teamName,
@@ -364,12 +338,11 @@ function teamProfile(
     averageDefensiveActions: rounded(average(sample.defensiveActions)),
     averageRecoveries: rounded(average(sample.recoveries)),
     statisticMatchCount: sample.statisticMatchCount,
-    phaseShotMatchCount: sample.phaseShotMatchCount,
     buildupMatchCount: sample.buildupMatchCount,
     defensiveActivityMatchCount: sample.defensiveActivityMatchCount,
     formationSamples: sample.formationSamples,
     observedFormations: [...sample.formations],
-    adjustment: adjustmentFor(sample, opponent),
+    recentMatches: sample.recentMatches,
   };
 }
 
@@ -397,16 +370,16 @@ export function buildFairAiTacticalForensics(
 
   return {
     source: "Fresh KickoffScore scores, full/half statistics, and lineups from up to five completed matches per team.",
-    home: teamProfile(homeTeamName, homeSample, awaySample),
-    away: teamProfile(awayTeamName, awaySample, homeSample),
+    home: teamProfile(homeTeamName, homeSample),
+    away: teamProfile(awayTeamName, awaySample),
     opponentRecentStrengthStatus: "unavailable",
-    matchupNote: "Five-match result, goal, phase, buildup, and defensive-activity evidence is compared across both teams. Bounded shot-phase, build-up-versus-defensive-activity, and opposing-shot-exposure adjustments are passed into the raw FAIR AI simulation before the odds/FAIR AI blend.",
+    matchupNote: "This is a retrospective summary of observed results and aggregate match statistics from up to five completed matches per team. It does not generate forecasts or claim that the listed signals caused an outcome.",
     limitations: [
       "The source does not provide these historical opponents' own as-of-match five-game strength records, so opponent recent strength is unavailable rather than guessed.",
-      "Aggregate match statistics do not prove pressing triggers, high-line behavior, overloads, rest-defense shape, counterattacks, tactical confidence, or managerial adaptations.",
-      "Scores and BTTS/goal-line frequencies describe this small historical sample; they are not probabilities for the upcoming fixture.",
-      "Half-specific shot adjustments require half-period shot data in at least three matches and are shrunk and bounded. Other tactical adjustments are similarly bounded proxies.",
-      "Observed formations describe historical lineups, not the confirmed lineup or formation for the upcoming match.",
+      "Aggregate match statistics do not identify pressing height or efficiency, high-line behavior, overloads, rest-defense shape, counterattacks, tactical confidence, or managerial adaptations.",
+      "Scores and BTTS/goal-line frequencies describe only this small historical sample; they are counts, not probabilities or forecasts.",
+      "Pass completion, long-ball completion, recoveries, tackles, interceptions, and shots conceded are indicators, not proof of the tactical mechanisms behind a scoreline.",
+      "Observed formations describe historical lineups. They do not establish a structural mismatch without opponent shape and event-level positional evidence.",
     ],
   };
 }
