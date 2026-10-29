@@ -195,6 +195,7 @@ router.get(
       const liveAction = await get365ScoresLiveAction(query.data.sourceUrl);
       res.json(GetFootballLiveActionResponse.parse(liveAction));
     } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
       if (error instanceof LiveActionSourceUrlError) {
         res.status(400).json({ error: error.message });
         return;

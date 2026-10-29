@@ -10,10 +10,10 @@ import {
   closeBrowserSession,
   createBrowserSession,
   getBrowserState,
-  navigateBrowser,
   navigateBrowserJsonDocument,
   waitForBrowserPage,
 } from "./browser-controller";
+import { UpstreamRateLimitError } from "./upstream-rate-limit";
 
 const DAY_LIST_URL = "https://www.365scores.com/football/yesterdays-matches";
 const RESULTS_LIST_URL = "https://www.365scores.com/football/match-results";
@@ -22,6 +22,10 @@ const REPLAY_CACHE_TTL_MS = 10 * 60 * 1_000;
 const LIVE_SHOT_FEED_CACHE_TTL_MS = 55_000;
 const REPLAY_SOURCE_TIMEOUT_MS = 45_000;
 const MAX_REPLAY_CACHE_ENTRIES = 60;
+const MIN_365SCORES_REQUEST_INTERVAL_MS = 1_500;
+const BLOCKED_SOURCE_COOLDOWN_MS = 30 * 60 * 1_000;
+const SERVER_ERROR_COOLDOWN_MS = 5 * 60 * 1_000;
+const MAX_RATE_LIMIT_BACKOFF_MS = 15 * 60 * 1_000;
 
 type BrowserSnapshot = Awaited<ReturnType<typeof getBrowserState>>;
 type SectionKey = FootballMatchReplaySection["key"];
@@ -159,12 +163,23 @@ const replayCache = new Map<
   number,
   { expiresAt: number; replay: FootballMatchReplay }
 >();
-const LIVE_ACTION_CACHE_TTL_MS = 8_000;
+const LIVE_ACTION_CACHE_TTL_MS = 20_000;
 const liveActionCache = new Map<
   string,
   { expiresAt: number; snapshot: FootballLiveAction }
 >();
 const liveActionRequests = new Map<string, Promise<FootballLiveAction>>();
+const replayRequests = new Map<number, Promise<FootballMatchReplay>>();
+
+type SourcePause = {
+  until: number;
+  kind: "rate-limited" | "blocked";
+};
+
+let sourcePause: SourcePause | null = null;
+let consecutiveRateLimits = 0;
+let nextSourceRequestAt = 0;
+let sourceRequestTail: Promise<void> = Promise.resolve();
 
 export class LiveActionSourceUrlError extends Error {
   constructor(message = "Provide a valid 365Scores football match link.") {
@@ -219,6 +234,169 @@ export class MatchReplaySourceError extends Error {
     super(message);
     this.name = "MatchReplaySourceError";
   }
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function retryAfterMilliseconds(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
+}
+
+function activeSourcePauseError(): Error | null {
+  if (!sourcePause || sourcePause.until <= Date.now()) {
+    sourcePause = null;
+    return null;
+  }
+  const seconds = Math.max(
+    1,
+    Math.ceil((sourcePause.until - Date.now()) / 1_000),
+  );
+  return sourcePause.kind === "rate-limited"
+    ? new UpstreamRateLimitError(seconds)
+    : new MatchReplaySourceError(
+        `365Scores is temporarily declining requests. Please wait at least ${seconds} seconds before trying again.`,
+      );
+}
+
+async function with365ScoresRequest<T>(request: () => Promise<T>): Promise<T> {
+  const previous = sourceRequestTail;
+  let release = () => {};
+  const turn = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => turn);
+  sourceRequestTail = tail;
+  await previous;
+
+  try {
+    const paused = activeSourcePauseError();
+    if (paused) throw paused;
+
+    const wait = nextSourceRequestAt - Date.now();
+    if (wait > 0) await sleep(wait);
+
+    const pauseAfterWait = activeSourcePauseError();
+    if (pauseAfterWait) throw pauseAfterWait;
+
+    nextSourceRequestAt =
+      Date.now() + MIN_365SCORES_REQUEST_INTERVAL_MS;
+    return await request();
+  } finally {
+    release();
+    if (sourceRequestTail === tail) sourceRequestTail = Promise.resolve();
+  }
+}
+
+function pauseAfterRateLimit(retryAfter: string | null): number {
+  consecutiveRateLimits += 1;
+  const fallbackDelay = Math.min(
+    60_000 * 2 ** Math.min(consecutiveRateLimits - 1, 4),
+    MAX_RATE_LIMIT_BACKOFF_MS,
+  );
+  const delay = Math.max(
+    1_000,
+    retryAfterMilliseconds(retryAfter) ?? fallbackDelay,
+  );
+  sourcePause = { until: Date.now() + delay, kind: "rate-limited" };
+  return delay;
+}
+
+function pauseAfterSourceBlock(
+  retryAfter: string | null,
+  fallbackDelay = BLOCKED_SOURCE_COOLDOWN_MS,
+): void {
+  sourcePause = {
+    until:
+      Date.now() +
+      Math.max(1_000, retryAfterMilliseconds(retryAfter) ?? fallbackDelay),
+    kind: "blocked",
+  };
+}
+
+async function request365ScoresDocument(
+  sessionId: string,
+  value: string,
+  expectedContent: "json" | "html",
+): Promise<Awaited<ReturnType<typeof navigateBrowserJsonDocument>>> {
+  return with365ScoresRequest(async () => {
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      throw new MatchReplaySourceError();
+    }
+
+    let response: Awaited<ReturnType<typeof navigateBrowserJsonDocument>>;
+    try {
+      response = await navigateBrowserJsonDocument(sessionId, url.toString());
+    } catch {
+      pauseAfterSourceBlock(null, SERVER_ERROR_COOLDOWN_MS);
+      throw new MatchReplaySourceError(
+        "365Scores could not be reached. Further requests are paused before retrying.",
+      );
+    }
+    let currentUrl: URL;
+    try {
+      currentUrl = new URL(response.currentUrl);
+    } catch {
+      throw new MatchReplaySourceError();
+    }
+    if (currentUrl.hostname !== url.hostname) {
+      pauseAfterSourceBlock(response.retryAfter);
+      throw new MatchReplaySourceError(
+        "365Scores redirected the request to an unexpected source.",
+      );
+    }
+
+    if (response.statusCode === 429) {
+      const delay = pauseAfterRateLimit(response.retryAfter);
+      throw new UpstreamRateLimitError(Math.max(1, Math.ceil(delay / 1_000)));
+    }
+    if (response.statusCode === 401 || response.statusCode === 403) {
+      pauseAfterSourceBlock(response.retryAfter);
+      throw new MatchReplaySourceError(
+        "365Scores declined the request. No further requests will be made for a while.",
+      );
+    }
+    if (response.statusCode === 503) {
+      pauseAfterSourceBlock(response.retryAfter, SERVER_ERROR_COOLDOWN_MS);
+      throw new MatchReplaySourceError(
+        "365Scores is temporarily unavailable. Requests are paused before retrying.",
+      );
+    }
+    if (response.statusCode >= 500) {
+      pauseAfterSourceBlock(response.retryAfter, SERVER_ERROR_COOLDOWN_MS);
+      throw new MatchReplaySourceError(
+        "365Scores returned a temporary server error. Requests are paused before retrying.",
+      );
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw new MatchReplaySourceError(
+        `365Scores returned HTTP ${response.statusCode}.`,
+      );
+    }
+
+    const contentType = response.contentType.toLowerCase();
+    const hasExpectedType =
+      expectedContent === "json"
+        ? contentType.includes("json") && response.document !== null
+        : contentType.includes("text/html") ||
+          contentType.includes("application/xhtml");
+    if (!hasExpectedType) {
+      pauseAfterSourceBlock(response.retryAfter);
+      throw new MatchReplaySourceError(
+        "365Scores returned an unexpected page instead of the requested data. Further requests are paused.",
+      );
+    }
+    consecutiveRateLimits = 0;
+    return response;
+  });
 }
 
 function normalizeText(value: string): string {
@@ -904,18 +1082,28 @@ async function readSourceJson(
     );
   }
 
-  const response = await navigateBrowserJsonDocument(sessionId, url.toString());
-  try {
-    if (new URL(response.currentUrl).hostname !== url.hostname) {
-      throw new MatchReplaySourceError(
-        "365Scores redirected the replay to an unexpected source.",
-      );
-    }
-  } catch (error) {
-    if (error instanceof MatchReplaySourceError) throw error;
-    throw new MatchReplaySourceError();
-  }
+  const response = await request365ScoresDocument(
+    sessionId,
+    url.toString(),
+    "json",
+  );
   return response.document;
+}
+
+async function navigate365ScoresPage(
+  sessionId: string,
+  url: string,
+): Promise<void> {
+  const parsed = new URL(url);
+  if (
+    parsed.protocol !== "https:" ||
+    !["www.365scores.com", "365scores.com"].includes(parsed.hostname)
+  ) {
+    throw new MatchReplaySourceError(
+      "365Scores returned an unexpected page address. The replay was stopped.",
+    );
+  }
+  await request365ScoresDocument(sessionId, url, "html");
 }
 
 function liveActionSourceIdentifiers(value: string): {
@@ -1096,7 +1284,8 @@ export async function get365ScoresLiveAction(
     } catch (error) {
       if (
         error instanceof LiveActionSourceUrlError ||
-        error instanceof MatchReplaySourceError
+        error instanceof MatchReplaySourceError ||
+        error instanceof UpstreamRateLimitError
       ) {
         throw error;
       }
@@ -1163,7 +1352,7 @@ function gameMatchesFixture(
   );
 }
 
-export async function get365ScoresMatchReplay(
+async function load365ScoresMatchReplay(
   details: ReplayFixtureContext,
 ): Promise<FootballMatchReplay> {
   const cached = replayCache.get(details.match.fixtureId);
@@ -1182,54 +1371,48 @@ export async function get365ScoresMatchReplay(
   const resultsListUrl = new URL(RESULTS_LIST_URL);
   resultsListUrl.searchParams.set("date", date);
   const competitionId = sourceCompetitionId(details.match.competition);
-  const initialUrl =
-    competitionId !== null
-      ? gamesListApiUrl(date, competitionId).toString()
-      : dayListUrl.toString();
 
   try {
-    const listState = await createBrowserSession(initialUrl);
+    // Start with a blank page: createBrowserSession(initialUrl) would request
+    // the same list a second time when readSourceJson runs below.
+    const listState = await createBrowserSession();
     sessionId = listState.sessionId;
     let sourceDateListUrl = dayListUrl.toString();
     let matchedGame: SourceGame | null = null;
     let initialMatchArea = "";
 
     if (competitionId !== null) {
-      try {
-        const listPayload = sourceObject(
-          await readSourceJson(
-            sessionId,
-            gamesListApiUrl(date, competitionId).toString(),
-          ),
+      const listPayload = sourceObject(
+        await readSourceJson(
+          sessionId,
+          gamesListApiUrl(date, competitionId).toString(),
+        ),
+      );
+      const games = sourceEntries(
+        listPayload?.games as
+          | SourceGame[]
+          | Record<string, SourceGame>
+          | undefined,
+      );
+      const matches = games.filter((candidate) =>
+        gameMatchesFixture(candidate, details, fixtureDate),
+      );
+      if (matches.length > 1) {
+        throw new MatchReplayNotFoundError(
+          "More than one 365Scores result matched this date, teams, and score. The replay was stopped to avoid attaching the wrong match.",
         );
-        const games = sourceEntries(
-          listPayload?.games as
-            | SourceGame[]
-            | Record<string, SourceGame>
-            | undefined,
-        );
-        const matches = games.filter((candidate) =>
-          gameMatchesFixture(candidate, details, fixtureDate),
-        );
-        if (matches.length > 1) {
-          throw new MatchReplayNotFoundError(
-            "More than one 365Scores result matched this date, teams, and score. The replay was stopped to avoid attaching the wrong match.",
-          );
-        }
-        matchedGame = matches[0] ?? null;
-      } catch (error) {
-        if (error instanceof MatchReplayNotFoundError) throw error;
       }
+      matchedGame = matches[0] ?? null;
     }
 
     if (!matchedGame) {
-      await navigateBrowser(sessionId, dayListUrl.toString());
+      await navigate365ScoresPage(sessionId, dayListUrl.toString());
       await waitForBrowserPage(sessionId, PAGE_LOAD_SETTLE_MS);
       let snapshot = await getBrowserState(sessionId);
       let candidates = listCandidates(snapshot, details);
 
       if (!candidates.length) {
-        await navigateBrowser(sessionId, resultsListUrl.toString());
+        await navigate365ScoresPage(sessionId, resultsListUrl.toString());
         await waitForBrowserPage(sessionId, PAGE_LOAD_SETTLE_MS);
         snapshot = await getBrowserState(sessionId);
         sourceDateListUrl = resultsListUrl.toString();
@@ -1250,7 +1433,7 @@ export async function get365ScoresMatchReplay(
         throw new MatchReplaySourceError();
       }
 
-      await navigateBrowser(sessionId, sourceUrl.toString());
+      await navigate365ScoresPage(sessionId, sourceUrl.toString());
       await waitForBrowserPage(sessionId, PAGE_LOAD_SETTLE_MS);
       const matchSnapshot = await getBrowserState(sessionId);
       initialMatchArea = extractMatchArea(matchSnapshot.pageContent.text);
@@ -1410,7 +1593,8 @@ export async function get365ScoresMatchReplay(
   } catch (error) {
     if (
       error instanceof MatchReplayNotFoundError ||
-      error instanceof MatchReplaySourceError
+      error instanceof MatchReplaySourceError ||
+      error instanceof UpstreamRateLimitError
     ) {
       throw error;
     }
@@ -1435,5 +1619,25 @@ export async function get365ScoresMatchReplay(
     return await Promise.race([sourceTask, timeoutTask]);
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
+}
+
+export async function get365ScoresMatchReplay(
+  details: ReplayFixtureContext,
+): Promise<FootballMatchReplay> {
+  const cached = replayCache.get(details.match.fixtureId);
+  if (cached && cached.expiresAt > Date.now()) return cached.replay;
+
+  const inFlight = replayRequests.get(details.match.fixtureId);
+  if (inFlight) return inFlight;
+
+  const request = load365ScoresMatchReplay(details);
+  replayRequests.set(details.match.fixtureId, request);
+  try {
+    return await request;
+  } finally {
+    if (replayRequests.get(details.match.fixtureId) === request) {
+      replayRequests.delete(details.match.fixtureId);
+    }
   }
 }
