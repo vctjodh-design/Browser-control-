@@ -33,6 +33,9 @@ type CacheEntry = { expiresAt: number; data: FootballMatchLastFive };
 type HistoricalFixture = {
   fixtureId: number;
   date: Date;
+  competition: string;
+  leagueId: number | null;
+  season: number | null;
   homeTeamId: number;
   homeTeamName: string;
   awayTeamId: number;
@@ -348,6 +351,7 @@ function parsePlayers(payload: unknown): FootballLastFivePlayerGroup[] {
 function parseHistoricalFixture(value: unknown): HistoricalFixture | null {
   const object = asObject(value);
   const fixture = asObject(object?.fixture);
+  const league = asObject(object?.league);
   const teams = asObject(object?.teams);
   const home = asObject(teams?.home);
   const away = asObject(teams?.away);
@@ -382,6 +386,10 @@ function parseHistoricalFixture(value: unknown): HistoricalFixture | null {
   return {
     fixtureId,
     date: new Date(dateValue),
+    competition:
+      asString(league?.name) ?? asString(league?.country) ?? "Football",
+    leagueId: asInteger(league?.id),
+    season: asInteger(league?.season),
     homeTeamId,
     homeTeamName,
     awayTeamId,
@@ -444,6 +452,7 @@ function parseFairAiSourceSnapshot(value: unknown) {
 
   return {
     fixtureId: match.fixtureId,
+    source: "KickoffScore",
     details: {
       sourceUrl: sourceMatchUrl(recentMatch),
       match: {
@@ -478,6 +487,46 @@ function parseFairAiSourceSnapshot(value: unknown) {
   };
 }
 
+function historicalFixtureFallbackSnapshot(
+  match: HistoricalFixture,
+): NonNullable<ReturnType<typeof parseFairAiSourceSnapshot>> {
+  return {
+    fixtureId: match.fixtureId,
+    source: "KickoffScore summary",
+    details: {
+      sourceUrl: `${KICKOFFSCORE_SITE_ORIGIN}/api/fixtures?id=${match.fixtureId}`,
+      match: {
+        fixtureId: match.fixtureId,
+        date: match.date.toISOString(),
+        competition: match.competition,
+        status: "Match Finished",
+        venue: null,
+        leagueId: match.leagueId,
+        season: match.season,
+        home: {
+          id: match.homeTeamId,
+          name: match.homeTeamName,
+          logo: null,
+          score: match.homeScore,
+          halfTimeScore: null,
+        },
+        away: {
+          id: match.awayTeamId,
+          name: match.awayTeamName,
+          logo: null,
+          score: match.awayScore,
+          halfTimeScore: null,
+        },
+      },
+      standings: [],
+      statistics: [],
+      events: [],
+      lineups: [],
+      players: [],
+    },
+  };
+}
+
 export async function getFreshKickoffScoreFairAiSnapshots(
   teamIds: number[],
   matchesPerTeam = 5,
@@ -493,6 +542,7 @@ export async function getFreshKickoffScoreFairAiSnapshots(
 
   const fixtureIdsByTeam = new Map<number, number[]>();
   const fixtureIds = new Set<number>();
+  const matchesByFixture = new Map<number, HistoricalFixture>();
   for (const teamId of uniqueTeamIds) {
     const payload = await fetchKickoffScoreJson("/api/fixtures", {
       team: String(teamId),
@@ -511,19 +561,48 @@ export async function getFreshKickoffScoreFairAiSnapshots(
       throw new Error(`KickoffScore has no recent completed matches for team ${teamId}.`);
     }
     fixtureIdsByTeam.set(teamId, matches.map((match) => match.fixtureId));
-    matches.forEach((match) => fixtureIds.add(match.fixtureId));
+    matches.forEach((match) => {
+      fixtureIds.add(match.fixtureId);
+      matchesByFixture.set(match.fixtureId, match);
+    });
   }
 
   const snapshotsByFixture = new Map<
     number,
     NonNullable<ReturnType<typeof parseFairAiSourceSnapshot>>
   >();
+  let kickoffScoreRateLimited = false;
   for (const fixtureId of fixtureIds) {
-    const payload = await fetchKickoffScoreJson("/api/fixtures", {
-      id: String(fixtureId),
-    });
-    const snapshot = parseFairAiSourceSnapshot(payload);
-    if (snapshot) snapshotsByFixture.set(fixtureId, snapshot);
+    const match = matchesByFixture.get(fixtureId);
+    if (kickoffScoreRateLimited && match) {
+      snapshotsByFixture.set(
+        fixtureId,
+        historicalFixtureFallbackSnapshot(match),
+      );
+      continue;
+    }
+    try {
+      const payload = await fetchKickoffScoreJson("/api/fixtures", {
+        id: String(fixtureId),
+      });
+      const snapshot = parseFairAiSourceSnapshot(payload);
+      if (snapshot) snapshotsByFixture.set(fixtureId, snapshot);
+      else if (match) {
+        snapshotsByFixture.set(
+          fixtureId,
+          historicalFixtureFallbackSnapshot(match),
+        );
+      }
+    } catch (error) {
+      if (!match) throw error;
+      if (error instanceof UpstreamRateLimitError) {
+        kickoffScoreRateLimited = true;
+      }
+      snapshotsByFixture.set(
+        fixtureId,
+        historicalFixtureFallbackSnapshot(match),
+      );
+    }
   }
 
   const refreshedTeams = uniqueTeamIds.filter((teamId) =>

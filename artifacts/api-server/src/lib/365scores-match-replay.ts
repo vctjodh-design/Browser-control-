@@ -14,6 +14,10 @@ import {
   waitForBrowserPage,
 } from "./browser-controller";
 import { UpstreamRateLimitError } from "./upstream-rate-limit";
+import {
+  build365ScoresForensicsFallback,
+  type FootballMatchForensicsFallback,
+} from "./365scores-forensics-fallback";
 
 const DAY_LIST_URL = "https://www.365scores.com/football/yesterdays-matches";
 const RESULTS_LIST_URL = "https://www.365scores.com/football/match-results";
@@ -35,9 +39,24 @@ type ReplayFixtureContext = {
     date: string | Date;
     competition: string;
     status: string;
-    home: { name: string; score: number | null; halfTimeScore: number | null };
-    away: { name: string; score: number | null; halfTimeScore: number | null };
+    home: {
+      id: number;
+      name: string;
+      score: number | null;
+      halfTimeScore: number | null;
+    };
+    away: {
+      id: number;
+      name: string;
+      score: number | null;
+      halfTimeScore: number | null;
+    };
   };
+};
+
+type LoadedReplay = {
+  replay: FootballMatchReplay;
+  forensicsFallback: FootballMatchForensicsFallback;
 };
 
 type SourcePlayerStat = {
@@ -84,6 +103,7 @@ type SourceGameEvent = {
   order?: number;
   playerId?: number;
   extraPlayers?: number[];
+  competitorNum?: number;
   eventType?: { name?: string };
 };
 
@@ -159,17 +179,14 @@ type SourceFeedResponse = {
   Messages?: SourceComment[];
 };
 
-const replayCache = new Map<
-  number,
-  { expiresAt: number; replay: FootballMatchReplay }
->();
+const replayCache = new Map<number, { expiresAt: number; loaded: LoadedReplay }>();
 const LIVE_ACTION_CACHE_TTL_MS = 20_000;
 const liveActionCache = new Map<
   string,
   { expiresAt: number; snapshot: FootballLiveAction }
 >();
 const liveActionRequests = new Map<string, Promise<FootballLiveAction>>();
-const replayRequests = new Map<number, Promise<FootballMatchReplay>>();
+const replayRequests = new Map<number, Promise<LoadedReplay>>();
 
 type SourcePause = {
   until: number;
@@ -1354,13 +1371,13 @@ function gameMatchesFixture(
 
 async function load365ScoresMatchReplay(
   details: ReplayFixtureContext,
-): Promise<FootballMatchReplay> {
+): Promise<LoadedReplay> {
   const cached = replayCache.get(details.match.fixtureId);
-  if (cached && cached.expiresAt > Date.now()) return cached.replay;
+  if (cached && cached.expiresAt > Date.now()) return cached.loaded;
 
   let sessionId: string | null = null;
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  const sourceTask = (async (): Promise<FootballMatchReplay> => {
+  const sourceTask = (async (): Promise<LoadedReplay> => {
   const fixtureDate = new Date(details.match.date);
   if (!Number.isFinite(fixtureDate.getTime())) {
     throw new MatchReplaySourceError("The match date is unavailable.");
@@ -1577,8 +1594,22 @@ async function load365ScoresMatchReplay(
       sections,
     };
 
-    replayCache.set(details.match.fixtureId, {
+    const loaded: LoadedReplay = {
       replay,
+      forensicsFallback: {
+        ...build365ScoresForensicsFallback(
+          game,
+          details,
+          fullStatsResponse,
+          firstHalfStatsResponse,
+          secondHalfStatsResponse,
+          commentary.events,
+        ),
+        halfTimeScore: replay.halfTimeScore,
+      },
+    };
+    replayCache.set(details.match.fixtureId, {
+      loaded,
       expiresAt:
         Date.now() +
         (isLiveMatchStatus(details.match.status)
@@ -1589,7 +1620,7 @@ async function load365ScoresMatchReplay(
       const oldestFixtureId = replayCache.keys().next().value;
       if (oldestFixtureId !== undefined) replayCache.delete(oldestFixtureId);
     }
-    return replay;
+    return loaded;
   } catch (error) {
     if (
       error instanceof MatchReplayNotFoundError ||
@@ -1625,8 +1656,20 @@ async function load365ScoresMatchReplay(
 export async function get365ScoresMatchReplay(
   details: ReplayFixtureContext,
 ): Promise<FootballMatchReplay> {
+  return (await get365ScoresLoadedMatch(details)).replay;
+}
+
+export async function get365ScoresMatchForensicsFallback(
+  details: ReplayFixtureContext,
+): Promise<FootballMatchForensicsFallback> {
+  return (await get365ScoresLoadedMatch(details)).forensicsFallback;
+}
+
+async function get365ScoresLoadedMatch(
+  details: ReplayFixtureContext,
+): Promise<LoadedReplay> {
   const cached = replayCache.get(details.match.fixtureId);
-  if (cached && cached.expiresAt > Date.now()) return cached.replay;
+  if (cached && cached.expiresAt > Date.now()) return cached.loaded;
 
   const inFlight = replayRequests.get(details.match.fixtureId);
   if (inFlight) return inFlight;

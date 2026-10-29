@@ -9,6 +9,7 @@ import type {
   FootballFairAiTacticalForensics,
   FootballFairAiTeam,
   FootballFairAiTeamStats,
+  FootballLastFiveEvent,
   FootballMatchDetails,
   FootballMatchLastFive,
   FootballMatchReplay,
@@ -18,7 +19,10 @@ import { database } from "./processed-match-store";
 import { runFairAiPossessionSimulation } from "./fair-ai-possession-simulator";
 import { buildFairAiTacticalForensics } from "./fair-ai-tactical-forensics";
 import { getFreshKickoffScoreFairAiSnapshots } from "./kickoffscore-last-five";
-import { get365ScoresMatchReplay } from "./365scores-match-replay";
+import {
+  get365ScoresMatchForensicsFallback,
+  get365ScoresMatchReplay,
+} from "./365scores-match-replay";
 
 type JsonObject = Record<string, unknown>;
 type SqlRow = Record<string, unknown>;
@@ -804,6 +808,207 @@ function saveFreshFairAiSourceSnapshot(
   );
 }
 
+type FairAiSourceSnapshot = NonNullable<
+  Awaited<ReturnType<typeof getFreshKickoffScoreFairAiSnapshots>>["snapshots"][number]
+>;
+
+function normalizedLabel(value: string): string {
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+function forensicsMissingSections(snapshot: FairAiSourceSnapshot): string[] {
+  const { details } = snapshot;
+  const missing: string[] = [];
+  const teams = [details.match.home, details.match.away];
+
+  const statsByTeam = teams.map((team) => {
+    const stats = details.statistics.find((entry) =>
+      entry.teamId === team.id ||
+      normalizedLabel(entry.teamName) === normalizedLabel(team.name),
+    )?.statistics ?? [];
+    const periods = new Set(stats.map((stat) =>
+      normalizedLabel(stat.label.split("·")[0] ?? stat.label),
+    ));
+    const hasPeriod = (aliases: string[]) =>
+      [...periods].some((period) => aliases.some((alias) => period.includes(alias)));
+    return hasPeriod(["full"]) &&
+      hasPeriod(["1st", "first"]) &&
+      hasPeriod(["2nd", "second"]);
+  });
+  if (statsByTeam.some((complete) => !complete)) {
+    missing.push("full- and half-time statistics");
+  }
+
+  const goalCount = (details.match.home.score ?? 0) + (details.match.away.score ?? 0);
+  const recordedGoals = details.events.filter((event) =>
+    /\bgoal\b/i.test(`${event.type} ${event.detail ?? ""}`),
+  ).length;
+  const hasComments = details.events.some((event) => event.comments?.trim());
+  if (
+    !details.events.length ||
+    recordedGoals < goalCount ||
+    !hasComments
+  ) {
+    missing.push("event timeline or source comments");
+  }
+
+  const lineupsComplete = teams.every((team) => {
+    const lineup = details.lineups.find((entry) =>
+      entry.teamId === team.id ||
+      normalizedLabel(entry.teamName) === normalizedLabel(team.name),
+    );
+    return !!lineup?.formation && lineup.starters.length >= 11;
+  });
+  if (!lineupsComplete) missing.push("formations or lineups");
+
+  const playerRatingsComplete = teams.every((team) => {
+    const group = details.players.find((entry) =>
+      entry.teamId === team.id ||
+      normalizedLabel(entry.teamName) === normalizedLabel(team.name),
+    );
+    return (group?.players.filter((player) => player.rating !== null).length ?? 0) >= 5;
+  });
+  if (!playerRatingsComplete) missing.push("player ratings");
+  return missing;
+}
+
+function mergeForensicsFallback(
+  snapshot: FairAiSourceSnapshot,
+  fallback: Awaited<ReturnType<typeof get365ScoresMatchForensicsFallback>>,
+): FairAiSourceSnapshot {
+  const { details } = snapshot;
+  const halfTimeMatch = fallback.halfTimeScore?.match(/^\s*(\d+)\s*[–-]\s*(\d+)\s*$/);
+  const statistics = [...details.statistics];
+  for (const fallbackTeam of fallback.statistics) {
+    const current = statistics.find((entry) =>
+      entry.teamId === fallbackTeam.teamId ||
+      normalizedLabel(entry.teamName) === normalizedLabel(fallbackTeam.teamName),
+    );
+    if (!current) {
+      statistics.push(fallbackTeam);
+      continue;
+    }
+    const labels = new Set(current.statistics.map((stat) =>
+      normalizedLabel(stat.label),
+    ));
+    current.statistics.push(
+      ...fallbackTeam.statistics.filter((stat) => !labels.has(normalizedLabel(stat.label))),
+    );
+  }
+
+  const goalCount = (details.match.home.score ?? 0) + (details.match.away.score ?? 0);
+  const timelineGoalCount = (events: FootballLastFiveEvent[]) =>
+    events.filter((event) =>
+      /\bgoal\b/i.test(`${event.type} ${event.detail ?? ""}`),
+    ).length;
+  const commentaryCount = (events: FootballLastFiveEvent[]) =>
+    events.filter((event) => event.comments?.trim()).length;
+  const fallbackHasBetterTimeline =
+    fallback.events.length > 0 &&
+    (
+      timelineGoalCount(fallback.events) > timelineGoalCount(details.events) ||
+      (
+        timelineGoalCount(fallback.events) === timelineGoalCount(details.events) &&
+        timelineGoalCount(fallback.events) >= goalCount &&
+        commentaryCount(fallback.events) > commentaryCount(details.events)
+      )
+    );
+  const events = !details.events.length || fallbackHasBetterTimeline
+    ? fallback.events.length ? fallback.events : details.events
+    : details.events;
+
+  const lineups = [...details.lineups];
+  for (const fallbackLineup of fallback.lineups) {
+    const index = lineups.findIndex((entry) =>
+      entry.teamId === fallbackLineup.teamId ||
+      normalizedLabel(entry.teamName) === normalizedLabel(fallbackLineup.teamName),
+    );
+    if (index < 0) {
+      lineups.push(fallbackLineup);
+    } else {
+      const current = lineups[index];
+      if (
+        current &&
+        (
+          !current.formation ||
+          current.starters.length < fallbackLineup.starters.length
+        ) &&
+        fallbackLineup.starters.length > 0
+      ) {
+        lineups[index] = fallbackLineup;
+      }
+    }
+  }
+
+  const players = [...details.players];
+  for (const fallbackGroup of fallback.players) {
+    const index = players.findIndex((entry) =>
+      entry.teamId === fallbackGroup.teamId ||
+      normalizedLabel(entry.teamName) === normalizedLabel(fallbackGroup.teamName),
+    );
+    if (index < 0) {
+      players.push(fallbackGroup);
+      continue;
+    }
+    const currentGroup = players[index];
+    if (!currentGroup) continue;
+    const mergedPlayers = [...currentGroup.players];
+    for (const fallbackPlayer of fallbackGroup.players) {
+      const playerIndex = mergedPlayers.findIndex((player) =>
+        player.id !== null && fallbackPlayer.id !== null
+          ? player.id === fallbackPlayer.id
+          : normalizedLabel(player.name) === normalizedLabel(fallbackPlayer.name),
+      );
+      if (playerIndex < 0) {
+        mergedPlayers.push(fallbackPlayer);
+        continue;
+      }
+      const currentPlayer = mergedPlayers[playerIndex];
+      if (!currentPlayer) continue;
+      const statisticLabels = new Set(currentPlayer.statistics.map((stat) =>
+        normalizedLabel(stat.label),
+      ));
+      mergedPlayers[playerIndex] = {
+        ...currentPlayer,
+        rating: currentPlayer.rating ?? fallbackPlayer.rating,
+        statistics: [
+          ...currentPlayer.statistics,
+          ...fallbackPlayer.statistics.filter((stat) =>
+            !statisticLabels.has(normalizedLabel(stat.label)),
+          ),
+        ],
+      };
+    }
+    players[index] = { ...currentGroup, players: mergedPlayers };
+  }
+
+  return {
+    ...snapshot,
+    details: {
+      ...details,
+      match: {
+        ...details.match,
+        home: {
+          ...details.match.home,
+          halfTimeScore:
+            details.match.home.halfTimeScore ??
+            (halfTimeMatch ? Number(halfTimeMatch[1]) : null),
+        },
+        away: {
+          ...details.match.away,
+          halfTimeScore:
+            details.match.away.halfTimeScore ??
+            (halfTimeMatch ? Number(halfTimeMatch[2]) : null),
+        },
+      },
+      statistics,
+      events,
+      lineups,
+      players,
+    },
+  };
+}
+
 async function refreshFairAiTeamsFromSource(teamKeys: string[]): Promise<{
   sourceTeamIds: number[];
   recentFixtureIdsByTeam: Record<number, number[]>;
@@ -824,7 +1029,9 @@ async function refreshFairAiTeamsFromSource(teamKeys: string[]): Promise<{
   });
   const refreshed = await getFreshKickoffScoreFairAiSnapshots(selectedTeams, 5);
   for (const snapshot of refreshed.snapshots) {
-    if (snapshot) saveFreshFairAiSourceSnapshot(snapshot.fixtureId, snapshot.details);
+    if (snapshot?.source === "KickoffScore") {
+      saveFreshFairAiSourceSnapshot(snapshot.fixtureId, snapshot.details);
+    }
   }
   return {
     sourceTeamIds: selectedTeams,
@@ -1903,7 +2110,33 @@ export async function runFairAiArchiveForensics(
     input.homeTeamKey,
     input.awayTeamKey,
   ]);
-  return buildFairAiTacticalForensics(
+  let fallbackAttempts = 0;
+  let fallbackDataReturned = 0;
+  let fallbackFailures = 0;
+  for (const snapshot of refreshed.snapshotsByFixture.values()) {
+    if (!forensicsMissingSections(snapshot).length) continue;
+    fallbackAttempts += 1;
+    try {
+      const fallback = await get365ScoresMatchForensicsFallback(snapshot.details);
+      if (
+        fallback.statistics.length ||
+        fallback.events.length ||
+        fallback.lineups.length ||
+        fallback.players.length
+      ) {
+        fallbackDataReturned += 1;
+      }
+      refreshed.snapshotsByFixture.set(
+        snapshot.fixtureId,
+        mergeForensicsFallback(snapshot, fallback),
+      );
+    } catch {
+      // Keep valid KickoffScore evidence and report the remaining source gaps below.
+      fallbackFailures += 1;
+    }
+  }
+
+  const result = buildFairAiTacticalForensics(
     [...refreshed.snapshotsByFixture.values()],
     refreshed.recentFixtureIdsByTeam,
     refreshed.sourceTeamIds[0] ?? 0,
@@ -1911,6 +2144,25 @@ export async function runFairAiArchiveForensics(
     homeBase.name,
     awayBase.name,
   );
+  if (fallbackAttempts) {
+    result.source =
+      `KickoffScore fixture summaries/details with 365Scores fallback attempted for ${fallbackAttempts} incomplete match records; ` +
+      `365Scores returned additional forensic data for ${fallbackDataReturned}.`;
+    if (fallbackFailures) {
+      result.limitations.push(
+        `365Scores could not verify or load ${fallbackFailures} fallback match record${fallbackFailures === 1 ? "" : "s"}; available KickoffScore data was retained and some details may remain unavailable.`,
+      );
+    }
+    const remainingIncomplete = [...refreshed.snapshotsByFixture.values()]
+      .filter((snapshot) => forensicsMissingSections(snapshot).length > 0)
+      .length;
+    if (remainingIncomplete) {
+      result.limitations.push(
+        `Some requested details remained unavailable after trying 365Scores for ${fallbackAttempts} incomplete match records.`,
+      );
+    }
+  }
+  return result;
 }
 
 export function getFairAiDataSummary(): FairAiDataSummary {
