@@ -2134,12 +2134,89 @@ components:
           type: integer
           minimum: 0
       required: [wins, draws, losses]
+    FootballFairAiTacticalPlayerHighlight:
+      type: object
+      properties:
+        name:
+          type: string
+        position:
+          type: ["string", "null"]
+        appearances:
+          type: integer
+          minimum: 0
+        averageRating:
+          type: ["number", "null"]
+        goals:
+          type: ["number", "null"]
+        assists:
+          type: ["number", "null"]
+      required: [name, position, appearances, averageRating, goals, assists]
+    FootballFairAiFormationSummary:
+      type: object
+      properties:
+        formation:
+          type: string
+        matches:
+          type: integer
+          minimum: 0
+        wins:
+          type: integer
+          minimum: 0
+        draws:
+          type: integer
+          minimum: 0
+        losses:
+          type: integer
+          minimum: 0
+        pointsPerMatch:
+          type: ["number", "null"]
+        averageGoalsFor:
+          type: ["number", "null"]
+        averageGoalsAgainst:
+          type: ["number", "null"]
+      required: [formation, matches, wins, draws, losses, pointsPerMatch, averageGoalsFor, averageGoalsAgainst]
+    FootballFairAiTacticalMatchupFactor:
+      type: object
+      properties:
+        area:
+          type: string
+        edge:
+          type: string
+          enum: [home, away, balanced, unavailable]
+        summary:
+          type: string
+        homeEvidence:
+          type: string
+        awayEvidence:
+          type: string
+      required: [area, edge, summary, homeEvidence, awayEvidence]
+    FootballFairAiTacticalMatchupAssessment:
+      type: object
+      properties:
+        resultLean:
+          type: string
+          enum: [home, draw, away, no_clear_edge]
+        confidence:
+          type: string
+          enum: [limited, low, moderate]
+        scoringLean:
+          type: string
+          enum: [open_btts, open_goals, tight, mixed, unavailable]
+        summary:
+          type: string
+        factors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFairAiTacticalMatchupFactor"
+      required: [resultLean, confidence, scoringLean, summary, factors]
     FootballFairAiTacticalMatchEvidence:
       type: object
       properties:
         fixtureId:
           type: integer
         matchDate:
+          type: string
+        competition:
           type: string
         opponentName:
           type: string
@@ -2157,6 +2234,18 @@ components:
         totalGoals:
           type: integer
           minimum: 0
+        halfTimeGoalsFor:
+          type: ["integer", "null"]
+        halfTimeGoalsAgainst:
+          type: ["integer", "null"]
+        expectedGoalsFor:
+          type: ["number", "null"]
+        expectedGoalsAgainst:
+          type: ["number", "null"]
+        bigChancesFor:
+          type: ["number", "null"]
+        bigChancesAgainst:
+          type: ["number", "null"]
         possessionPct:
           type: ["number", "null"]
         shotsFor:
@@ -2179,15 +2268,42 @@ components:
           type: ["number", "null"]
         formation:
           type: ["string", "null"]
+        timelineSummary:
+          type: string
+        timelineHasFullGoalRecord:
+          type: boolean
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballLastFiveEvent"
+        teamStatistics:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballLastFiveTeamStatistics"
+        lineups:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballLastFiveLineup"
+        playerHighlights:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFairAiTacticalPlayerHighlight"
       required:
         - fixtureId
         - matchDate
+        - competition
         - opponentName
         - goalsFor
         - goalsAgainst
         - result
         - bothTeamsScored
         - totalGoals
+        - halfTimeGoalsFor
+        - halfTimeGoalsAgainst
+        - expectedGoalsFor
+        - expectedGoalsAgainst
+        - bigChancesFor
+        - bigChancesAgainst
         - possessionPct
         - shotsFor
         - shotsAgainst
@@ -2199,6 +2315,12 @@ components:
         - defensiveActions
         - recoveries
         - formation
+        - timelineSummary
+        - timelineHasFullGoalRecord
+        - events
+        - teamStatistics
+        - lineups
+        - playerHighlights
     FootballFairAiTacticalTeamProfile:
       type: object
       properties:
@@ -2225,6 +2347,20 @@ components:
           type: ["number", "null"]
         averageGoalsAgainst:
           type: ["number", "null"]
+        averageExpectedGoalsFor:
+          type: ["number", "null"]
+        averageExpectedGoalsAgainst:
+          type: ["number", "null"]
+        expectedGoalsMatchCount:
+          type: integer
+          minimum: 0
+        averageBigChancesFor:
+          type: ["number", "null"]
+        averageBigChancesAgainst:
+          type: ["number", "null"]
+        bigChancesMatchCount:
+          type: integer
+          minimum: 0
         firstHalfGoalsFor:
           type: ["number", "null"]
         secondHalfGoalsFor:
@@ -2249,6 +2385,11 @@ components:
           type: ["number", "null"]
         averageRecoveries:
           type: ["number", "null"]
+        averagePlayerRating:
+          type: ["number", "null"]
+        playerRatingMatchCount:
+          type: integer
+          minimum: 0
         statisticMatchCount:
           type: integer
           minimum: 0
@@ -2261,10 +2402,36 @@ components:
         formationSamples:
           type: integer
           minimum: 0
+        eventTimelineMatches:
+          type: integer
+          minimum: 0
+        commentaryEventCount:
+          type: integer
+          minimum: 0
+        completeGoalTimelines:
+          type: integer
+          minimum: 0
+        goalsAfterConceding:
+          type: integer
+          minimum: 0
+        lateGoalsFor:
+          type: integer
+          minimum: 0
+        lateGoalsAgainst:
+          type: integer
+          minimum: 0
         observedFormations:
           type: array
           items:
             type: string
+        formationSummaries:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFairAiFormationSummary"
+        topPlayers:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootballFairAiTacticalPlayerHighlight"
         recentMatches:
           type: array
           items:
@@ -2279,6 +2446,12 @@ components:
         - over35Matches
         - averageGoalsFor
         - averageGoalsAgainst
+        - averageExpectedGoalsFor
+        - averageExpectedGoalsAgainst
+        - expectedGoalsMatchCount
+        - averageBigChancesFor
+        - averageBigChancesAgainst
+        - bigChancesMatchCount
         - firstHalfGoalsFor
         - secondHalfGoalsFor
         - averagePossessionPct
@@ -2291,11 +2464,21 @@ components:
         - averageFinalThirdPassCompletionPct
         - averageDefensiveActions
         - averageRecoveries
+        - averagePlayerRating
+        - playerRatingMatchCount
         - statisticMatchCount
         - buildupMatchCount
         - defensiveActivityMatchCount
         - formationSamples
+        - eventTimelineMatches
+        - commentaryEventCount
+        - completeGoalTimelines
+        - goalsAfterConceding
+        - lateGoalsFor
+        - lateGoalsAgainst
         - observedFormations
+        - formationSummaries
+        - topPlayers
         - recentMatches
     FootballFairAiTacticalForensics:
       type: object
@@ -2306,6 +2489,8 @@ components:
           $ref: "#/components/schemas/FootballFairAiTacticalTeamProfile"
         away:
           $ref: "#/components/schemas/FootballFairAiTacticalTeamProfile"
+        assessment:
+          $ref: "#/components/schemas/FootballFairAiTacticalMatchupAssessment"
         opponentRecentStrengthStatus:
           type: string
           enum: [unavailable]
@@ -2319,6 +2504,7 @@ components:
         - source
         - home
         - away
+        - assessment
         - opponentRecentStrengthStatus
         - matchupNote
         - limitations

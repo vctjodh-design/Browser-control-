@@ -5,7 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { FootballFairAiFormationSummary } from './footballFairAiFormationSummary';
 import type { FootballFairAiTacticalMatchEvidence } from './footballFairAiTacticalMatchEvidence';
+import type { FootballFairAiTacticalPlayerHighlight } from './footballFairAiTacticalPlayerHighlight';
 import type { FootballFairAiTacticalResults } from './footballFairAiTacticalResults';
 
 export interface FootballFairAiTacticalTeamProfile {
@@ -25,6 +27,18 @@ export interface FootballFairAiTacticalTeamProfile {
   averageGoalsFor: number | null;
   /** @nullable */
   averageGoalsAgainst: number | null;
+  /** @nullable */
+  averageExpectedGoalsFor: number | null;
+  /** @nullable */
+  averageExpectedGoalsAgainst: number | null;
+  /** @minimum 0 */
+  expectedGoalsMatchCount: number;
+  /** @nullable */
+  averageBigChancesFor: number | null;
+  /** @nullable */
+  averageBigChancesAgainst: number | null;
+  /** @minimum 0 */
+  bigChancesMatchCount: number;
   /** @nullable */
   firstHalfGoalsFor: number | null;
   /** @nullable */
@@ -49,6 +63,10 @@ export interface FootballFairAiTacticalTeamProfile {
   averageDefensiveActions: number | null;
   /** @nullable */
   averageRecoveries: number | null;
+  /** @nullable */
+  averagePlayerRating: number | null;
+  /** @minimum 0 */
+  playerRatingMatchCount: number;
   /** @minimum 0 */
   statisticMatchCount: number;
   /** @minimum 0 */
@@ -57,6 +75,20 @@ export interface FootballFairAiTacticalTeamProfile {
   defensiveActivityMatchCount: number;
   /** @minimum 0 */
   formationSamples: number;
+  /** @minimum 0 */
+  eventTimelineMatches: number;
+  /** @minimum 0 */
+  commentaryEventCount: number;
+  /** @minimum 0 */
+  completeGoalTimelines: number;
+  /** @minimum 0 */
+  goalsAfterConceding: number;
+  /** @minimum 0 */
+  lateGoalsFor: number;
+  /** @minimum 0 */
+  lateGoalsAgainst: number;
   observedFormations: string[];
+  formationSummaries: FootballFairAiFormationSummary[];
+  topPlayers: FootballFairAiTacticalPlayerHighlight[];
   recentMatches: FootballFairAiTacticalMatchEvidence[];
 }

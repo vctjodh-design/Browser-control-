@@ -4,6 +4,8 @@ import {
   useGetFootballFairAiTeams,
   useRunFootballFairAiForensics,
   type FootballFairAiTacticalTeamProfile,
+  type FootballFairAiTacticalMatchEvidence,
+  type FootballFairAiTacticalMatchupAssessment,
   type FootballFairAiTeam,
 } from '@workspace/api-client-react';
 import { Activity, AlertTriangle, RefreshCw, Search, ShieldAlert } from 'lucide-react';
@@ -64,7 +66,9 @@ function TeamSelector({
         <div className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-[#eaf1e9] px-2.5 py-2" data-testid={`selection-forensics-${side}`}>
           <span className="min-w-0 truncate text-[9px] font-extrabold text-[#4e755c]">{selected.name}</span>
           <span className="mono shrink-0 text-[7px] text-[#718172]">
-            {selected.recentMatchCount} recent
+            {selected.recentMatchCount
+              ? `${selected.recentMatchCount} archive matches`
+              : 'latest five refresh on run'}
           </span>
         </div>
       )}
@@ -97,7 +101,7 @@ function TeamSelector({
             >
               <span className="min-w-0 truncate text-[9px] font-bold">{team.name}</span>
               <span className="mono shrink-0 text-[7px] text-[#81877e]">
-                {team.recentMatchCount} matches
+                {team.recentMatchCount} archive matches
               </span>
             </button>
           ))
@@ -151,6 +155,151 @@ function Metric({
   );
 }
 
+function matchupEdgeLabel(
+  edge: string,
+  homeName: string,
+  awayName: string,
+) {
+  if (edge === 'home') return homeName;
+  if (edge === 'away') return awayName;
+  if (edge === 'balanced') return 'Even';
+  return 'Not enough data';
+}
+
+function MatchupAssessment({
+  assessment,
+  homeName,
+  awayName,
+}: {
+  assessment: FootballFairAiTacticalMatchupAssessment;
+  homeName: string;
+  awayName: string;
+}) {
+  const resultLabel = assessment.resultLean === 'home'
+    ? `${homeName} edge`
+    : assessment.resultLean === 'away'
+      ? `${awayName} edge`
+      : assessment.resultLean === 'draw'
+        ? 'Draw is live'
+        : 'No clear result edge';
+  const goalLabel = assessment.scoringLean === 'open_btts'
+    ? 'Open game · BTTS lean'
+    : assessment.scoringLean === 'open_goals'
+      ? 'Open scoring lean'
+      : assessment.scoringLean === 'tight'
+        ? 'Tighter · under 2.5 lean'
+        : assessment.scoringLean === 'mixed'
+          ? 'Mixed goal signals'
+          : 'Goal outlook unavailable';
+
+  return (
+    <section className="rounded-xl border border-[#d5dfd2] bg-[#f0f4ed] p-3.5 sm:p-4" aria-label="Comparative matchup assessment" data-testid="section-forensics-matchup-assessment">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="mono text-[7px] uppercase tracking-[.13em] text-[#9b7160]">Evidence-based comparison</p>
+          <h3 className="mt-1 text-[11px] font-extrabold text-[#40534b]">Likely matchup direction</h3>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <span className="rounded-full border border-[#cad7c9] bg-white px-2.5 py-1 text-[8px] font-extrabold text-[#4e755c]" data-testid="text-forensics-result-lean">{resultLabel}</span>
+          <span className="rounded-full border border-[#ded7c7] bg-[#fffaf0] px-2.5 py-1 text-[8px] font-bold text-[#8c7149]" data-testid="text-forensics-goal-lean">{goalLabel}</span>
+          <span className="rounded-full border border-[#deded3] bg-white px-2.5 py-1 text-[7px] font-bold uppercase text-[#81877e]" data-testid="text-forensics-confidence">{assessment.confidence} confidence</span>
+        </div>
+      </div>
+      <p className="mt-2 text-[8px] leading-5 text-[#66736a]" data-testid="text-forensics-assessment-summary">{assessment.summary}</p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {assessment.factors.map((item) => (
+          <article key={item.area} className="rounded-lg border border-[#e0e5dc] bg-white p-2.5" data-testid={`forensics-factor-${item.area.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
+            <div className="flex items-start justify-between gap-2">
+              <h4 className="text-[8px] font-extrabold text-[#52615e]">{item.area}</h4>
+              <span className="shrink-0 rounded-full bg-[#f3f4ef] px-1.5 py-0.5 text-[7px] font-bold text-[#68756b]">{matchupEdgeLabel(item.edge, homeName, awayName)}</span>
+            </div>
+            <p className="mt-1.5 text-[7px] leading-4 text-[#7b8279]">{item.summary}</p>
+            <p className="mt-1.5 border-t border-[#eff0ea] pt-1.5 text-[7px] leading-4 text-[#627469]"><strong>{homeName}:</strong> {item.homeEvidence}</p>
+            <p className="mt-1 text-[7px] leading-4 text-[#627469]"><strong>{awayName}:</strong> {item.awayEvidence}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function MatchEvidenceDetails({ match }: { match: FootballFairAiTacticalMatchEvidence }) {
+  return (
+    <details className="mt-2 rounded-lg border border-[#e5e6dc] bg-white" data-testid={`details-forensics-evidence-${match.fixtureId}`}>
+      <summary className="cursor-pointer px-2.5 py-2 text-[8px] font-bold text-[#627469] hover:bg-[#f7f8f3]">
+        Open timeline, commentary, full statistics and lineups
+        <span className="mono ml-1.5 text-[7px] font-medium text-[#96998f]">
+          {match.events.length} events · {match.teamStatistics.length} stat sheets · {match.lineups.length} lineups
+        </span>
+      </summary>
+      <div className="space-y-3 border-t border-[#eceee6] p-2.5">
+        <section aria-label={`Timeline for ${match.opponentName}`}>
+          <p className="mb-1.5 text-[7px] font-extrabold uppercase tracking-[.1em] text-[#9b7160]">Timeline & source commentary</p>
+          <p className="mb-1.5 rounded-md bg-[#f5f5ef] px-2 py-1.5 text-[7px] leading-4 text-[#737c73]">{match.timelineSummary}</p>
+          {match.events.length ? (
+            <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border border-[#eceee6] bg-[#fcfbf7] p-2">
+              {match.events.map((event, index) => (
+                <article key={`${event.minute}-${event.type}-${index}`} className="grid grid-cols-[32px_minmax(0,1fr)] gap-2 border-b border-[#efefe9] pb-1 last:border-0" data-testid={`forensics-event-${match.fixtureId}-${index}`}>
+                  <span className="mono pt-0.5 text-right text-[7px] text-[#9b7160]">
+                    {event.minute === null ? '—' : `${event.minute}${event.extraMinute ? `+${event.extraMinute}` : ''}′`}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[7px] font-bold text-[#52615e]">
+                      {[event.teamName, event.type, event.detail, event.player, event.assist ? `Assist: ${event.assist}` : null].filter(Boolean).join(' · ')}
+                    </p>
+                    {event.comments && <p className="mt-0.5 text-[7px] leading-4 text-[#80867d]">{event.comments}</p>}
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : <p className="text-[7px] text-[#96998f]">No event commentary was supplied for this match.</p>}
+        </section>
+        <section aria-label={`Full match statistics for ${match.opponentName}`}>
+          <p className="mb-1.5 text-[7px] font-extrabold uppercase tracking-[.1em] text-[#9b7160]">Full, first-half and second-half statistics</p>
+          {match.teamStatistics.length ? (
+            <div className="grid gap-2 lg:grid-cols-2">
+              {match.teamStatistics.map((team, teamIndex) => (
+                <article key={`${team.teamId ?? team.teamName}-${teamIndex}`} className="max-h-56 overflow-y-auto rounded-md border border-[#eceee6] bg-[#fcfbf7] p-2">
+                  <p className="mb-1.5 text-[7px] font-extrabold text-[#53635a]">{team.teamName}</p>
+                  <div className="divide-y divide-[#eeeeea]">
+                    {team.statistics.map((stat, statIndex) => (
+                      <div key={`${stat.label}-${statIndex}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 py-1 text-[7px]">
+                        <span className="text-[#7a8178]">{stat.label}</span>
+                        <span className="mono text-right text-[#4d6555]">{stat.value ?? '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : <p className="text-[7px] text-[#96998f]">Detailed statistics were not returned.</p>}
+        </section>
+        <section aria-label={`Lineups and player ratings for ${match.opponentName}`}>
+          <p className="mb-1.5 text-[7px] font-extrabold uppercase tracking-[.1em] text-[#9b7160]">Formations, lineups and top player ratings</p>
+          <div className="grid gap-2 lg:grid-cols-2">
+            {match.lineups.map((lineup, index) => (
+              <article key={`${lineup.teamId ?? lineup.teamName}-${index}`} className="rounded-md border border-[#eceee6] bg-[#fcfbf7] p-2">
+                <p className="text-[7px] font-extrabold text-[#53635a]">{lineup.teamName} · {lineup.formation ?? 'formation unavailable'}</p>
+                <p className="mt-0.5 text-[7px] text-[#858982]">Coach: {lineup.coach ?? 'not listed'}</p>
+                <p className="mt-1 text-[7px] leading-4 text-[#737c73]">Starting XI: {lineup.starters.map((player) => `${player.name}${player.position ? ` (${player.position})` : ''}`).join(', ') || 'not returned'}</p>
+              </article>
+            ))}
+          </div>
+          {match.playerHighlights.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {match.playerHighlights.map((player) => (
+                <span key={`${player.name}-${player.position}`} className="rounded-md bg-[#f1f4ee] px-2 py-1 text-[7px] text-[#627469]">
+                  {player.name} · {player.position ?? 'position n/a'} · rating {value(player.averageRating)} · {value(player.goals, 0)} goals · {value(player.assists, 0)} assists
+                </span>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    </details>
+  );
+}
+
 function TeamForensics({ profile }: { profile: FootballFairAiTacticalTeamProfile }) {
   const analyzed = profile.matchesAnalyzed;
   const formationText = profile.observedFormations.length
@@ -178,6 +327,10 @@ function TeamForensics({ profile }: { profile: FootballFairAiTacticalTeamProfile
           <Metric label="Goals for / against" value={`${value(profile.averageGoalsFor)} / ${value(profile.averageGoalsAgainst)}`} />
           <Metric label="BTTS yes" value={sampleCount(profile.bttsMatches, analyzed)} />
           <Metric label="Over 2.5 / 3.5" value={`${sampleCount(profile.over25Matches, analyzed)} / ${sampleCount(profile.over35Matches, analyzed)}`} />
+          <Metric label="Expected goals for / against" value={`${value(profile.averageExpectedGoalsFor)} / ${value(profile.averageExpectedGoalsAgainst)}`} />
+          <Metric label="Big chances for / against" value={`${value(profile.averageBigChancesFor)} / ${value(profile.averageBigChancesAgainst)}`} />
+          <Metric label="Player ratings available" value={`${profile.playerRatingMatchCount}/${analyzed} matches · avg ${value(profile.averagePlayerRating)}`} />
+          <Metric label="Timeline & commentary" value={`${profile.eventTimelineMatches}/${analyzed} timelines · ${profile.commentaryEventCount} comments`} />
         </div>
       </section>
 
@@ -190,7 +343,7 @@ function TeamForensics({ profile }: { profile: FootballFairAiTacticalTeamProfile
               Possession {percentage(profile.averagePossessionPct)} · pass {percentage(profile.averagePassCompletionPct)} · final third {percentage(profile.averageFinalThirdPassCompletionPct)} · long balls {percentage(profile.averageLongBallCompletionPct)}
             </p>
             <p className="mt-1 text-[7px] leading-4 text-[#788078]">
-              {profile.buildupMatchCount}/{profile.matchesExpected} matches have at least one passing indicator. These totals do not show overloads, direction, or confidence.
+              {profile.buildupMatchCount}/{profile.matchesExpected} matches have at least one passing indicator. These totals do not show overloads, passing direction, or tactical confidence.
             </p>
           </div>
           <div className="rounded-lg border border-[#e6e9e1] bg-[#fbfaf6] p-2.5">
@@ -199,7 +352,7 @@ function TeamForensics({ profile }: { profile: FootballFairAiTacticalTeamProfile
               Tackles + interceptions {value(profile.averageDefensiveActions)} · recoveries {value(profile.averageRecoveries)} · shots conceded {value(profile.averageShotsAgainst)}
             </p>
             <p className="mt-1 text-[7px] leading-4 text-[#788078]">
-              Defensive activity and shots allowed are only proxies; press intensity, location, and high-ball recoveries are not measured.
+              Defensive activity and shots allowed are proxies; event coverage {profile.eventTimelineMatches}/{profile.matchesExpected}, complete goal timelines {profile.completeGoalTimelines}/{profile.matchesExpected}. Press height and recovery location are not measured.
             </p>
           </div>
           <div className="rounded-lg border border-[#e6e9e1] bg-[#fbfaf6] p-2.5">
@@ -222,6 +375,33 @@ function TeamForensics({ profile }: { profile: FootballFairAiTacticalTeamProfile
           </div>
         </div>
       </section>
+      <section className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className="rounded-lg border border-[#e6e9e1] bg-[#fbfaf6] p-2.5">
+          <h4 className="text-[8px] font-extrabold text-[#52615e]">Formation results, not formation assumptions</h4>
+          {profile.formationSummaries.length ? (
+            <div className="mt-1.5 space-y-1">
+              {profile.formationSummaries.map((formation) => (
+                <p key={formation.formation} className="mono text-[7px] leading-4 text-[#4d6555]">
+                  {formation.formation} · {formation.matches} matches · {formation.wins}-{formation.draws}-{formation.losses} · {value(formation.pointsPerMatch)} pts/match · GF/GA {value(formation.averageGoalsFor)}/{value(formation.averageGoalsAgainst)}
+                </p>
+              ))}
+            </div>
+          ) : <p className="mt-1.5 text-[7px] text-[#788078]">No formation results were returned.</p>}
+          <p className="mt-1 text-[7px] leading-4 text-[#788078]">These are outcomes recorded under each shape, not proof the shape caused them.</p>
+        </div>
+        <div className="rounded-lg border border-[#e6e9e1] bg-[#fbfaf6] p-2.5">
+          <h4 className="text-[8px] font-extrabold text-[#52615e]">Top-rated players across the sample</h4>
+          {profile.topPlayers.length ? (
+            <div className="mt-1.5 space-y-1">
+              {profile.topPlayers.map((player) => (
+                <p key={`${player.name}-${player.position}`} className="mono text-[7px] leading-4 text-[#4d6555]">
+                  {player.name} · {player.position ?? 'position n/a'} · {player.appearances} appearances · {value(player.averageRating)} rating · {value(player.goals, 0)} goals · {value(player.assists, 0)} assists
+                </p>
+              ))}
+            </div>
+          ) : <p className="mt-1.5 text-[7px] text-[#788078]">Player ratings were not returned for these matches.</p>}
+        </div>
+      </section>
       <section className="mt-3" aria-label={`${profile.teamName} match-by-match evidence`}>
         <p className="text-[7px] font-extrabold uppercase tracking-[.1em] text-[#9b7160]">Match-by-match evidence</p>
         <div className="mt-2 space-y-1.5">
@@ -233,7 +413,7 @@ function TeamForensics({ profile }: { profile: FootballFairAiTacticalTeamProfile
             >
               <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                 <p className="min-w-0 truncate text-[8px] font-bold text-[#52615e]">
-                  {dateLabel(match.matchDate)} · vs {match.opponentName}
+                  {dateLabel(match.matchDate)} · {match.competition} · vs {match.opponentName}
                 </p>
                 <p className="mono text-[9px] font-extrabold text-[#40534b]">
                   {match.goalsFor}–{match.goalsAgainst}
@@ -241,11 +421,13 @@ function TeamForensics({ profile }: { profile: FootballFairAiTacticalTeamProfile
                 </p>
               </div>
               <p className="mono mt-1 text-[7px] leading-4 text-[#788078]">
-                BTTS {match.bothTeamsScored ? 'yes' : 'no'} · {match.totalGoals > 2.5 ? 'Over' : 'Under'} 2.5 · {match.totalGoals > 3.5 ? 'Over' : 'Under'} 3.5
+                HT {match.halfTimeGoalsFor ?? '—'}–{match.halfTimeGoalsAgainst ?? '—'} · BTTS {match.bothTeamsScored ? 'yes' : 'no'} · {match.totalGoals > 2 ? 'Over' : 'Under'} 2.5 · {match.totalGoals > 3 ? 'Over' : 'Under'} 3.5
               </p>
               <p className="mono mt-0.5 text-[7px] leading-4 text-[#788078]">
-                Shots {value(match.shotsFor, 0)}–{value(match.shotsAgainst, 0)} · pass {percentage(match.passCompletionPct)} · final third {percentage(match.finalThirdPassCompletionPct)} · def. actions {value(match.defensiveActions, 0)} · {match.formation ?? 'formation n/a'}
+                xG {value(match.expectedGoalsFor)}–{value(match.expectedGoalsAgainst)} · big chances {value(match.bigChancesFor, 0)}–{value(match.bigChancesAgainst, 0)} · shots {value(match.shotsFor, 0)}–{value(match.shotsAgainst, 0)} · SOT {value(match.shotsOnTargetFor, 0)}–{value(match.shotsOnTargetAgainst, 0)} · {match.formation ?? 'formation n/a'}
               </p>
+              <p className="mt-1 text-[7px] leading-4 text-[#758078]" data-testid={`timeline-summary-${match.fixtureId}`}>{match.timelineSummary}</p>
+              <MatchEvidenceDetails match={match} />
             </article>
           ))}
           {!profile.recentMatches.length && (
@@ -256,7 +438,7 @@ function TeamForensics({ profile }: { profile: FootballFairAiTacticalTeamProfile
         </div>
       </section>
       <p className="mt-3 rounded-lg border border-[#e8dfca] bg-[#faf5e9] px-2.5 py-2 text-[7px] leading-4 text-[#7d6c4d]">
-        These five-match frequencies describe what happened, not why it happened. They are not forecasts; causal explanations require event-level tactical or positional evidence.
+        The outlook is a contextual lean, not a guaranteed result. Event sequence, statistics, shape results, and player ratings are shown as evidence; precise press structure, overloads, and rest-defense positions still require tracking data.
       </p>
     </article>
   );
@@ -298,14 +480,14 @@ export default function FairAiForensicsPanel({
           </div>
         </div>
         <span className="rounded-full border border-[#d7dfd5] bg-white px-2.5 py-1 text-[8px] font-extrabold uppercase tracking-[.08em] text-[#627b67]">
-          No predictions
+          Contextual outlook
         </span>
       </div>
 
       <div className="space-y-3 p-3 sm:p-5">
         <div className="flex max-w-[1000px] items-start gap-2 rounded-lg border border-[#e8dfca] bg-[#faf5e9] px-3 py-2.5 text-[8px] leading-[1.65] text-[#7d6c4d]" role="note">
           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-          <p>This review refreshes up to five completed matches per team and reports observed results and aggregate statistics only. The formula is a framework for checking evidence—not a claim that these inputs prove a tactical cause.</p>
+          <p>This review compares each team&apos;s five latest completed matches, including event timelines, source comments, full/half statistics, formations, lineups and player ratings. The likely-outcome lean is qualitative and evidence-led, not a probability; missing tactical tracking is not invented.</p>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">
@@ -351,6 +533,11 @@ export default function FairAiForensicsPanel({
             <p className="text-[8px] leading-4 text-[#737c73]" data-testid="text-forensics-source">
               Source: {forensics.data.source} {forensics.data.matchupNote}
             </p>
+            <MatchupAssessment
+              assessment={forensics.data.assessment}
+              homeName={forensics.data.home.teamName}
+              awayName={forensics.data.away.teamName}
+            />
             <div className="grid gap-3 xl:grid-cols-2">
               <TeamForensics profile={forensics.data.home} />
               <TeamForensics profile={forensics.data.away} />

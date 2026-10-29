@@ -6,10 +6,15 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { FootballFairAiTacticalMatchEvidenceResult } from './footballFairAiTacticalMatchEvidenceResult';
+import type { FootballFairAiTacticalPlayerHighlight } from './footballFairAiTacticalPlayerHighlight';
+import type { FootballLastFiveEvent } from './footballLastFiveEvent';
+import type { FootballLastFiveLineup } from './footballLastFiveLineup';
+import type { FootballLastFiveTeamStatistics } from './footballLastFiveTeamStatistics';
 
 export interface FootballFairAiTacticalMatchEvidence {
   fixtureId: number;
   matchDate: string;
+  competition: string;
   opponentName: string;
   /** @minimum 0 */
   goalsFor: number;
@@ -19,6 +24,18 @@ export interface FootballFairAiTacticalMatchEvidence {
   bothTeamsScored: boolean;
   /** @minimum 0 */
   totalGoals: number;
+  /** @nullable */
+  halfTimeGoalsFor: number | null;
+  /** @nullable */
+  halfTimeGoalsAgainst: number | null;
+  /** @nullable */
+  expectedGoalsFor: number | null;
+  /** @nullable */
+  expectedGoalsAgainst: number | null;
+  /** @nullable */
+  bigChancesFor: number | null;
+  /** @nullable */
+  bigChancesAgainst: number | null;
   /** @nullable */
   possessionPct: number | null;
   /** @nullable */
@@ -41,4 +58,10 @@ export interface FootballFairAiTacticalMatchEvidence {
   recoveries: number | null;
   /** @nullable */
   formation: string | null;
+  timelineSummary: string;
+  timelineHasFullGoalRecord: boolean;
+  events: FootballLastFiveEvent[];
+  teamStatistics: FootballLastFiveTeamStatistics[];
+  lineups: FootballLastFiveLineup[];
+  playerHighlights: FootballFairAiTacticalPlayerHighlight[];
 }
