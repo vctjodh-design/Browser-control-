@@ -635,7 +635,13 @@ export async function navigateBrowser(
 export async function navigateBrowserJsonDocument(
   sessionId: string,
   url: string,
-): Promise<{ currentUrl: string; document: unknown }> {
+): Promise<{
+  currentUrl: string;
+  document: unknown | null;
+  statusCode: number;
+  contentType: string;
+  retryAfter: string | null;
+}> {
   const session = getSession(sessionId);
   let safeUrl: string;
   try {
@@ -649,13 +655,29 @@ export async function navigateBrowserJsonDocument(
 
   const page = getActivePage(session);
   try {
-    await page.goto(safeUrl, {
+    const response = await page.goto(safeUrl, {
       waitUntil: "domcontentloaded",
       timeout: 12_000,
     });
+    const headers = response?.headers() ?? {};
+    const statusCode = response?.status() ?? 200;
+    const contentType = headers["content-type"] ?? "";
+    const retryAfter = headers["retry-after"] ?? null;
+    let document: unknown | null = null;
+    if (statusCode >= 200 && statusCode < 300) {
+      try {
+        document = await readBrowserJsonDocument(sessionId);
+      } catch {
+        // Let the source-specific policy decide whether a non-JSON response
+        // means a temporary source change or an access-denied challenge.
+      }
+    }
     return {
       currentUrl: page.url(),
-      document: await readBrowserJsonDocument(sessionId),
+      document,
+      statusCode,
+      contentType,
+      retryAfter,
     };
   } catch (error) {
     if (error instanceof BrowserOperationError) throw error;
