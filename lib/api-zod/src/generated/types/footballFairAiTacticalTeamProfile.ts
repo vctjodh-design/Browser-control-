@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { FootballFairAiTacticalAdjustment } from './footballFairAiTacticalAdjustment';
+import type { FootballFairAiTacticalMatchEvidence } from './footballFairAiTacticalMatchEvidence';
 import type { FootballFairAiTacticalResults } from './footballFairAiTacticalResults';
 
 export interface FootballFairAiTacticalTeamProfile {
@@ -52,13 +52,11 @@ export interface FootballFairAiTacticalTeamProfile {
   /** @minimum 0 */
   statisticMatchCount: number;
   /** @minimum 0 */
-  phaseShotMatchCount: number;
-  /** @minimum 0 */
   buildupMatchCount: number;
   /** @minimum 0 */
   defensiveActivityMatchCount: number;
   /** @minimum 0 */
   formationSamples: number;
   observedFormations: string[];
-  adjustment: FootballFairAiTacticalAdjustment;
+  recentMatches: FootballFairAiTacticalMatchEvidence[];
 }

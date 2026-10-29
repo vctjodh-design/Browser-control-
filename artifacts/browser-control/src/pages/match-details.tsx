@@ -18,7 +18,7 @@ import { PerformanceGraphsPanel } from '@/components/performance-graphs-panel';
 import { ModelPredictionGraphs } from '@/components/model-predictions-panel';
 import { LastFivePanel } from '@/components/last-five-panel';
 import FairAiSourceDataPanel from '@/components/fair-ai-source-data-panel';
-import FairAiSimulationPanel from '@/components/fair-ai-simulation-panel';
+import FairAiForensicsPanel from '@/components/fair-ai-forensics-panel';
 import { MatchReplayPanel } from '@/components/match-replay-panel';
 import { MatchCenterPanel } from '@/components/match-center-panel';
 import { LiveActionSourcePanel } from '@/components/live-action-source-panel';
@@ -39,7 +39,7 @@ import {
 type MatchTab = 'table' | 'fair-ai' | 'match-center' | 'live-action' | 'replay' | 'odds' | 'odds-translation' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
 const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'table', label: 'Table', short: '01' },
-  { id: 'fair-ai', label: 'FAIR AI', short: '02' },
+  { id: 'fair-ai', label: 'Forensics', short: '02' },
   { id: 'match-center', label: 'Match centre', short: '12' },
   { id: 'live-action', label: 'Live action', short: '13' },
   { id: 'replay', label: 'Match replay', short: '11' },
@@ -296,19 +296,8 @@ export default function MatchDetailsPage() {
   });
   const matchCenter = matchCenterQuery.data as FootballMatchCenter | undefined;
   const match = matchCenter?.match ?? details?.match;
-  const matchStatus = match?.status.toLowerCase() ?? '';
   const isLive = isLiveMatchStatus(match?.status);
   const isComplete = isCompleteMatchStatus(match?.status);
-  const canRunFairAiSimulation = !/\b(postponed|cancelled|canceled|abandoned|suspended|awarded)\b/.test(matchStatus);
-  const kickoffTime = match ? Date.parse(match.date) : Number.NaN;
-  const isUpcomingPreMatch = Boolean(
-    match &&
-    Number.isFinite(kickoffTime) &&
-    kickoffTime > Date.now() &&
-    !isLive &&
-    !isComplete &&
-    !/\b(postponed|cancelled|canceled|abandoned|suspended|awarded)\b/.test(matchStatus),
-  );
   const tmpQuery = useGetFootballMatchTmp(validId ? fixtureId : 0, {
     query: { enabled: validId && (activeTab === 'tmp' || activeTab === 'insights' || activeTab === 'graphs' || activeTab === 'predictions'), queryKey: ['/api/football/matches', fixtureId, 'tmp'] },
   });
@@ -394,33 +383,24 @@ export default function MatchDetailsPage() {
                 <div hidden={activeTab !== 'fair-ai'}>
                   <section className="space-y-4" aria-labelledby="fair-ai-match-title" data-testid="panel-fair-ai">
                     <div className="rounded-xl border border-[#d9e0d6] bg-[#f0f4ed] px-4 py-3.5">
-                      <p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">Player-level decision analysis</p>
-                      <h2 id="fair-ai-match-title" className="mt-1 text-[14px] font-extrabold text-[#344550]">FAIR AI data for {match.home.name} vs {match.away.name}</h2>
+                      <p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">Post-match review · last five completed games</p>
+                      <h2 id="fair-ai-match-title" className="mt-1 text-[14px] font-extrabold text-[#344550]">Tactical forensics for {match.home.name} vs {match.away.name}</h2>
                       <p className="mt-1 text-[9px] leading-5 text-[#727973]">
-                        This tab shows source coverage from odds, recent team and player records, and matched 365Scores reports. Shot origins may be available for recent completed matches, but continuous player/ball tracking and measured spatial xT/EVA are not.
+                        Review observed results and match statistics from each team&apos;s five latest completed games. The analysis reports patterns only; it does not forecast this fixture or claim unobserved tactical causes.
                       </p>
                     </div>
-                    {!isUpcomingPreMatch && (
-                      <div className="rounded-xl border border-[#e8dfca] bg-[#faf5e9] px-4 py-3.5 text-[9px] leading-5 text-[#7d6c4d]" role="status" data-testid="status-fair-ai-not-upcoming">
-                        {isComplete
-                          ? 'This match is complete. You can run a current-data what-if simulation manually; it is not a prediction or a reconstruction, and recent source data may include this match.'
-                          : isLive
-                            ? 'This match is live. A manual simulation uses the teams’ latest completed records; it is not a live forecast or match replay.'
-                            : 'This fixture is not eligible for automatic pre-match simulation. A manual current-data simulation can still be run.'}
-                      </div>
-                    )}
-                    <FairAiSimulationPanel
+                    <FairAiForensicsPanel
                       key={match.fixtureId}
-                      fixture={{
-                        fixtureId: match.fixtureId,
-                        homeTeamId: match.home.id,
-                        awayTeamId: match.away.id,
-                        homeTeamName: match.home.name,
-                        awayTeamName: match.away.name,
-                        oddsMarkets: details?.oddsMarkets ?? [],
+                      initialHome={{
+                        teamKey: `id:${match.home.id}`,
+                        name: match.home.name,
+                        recentMatchCount: 0,
                       }}
-                      autoRunOnOpen={isUpcomingPreMatch}
-                      allowSimulation={canRunFairAiSimulation}
+                      initialAway={{
+                        teamKey: `id:${match.away.id}`,
+                        name: match.away.name,
+                        recentMatchCount: 0,
+                      }}
                     />
                     <FairAiSourceDataPanel />
                   </section>

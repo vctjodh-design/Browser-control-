@@ -346,6 +346,19 @@ export interface FootballFairAiTeamsResponse {
   teams: FootballFairAiTeam[];
 }
 
+export interface FootballFairAiForensicsInput {
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  homeTeamKey: string;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  awayTeamKey: string;
+}
+
 export interface FootballFairAiOddsScoreline {
   /**
      * @minimum 0
@@ -484,27 +497,49 @@ export interface FootballFairAiTacticalResults {
   losses: number;
 }
 
-export interface FootballFairAiTacticalAdjustment {
-  /**
-     * @minimum 0.9
-     * @maximum 1.1
-     */
-  firstHalfShotScale: number;
-  /**
-     * @minimum 0.9
-     * @maximum 1.1
-     */
-  secondHalfShotScale: number;
-  /**
-     * @minimum 0.9
-     * @maximum 1.1
-     */
-  attackVsDefenseXgScale: number;
-  /**
-     * @minimum -2
-     * @maximum 2
-     */
-  buildupVsDefensePassAdjustmentPct: number;
+export type FootballFairAiTacticalMatchEvidenceResult = typeof FootballFairAiTacticalMatchEvidenceResult[keyof typeof FootballFairAiTacticalMatchEvidenceResult];
+
+
+export const FootballFairAiTacticalMatchEvidenceResult = {
+  win: 'win',
+  draw: 'draw',
+  loss: 'loss',
+} as const;
+
+export interface FootballFairAiTacticalMatchEvidence {
+  fixtureId: number;
+  matchDate: string;
+  opponentName: string;
+  /** @minimum 0 */
+  goalsFor: number;
+  /** @minimum 0 */
+  goalsAgainst: number;
+  result: FootballFairAiTacticalMatchEvidenceResult;
+  bothTeamsScored: boolean;
+  /** @minimum 0 */
+  totalGoals: number;
+  /** @nullable */
+  possessionPct: number | null;
+  /** @nullable */
+  shotsFor: number | null;
+  /** @nullable */
+  shotsAgainst: number | null;
+  /** @nullable */
+  shotsOnTargetFor: number | null;
+  /** @nullable */
+  shotsOnTargetAgainst: number | null;
+  /** @nullable */
+  passCompletionPct: number | null;
+  /** @nullable */
+  longBallCompletionPct: number | null;
+  /** @nullable */
+  finalThirdPassCompletionPct: number | null;
+  /** @nullable */
+  defensiveActions: number | null;
+  /** @nullable */
+  recoveries: number | null;
+  /** @nullable */
+  formation: string | null;
 }
 
 export interface FootballFairAiTacticalTeamProfile {
@@ -551,15 +586,13 @@ export interface FootballFairAiTacticalTeamProfile {
   /** @minimum 0 */
   statisticMatchCount: number;
   /** @minimum 0 */
-  phaseShotMatchCount: number;
-  /** @minimum 0 */
   buildupMatchCount: number;
   /** @minimum 0 */
   defensiveActivityMatchCount: number;
   /** @minimum 0 */
   formationSamples: number;
   observedFormations: string[];
-  adjustment: FootballFairAiTacticalAdjustment;
+  recentMatches: FootballFairAiTacticalMatchEvidence[];
 }
 
 export type FootballFairAiTacticalForensicsOpponentRecentStrengthStatus = typeof FootballFairAiTacticalForensicsOpponentRecentStrengthStatus[keyof typeof FootballFairAiTacticalForensicsOpponentRecentStrengthStatus];
@@ -948,7 +981,6 @@ export interface FootballFairAiSimulation {
   oddsBaseline?: FootballFairAiOddsBaseline;
   forecastBlend: FootballFairAiForecastBlend;
   actionEvidence: FootballFairAiActionEvidence;
-  tacticalForensics: FootballFairAiTacticalForensics;
   matchupAnalysis: FootballFairAiSimulationMatchupAnalysis;
   topScorelines: FootballFairAiSimulationScoreline[];
   playerContributions: FootballFairAiSimulationContribution[];

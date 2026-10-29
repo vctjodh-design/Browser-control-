@@ -1,8 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'wouter';
-import FairAiReadinessTab from '@/components/fair-ai-readiness-tab';
-import FairAiSimulationPanel from '@/components/fair-ai-simulation-panel';
+import FairAiForensicsPanel from '@/components/fair-ai-forensics-panel';
 import ModelPredictionsTab from '@/components/model-predictions-tab';
 import {
   getGetFootballModelTrainingDashboardQueryKey,
@@ -207,9 +206,9 @@ export default function ModelTrainingPage() {
                 requestAnimationFrame(() => fairAiPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
               }}
               className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#cfdccf] bg-[#eaf1e9] px-3 text-[10px] font-extrabold text-[#4e755c] transition hover:bg-[#deeadf]"
-              data-testid="link-fair-ai-simulation"
+              data-testid="link-tactical-forensics"
             >
-              <Sparkles size={12} /> FAIR AI Simulation
+              <ShieldCheck size={12} /> Tactical forensics
             </button>
           </nav>
         </div>
@@ -236,7 +235,7 @@ export default function ModelTrainingPage() {
           {([
             { id: 'training', label: 'Training', icon: Activity },
             { id: 'predictions', label: 'Predictions', icon: BarChart3 },
-            { id: 'fair-ai', label: 'FAIR AI Simulation', icon: Sparkles },
+            { id: 'fair-ai', label: 'Tactical forensics', icon: ShieldCheck },
           ] as const).map((tab) => {
             const Icon = tab.icon;
             const selected = activeTab === tab.id;
@@ -413,14 +412,7 @@ export default function ModelTrainingPage() {
           </div>
         ) : (
           <div id="panel-model-fair-ai" ref={fairAiPanelRef} role="tabpanel" aria-labelledby="tab-model-fair-ai">
-            <FairAiSimulationPanel />
-            <FairAiReadinessTab
-              dashboard={dashboard}
-              loading={dashboardQuery.isLoading}
-              error={dashboardQuery.isError ? errorText(dashboardQuery.error) : null}
-              onRetry={() => void dashboardQuery.refetch()}
-              onViewPredictions={() => setActiveTab('predictions')}
-            />
+            <FairAiForensicsPanel />
           </div>
         )}
       </div>

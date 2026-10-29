@@ -3,6 +3,8 @@ import {
   GetFootballFairAiDataResponse,
   GetFootballFairAiTeamsQueryParams,
   GetFootballFairAiTeamsResponse,
+  RunFootballFairAiForensicsBody,
+  RunFootballFairAiForensicsResponse,
   RunFootballFairAiSimulationBody,
   RunFootballFairAiSimulationResponse,
   StartFootballFairAiDataIngestionResponse,
@@ -10,6 +12,7 @@ import {
 import {
   getFairAiDataSummary,
   getFairAiTeams,
+  runFairAiArchiveForensics,
   runFairAiArchiveSimulation,
   startFairAiDataIngestion,
 } from "../lib/fair-ai-data-store";
@@ -28,6 +31,42 @@ router.get("/football/fair-ai/teams", (req, res): void => {
     return;
   }
   res.json(GetFootballFairAiTeamsResponse.parse(getFairAiTeams(parsed.data.search)));
+});
+
+router.post("/football/fair-ai/forensics", async (req, res): Promise<void> => {
+  const parsed = RunFootballFairAiForensicsBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  if (parsed.data.homeTeamKey === parsed.data.awayTeamKey) {
+    res.status(400).json({ error: "Choose two different teams for the forensic review." });
+    return;
+  }
+  try {
+    const forensics = await runFairAiArchiveForensics(parsed.data);
+    if (!forensics) {
+      res.status(404).json({ error: "One or both teams do not have imported match records." });
+      return;
+    }
+    res.json(RunFootballFairAiForensicsResponse.parse(forensics));
+  } catch (error) {
+    if (error instanceof UpstreamRateLimitError) {
+      res.set("Retry-After", String(error.retryAfterSeconds)).status(429).json({
+        error: `KickoffScore is rate limiting requests. Please wait ${error.retryAfterSeconds} seconds before trying again.`,
+      });
+      return;
+    }
+    req.log.error(
+      { errorName: error instanceof Error ? error.name : "UnknownError" },
+      "Could not refresh FAIR AI forensic data from KickoffScore",
+    );
+    res.status(502).json({
+      error: error instanceof Error
+        ? error.message
+        : "KickoffScore's latest completed match details could not be loaded.",
+    });
+  }
 });
 
 router.post("/football/fair-ai/simulate", async (req, res): Promise<void> => {
