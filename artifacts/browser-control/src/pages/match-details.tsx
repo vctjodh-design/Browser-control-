@@ -386,7 +386,7 @@ export default function MatchDetailsPage() {
                       <p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">Post-match review · last five completed games</p>
                       <h2 id="fair-ai-match-title" className="mt-1 text-[14px] font-extrabold text-[#344550]">Tactical forensics for {match.home.name} vs {match.away.name}</h2>
                       <p className="mt-1 text-[9px] leading-5 text-[#727973]">
-                        Review observed results and match statistics from each team&apos;s five latest completed games. The analysis reports patterns only; it does not forecast this fixture or claim unobserved tactical causes.
+                        Compare each team&apos;s five latest match timelines, commentary, full/half statistics, formations, lineups and player impact, then review a qualitative matchup lean with its evidence and coverage.
                       </p>
                     </div>
                     <FairAiForensicsPanel

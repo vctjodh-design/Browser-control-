@@ -6,12 +6,14 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { FootballFairAiTacticalForensicsOpponentRecentStrengthStatus } from './footballFairAiTacticalForensicsOpponentRecentStrengthStatus';
+import type { FootballFairAiTacticalMatchupAssessment } from './footballFairAiTacticalMatchupAssessment';
 import type { FootballFairAiTacticalTeamProfile } from './footballFairAiTacticalTeamProfile';
 
 export interface FootballFairAiTacticalForensics {
   source: string;
   home: FootballFairAiTacticalTeamProfile;
   away: FootballFairAiTacticalTeamProfile;
+  assessment: FootballFairAiTacticalMatchupAssessment;
   opponentRecentStrengthStatus: FootballFairAiTacticalForensicsOpponentRecentStrengthStatus;
   matchupNote: string;
   limitations: string[];
