@@ -3,6 +3,8 @@ import {
   getGetFootballFairAiTeamsQueryKey,
   useGetFootballFairAiTeams,
   useRunFootballFairAiForensics,
+  useRunFootballFairAiSimulation,
+  type FootballFairAiSimulation,
   type FootballFairAiTacticalTeamProfile,
   type FootballFairAiTacticalMatchEvidence,
   type FootballFairAiTacticalMatchupAssessment,
@@ -152,6 +154,155 @@ function Metric({
       <p className="text-[7px] font-extrabold uppercase tracking-[.08em] text-[#858982]">{label}</p>
       <p className="mono mt-1 text-[9px] font-semibold text-[#4d6555]">{metric}</p>
     </div>
+  );
+}
+
+function simulationShare(value: number) {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function ForensicsPredictionMarkets({
+  result,
+  isPending,
+  isError,
+  error,
+  onRetry,
+  canRetry,
+}: {
+  result: FootballFairAiSimulation | undefined;
+  isPending: boolean;
+  isError: boolean;
+  error: unknown;
+  onRetry: () => void;
+  canRetry: boolean;
+}) {
+  const outcomes = result
+    ? [
+        { label: `${result.home.name} win`, share: result.probabilities.home },
+        { label: 'Draw', share: result.probabilities.draw },
+        { label: `${result.away.name} win`, share: result.probabilities.away },
+      ].sort((left, right) => right.share - left.share)
+    : [];
+  const bttsPick = result
+    ? result.goalMarkets.bttsYesProbability >= result.goalMarkets.bttsNoProbability
+      ? { label: 'Yes', share: result.goalMarkets.bttsYesProbability }
+      : { label: 'No', share: result.goalMarkets.bttsNoProbability }
+    : null;
+  const totalGoals25 = result?.goalMarkets.totals.find((market) => market.line === 2.5);
+  const goalsPick = totalGoals25
+    ? totalGoals25.overProbability >= totalGoals25.underProbability
+      ? { label: 'Over 2.5', share: totalGoals25.overProbability }
+      : { label: 'Under 2.5', share: totalGoals25.underProbability }
+    : null;
+  const scorelines = result
+    ? (result.topScorelines.length
+        ? result.topScorelines
+        : [...result.scorelineDistribution].sort((left, right) => right.probability - left.probability))
+    : [];
+  const correctScore = scorelines[0];
+  const cards = result
+    ? [
+        {
+          title: '1X2',
+          pick: outcomes[0]?.label ?? 'Unavailable',
+          share: outcomes[0]?.share,
+          details: outcomes
+            .map((outcome) => `${outcome.label}: ${simulationShare(outcome.share)}`)
+            .join(' · '),
+        },
+        {
+          title: 'BTTS',
+          pick: bttsPick?.label ?? 'Unavailable',
+          share: bttsPick?.share,
+          details: `Yes ${simulationShare(result.goalMarkets.bttsYesProbability)} · No ${simulationShare(result.goalMarkets.bttsNoProbability)}`,
+        },
+        {
+          title: 'Goals · 2.5',
+          pick: goalsPick?.label ?? 'Unavailable',
+          share: goalsPick?.share,
+          details: totalGoals25
+            ? `Over ${simulationShare(totalGoals25.overProbability)} · Under ${simulationShare(totalGoals25.underProbability)}`
+            : 'The 2.5 goal line was not returned.',
+        },
+        {
+          title: 'Correct score',
+          pick: correctScore
+            ? `${correctScore.homeGoals}–${correctScore.awayGoals}`
+            : 'Unavailable',
+          share: correctScore?.probability,
+          details: correctScore
+            ? `${result.home.name} ${correctScore.homeGoals} · ${result.away.name} ${correctScore.awayGoals}`
+            : 'No scoreline was returned.',
+        },
+      ]
+    : [];
+
+  return (
+    <section
+      className="rounded-xl border border-[#d5dfd2] bg-white p-3.5 sm:p-4"
+      aria-labelledby="forensics-predictions-title"
+      data-testid="section-forensics-predictions"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="mono text-[7px] uppercase tracking-[.13em] text-[#9b7160]">Separate FAIR AI simulation</p>
+          <h3 id="forensics-predictions-title" className="mt-1 text-[11px] font-extrabold text-[#40534b]">
+            Match predictions
+          </h3>
+        </div>
+        {result && (
+          <span className="rounded-full border border-[#deded3] bg-[#f7f7f1] px-2.5 py-1 text-[7px] font-bold text-[#68756b]">
+            {result.iterations.toLocaleString()} runs
+          </span>
+        )}
+      </div>
+
+      {isPending ? (
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4" role="status" aria-label="Generating match predictions">
+          {[0, 1, 2, 3].map((item) => (
+            <div key={item} className="h-20 animate-pulse rounded-lg bg-[#f1f3ed]" />
+          ))}
+        </div>
+      ) : isError ? (
+        <div className="mt-3 rounded-lg border border-[#e3c3b6] bg-[#fff6f0] p-3 text-[8px] leading-5 text-[#784b3e]" role="alert" data-testid="status-forensics-predictions-error">
+          <p>Predictions could not be generated. {errorMessage(error)}</p>
+          {canRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-md bg-[#253746] px-3 text-[8px] font-extrabold text-[#f8f2e7] transition hover:bg-[#344b5a]"
+              data-testid="button-retry-forensics-predictions"
+            >
+              <RefreshCw size={11} /> Retry predictions
+            </button>
+          )}
+        </div>
+      ) : result ? (
+        <>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {cards.map((card) => (
+              <article
+                key={card.title}
+                className="rounded-lg border border-[#e0e5dc] bg-[#f8faf5] p-2.5"
+                data-testid={`card-forensics-prediction-${card.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+              >
+                <p className="text-[7px] font-extrabold uppercase tracking-[.08em] text-[#858982]">{card.title}</p>
+                <p className="mt-1.5 text-[11px] font-extrabold text-[#456b58]">{card.pick}</p>
+                {card.share !== undefined && (
+                  <p className="mono mt-0.5 text-[8px] font-bold text-[#627469]">{simulationShare(card.share)} of runs</p>
+                )}
+                <p className="mt-1.5 text-[7px] leading-4 text-[#7b8279]">{card.details}</p>
+              </article>
+            ))}
+          </div>
+          <p className="mt-2 text-[7px] leading-4 text-[#8a785d]" data-testid="text-forensics-prediction-limit">
+            These are picks from a separate {result.iterations.toLocaleString()}-run simulation. Percentages show simulation shares, not calibrated real-world probabilities or guarantees.
+          </p>
+        </>
+      ) : (
+        <p className="mt-3 text-[8px] text-[#858982]" role="status">Predictions will appear after the analysis finishes.</p>
+      )}
+    </section>
   );
 }
 
@@ -456,6 +607,8 @@ export default function FairAiForensicsPanel({
   const [home, setHome] = useState<TeamChoice | null>(initialHome ?? null);
   const [away, setAway] = useState<TeamChoice | null>(initialAway ?? null);
   const forensics = useRunFootballFairAiForensics();
+  const predictions = useRunFootballFairAiSimulation();
+  const [predictionPair, setPredictionPair] = useState<string | null>(null);
 
   useEffect(() => {
     setHome(initialHome ?? null);
@@ -463,7 +616,19 @@ export default function FairAiForensicsPanel({
   }, [initialHome?.teamKey, initialHome?.name, initialAway?.teamKey, initialAway?.name]);
 
   const canAnalyze = !!home && !!away &&
-    home.teamKey !== away.teamKey && !forensics.isPending;
+    home.teamKey !== away.teamKey && !forensics.isPending && !predictions.isPending;
+  const selectedPair = home && away ? `${home.teamKey}::${away.teamKey}` : null;
+  const predictionsMatchSelection = Boolean(selectedPair && selectedPair === predictionPair);
+
+  const runPredictions = (homeTeamKey: string, awayTeamKey: string) => {
+    predictions.mutate({
+      data: {
+        homeTeamKey,
+        awayTeamKey,
+        iterations: 10_000,
+      },
+    });
+  };
 
   return (
     <section
@@ -487,7 +652,7 @@ export default function FairAiForensicsPanel({
       <div className="space-y-3 p-3 sm:p-5">
         <div className="flex max-w-[1000px] items-start gap-2 rounded-lg border border-[#e8dfca] bg-[#faf5e9] px-3 py-2.5 text-[8px] leading-[1.65] text-[#7d6c4d]" role="note">
           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-          <p>This review compares each team&apos;s five latest completed matches, including event timelines, source comments, full/half statistics, formations, lineups and player ratings. The likely-outcome lean is qualitative and evidence-led, not a probability; missing tactical tracking is not invented.</p>
+          <p>This review compares each team&apos;s five latest completed matches, including event timelines, source comments, full/half statistics, formations, lineups and player ratings. A separate FAIR AI simulation then produces market picks; its percentages are simulation shares, not calibrated real-world probabilities.</p>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">
@@ -500,8 +665,17 @@ export default function FairAiForensicsPanel({
             type="button"
             onClick={() => {
               if (!canAnalyze || !home || !away) return;
+              const homeTeamKey = home.teamKey;
+              const awayTeamKey = away.teamKey;
+              setPredictionPair(null);
+              predictions.reset();
               forensics.mutate({
-                data: { homeTeamKey: home.teamKey, awayTeamKey: away.teamKey },
+                data: { homeTeamKey, awayTeamKey },
+              }, {
+                onSuccess: () => {
+                  setPredictionPair(`${homeTeamKey}::${awayTeamKey}`);
+                  runPredictions(homeTeamKey, awayTeamKey);
+                },
               });
             }}
             disabled={!canAnalyze}
@@ -510,6 +684,8 @@ export default function FairAiForensicsPanel({
           >
             {forensics.isPending
               ? <><RefreshCw size={12} className="animate-spin" /> Refreshing last five…</>
+              : predictions.isPending
+                ? <><RefreshCw size={12} className="animate-spin" /> Generating predictions…</>
               : <><ShieldAlert size={12} /> {forensics.data ? 'Refresh forensic review' : 'Analyze last five'}</>}
           </button>
           {home && away && home.teamKey === away.teamKey && (
@@ -533,6 +709,18 @@ export default function FairAiForensicsPanel({
             <p className="text-[8px] leading-4 text-[#737c73]" data-testid="text-forensics-source">
               Source: {forensics.data.source} {forensics.data.matchupNote}
             </p>
+            {predictionsMatchSelection && (
+              <ForensicsPredictionMarkets
+                result={predictions.data}
+                isPending={predictions.isPending}
+                isError={predictions.isError}
+                error={predictions.error}
+                canRetry={Boolean(home && away && !predictions.isPending)}
+                onRetry={() => {
+                  if (home && away) runPredictions(home.teamKey, away.teamKey);
+                }}
+              />
+            )}
             <MatchupAssessment
               assessment={forensics.data.assessment}
               homeName={forensics.data.home.teamName}

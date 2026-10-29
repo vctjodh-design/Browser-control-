@@ -7,6 +7,12 @@ The user is building an interaction-first football simulator: start from the odd
 
 The five-match Tactical Root-Cause review is separate from simulation. Preserve match-by-match events/comments, full and half statistics, formations, lineups, and player evidence. It may give a qualitative, evidence-backed matchup and goal-environment lean, but no calibrated probabilities; never feed forensic summaries into simulation or claim unobserved tactical causes.
 
+The Forensics tab should also show explicit 1X2, BTTS, Over/Under 2.5, and top correct-score picks from a separate FAIR AI simulation after analysis succeeds. Label percentages as uncalibrated shares of simulation runs, not real-world probabilities.
+
+**Why:** The user asked for concrete market predictions instead of showing only an evidence edge or lean.
+
+**How to apply:** Run the existing simulator for the selected teams after forensic retrieval succeeds. Keep forensic evidence separate from simulation inputs, show the requested four markets, and retain the calibration warning.
+
 The simulation must fetch the selected teams' latest completed match records directly from KickoffScore before each run. If fresh source data is unavailable, stop rather than silently using stale archive records.
 
 The current pre-match simulation may use standings only when both teams have snapshots with valid, non-future observation timestamps no more than 30 days old. Normalize rank, points per game, goal difference, and recent league form into small bounded heuristic adjustments; do not use these snapshots in historical training. The source observation time is not guaranteed to be the table's effective date.
