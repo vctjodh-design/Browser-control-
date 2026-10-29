@@ -14,3 +14,9 @@ Keep 365Scores requests serialized and paced, reuse cached results, honor `Retry
 **Why:** The user wants 365Scores collection to reduce repeat traffic and avoid rate limits, blocks, or IP bans.
 
 **How to apply:** Route all 365Scores lookup paths through the shared request policy. Its cooldown is process-local, so use shared coordination if the API later runs multiple instances.
+
+For FAIR AI Forensics, use a date/team/score-verified 365Scores replay to supplement incomplete KickoffScore match details. Preserve KickoffScore values when present, and report fields that remain unavailable after fallback.
+
+**Why:** The user asked for Forensics to try 365Scores when KickoffScore lacks full match details.
+
+**How to apply:** Keep 365Scores fallback on the existing paced replay path. Merge only missing or more complete evidence; never treat unavailable source data as observed.
