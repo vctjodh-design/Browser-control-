@@ -391,6 +391,7 @@ export default function MatchDetailsPage() {
                     </div>
                     <FairAiForensicsPanel
                       key={match.fixtureId}
+                      excludeFixtureId={match.fixtureId}
                       initialHome={{
                         teamKey: `id:${match.home.id}`,
                         name: match.home.name,

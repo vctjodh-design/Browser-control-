@@ -17,4 +17,6 @@ export interface FootballFairAiForensicsInput {
      * @maxLength 160
      */
   awayTeamKey: string;
+  /** @minimum 1 */
+  excludeFixtureId?: number;
 }
