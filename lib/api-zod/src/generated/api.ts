@@ -350,9 +350,11 @@ export const runFootballFairAiForensicsBodyAwayTeamKeyMax = 160;
 
 
 
+
 export const RunFootballFairAiForensicsBody = zod.object({
   "homeTeamKey": zod.string().min(1).max(runFootballFairAiForensicsBodyHomeTeamKeyMax),
-  "awayTeamKey": zod.string().min(1).max(runFootballFairAiForensicsBodyAwayTeamKeyMax)
+  "awayTeamKey": zod.string().min(1).max(runFootballFairAiForensicsBodyAwayTeamKeyMax),
+  "excludeFixtureId": zod.number().int().min(1).optional()
 })
 
 export const runFootballFairAiForensicsResponseHomeMatchesExpectedMin = 0;

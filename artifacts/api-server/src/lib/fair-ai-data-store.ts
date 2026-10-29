@@ -3,6 +3,7 @@ import type {
   FootballFairAiActionEvidence,
   FootballFairAiActionPlayerEvidence,
   FootballFairAiActionTeamEvidence,
+  FootballFairAiForensicsInput,
   FootballFairAiSimulation,
   FootballFairAiSimulationInput,
   FootballFairAiSimulationPlayer,
@@ -1009,7 +1010,10 @@ function mergeForensicsFallback(
   };
 }
 
-async function refreshFairAiTeamsFromSource(teamKeys: string[]): Promise<{
+async function refreshFairAiTeamsFromSource(
+  teamKeys: string[],
+  options: { excludeFixtureIds?: readonly number[] } = {},
+): Promise<{
   sourceTeamIds: number[];
   recentFixtureIdsByTeam: Record<number, number[]>;
   snapshotsByFixture: Map<
@@ -1027,7 +1031,11 @@ async function refreshFairAiTeamsFromSource(teamKeys: string[]): Promise<{
     }
     return sourceTeamId;
   });
-  const refreshed = await getFreshKickoffScoreFairAiSnapshots(selectedTeams, 5);
+  const refreshed = await getFreshKickoffScoreFairAiSnapshots(
+    selectedTeams,
+    5,
+    options.excludeFixtureIds,
+  );
   for (const snapshot of refreshed.snapshots) {
     if (snapshot?.source === "KickoffScore") {
       saveFreshFairAiSourceSnapshot(snapshot.fixtureId, snapshot.details);
@@ -2100,7 +2108,7 @@ export async function runFairAiArchiveSimulation(
 }
 
 export async function runFairAiArchiveForensics(
-  input: Pick<FootballFairAiSimulationInput, "homeTeamKey" | "awayTeamKey">,
+  input: FootballFairAiForensicsInput,
 ): Promise<FootballFairAiTacticalForensics | null> {
   const homeBase = fairAiTeamRows("", input.homeTeamKey)[0];
   const awayBase = fairAiTeamRows("", input.awayTeamKey)[0];
@@ -2109,7 +2117,10 @@ export async function runFairAiArchiveForensics(
   const refreshed = await refreshFairAiTeamsFromSource([
     input.homeTeamKey,
     input.awayTeamKey,
-  ]);
+  ], {
+    excludeFixtureIds:
+      input.excludeFixtureId === undefined ? [] : [input.excludeFixtureId],
+  });
   let fallbackAttempts = 0;
   let fallbackDataReturned = 0;
   let fallbackFailures = 0;

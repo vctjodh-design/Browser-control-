@@ -21,6 +21,7 @@ import {
   oddsCategory,
   KickoffScoreMatchNotFoundError,
 } from "./kickoffscore-match-details";
+import { excludeFixtureRows } from "./kickoffscore-fixture-selection";
 import { UpstreamRateLimitError } from "./upstream-rate-limit";
 
 const KICKOFFSCORE_SITE_ORIGIN = "https://kickoffscore.com";
@@ -530,6 +531,7 @@ function historicalFixtureFallbackSnapshot(
 export async function getFreshKickoffScoreFairAiSnapshots(
   teamIds: number[],
   matchesPerTeam = 5,
+  excludedFixtureIds: readonly number[] = [],
 ): Promise<{
   snapshots: ReturnType<typeof parseFairAiSourceSnapshot>[];
   refreshedTeams: number[];
@@ -549,7 +551,10 @@ export async function getFreshKickoffScoreFairAiSnapshots(
       last: "100",
       summary: "true",
     });
-    const matches = fixtureRows(payload)
+    const matches = excludeFixtureRows(
+      fixtureRows(payload),
+      excludedFixtureIds,
+    )
       .filter(isCompletedFixture)
       .flatMap((value) => {
         const match = parseHistoricalFixture(value);

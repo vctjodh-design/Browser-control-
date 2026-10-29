@@ -17,6 +17,7 @@ type TeamChoice = Pick<FootballFairAiTeam, 'teamKey' | 'name' | 'recentMatchCoun
 type FairAiForensicsPanelProps = {
   initialHome?: TeamChoice;
   initialAway?: TeamChoice;
+  excludeFixtureId?: number;
 };
 
 function TeamSelector({
@@ -501,6 +502,7 @@ function errorMessage(error: unknown) {
 export default function FairAiForensicsPanel({
   initialHome,
   initialAway,
+  excludeFixtureId,
 }: FairAiForensicsPanelProps) {
   const [home, setHome] = useState<TeamChoice | null>(initialHome ?? null);
   const [away, setAway] = useState<TeamChoice | null>(initialAway ?? null);
@@ -539,7 +541,10 @@ export default function FairAiForensicsPanel({
       <div className="space-y-3 p-3 sm:p-5">
         <div className="flex max-w-[1000px] items-start gap-2 rounded-lg border border-[#e8dfca] bg-[#faf5e9] px-3 py-2.5 text-[8px] leading-[1.65] text-[#7d6c4d]" role="note">
           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-          <p>This review compares each team&apos;s five latest completed matches, including event timelines, source comments, full/half statistics, formations, lineups and player ratings. Market picks below are derived from those samples and the Forensics assessment; they are not calibrated forecasts.</p>
+          <p>
+            This review compares each team&apos;s five latest eligible completed matches, including event timelines, source comments, full/half statistics, formations, lineups and player ratings. Market picks below are derived from those samples and the Forensics assessment; they are not calibrated forecasts.
+            {excludeFixtureId !== undefined && " The fixture being viewed is excluded from both samples, even if it has finished."}
+          </p>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">
@@ -556,7 +561,11 @@ export default function FairAiForensicsPanel({
               const awayTeamKey = away.teamKey;
               setAnalysisPair(null);
               forensics.mutate({
-                data: { homeTeamKey, awayTeamKey },
+                data: {
+                  homeTeamKey,
+                  awayTeamKey,
+                  ...(excludeFixtureId === undefined ? {} : { excludeFixtureId }),
+                },
               }, {
                 onSuccess: () => setAnalysisPair(`${homeTeamKey}::${awayTeamKey}`),
               });
