@@ -189,17 +189,30 @@ function ForensicsPredictionMarkets({
           >
             <p className="text-[7px] font-extrabold uppercase tracking-[.08em] text-[#858982]">{card.title}</p>
             <p className="mt-1.5 text-[11px] font-extrabold text-[#456b58]">{card.pick}</p>
+            <p
+              className={`mt-1 inline-flex rounded-full border px-1.5 py-0.5 text-[7px] font-extrabold ${
+                card.confidence === 'High'
+                  ? 'border-[#c8d8c7] bg-[#edf5eb] text-[#47734e]'
+                  : card.confidence === 'Moderate'
+                    ? 'border-[#e2d7b9] bg-[#fff9e9] text-[#806b36]'
+                    : 'border-[#e2d4ce] bg-[#fff5f1] text-[#8a6557]'
+              }`}
+              data-testid={`text-forensics-pick-confidence-${card.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+            >
+              Confidence: {card.confidence}
+            </p>
             {card.historicalFrequency !== undefined && (
               <p className="mono mt-0.5 text-[8px] font-bold text-[#627469]">
                 {(card.historicalFrequency * 100).toFixed(1)}% historical sample rate
               </p>
             )}
             <p className="mt-1.5 text-[7px] leading-4 text-[#7b8279]">{card.details}</p>
+            <p className="mt-1 text-[7px] leading-4 text-[#627469]">{card.confidenceReason}</p>
           </article>
         ))}
       </div>
       <p className="mt-2 text-[7px] leading-4 text-[#8a785d]" data-testid="text-forensics-prediction-limit">
-        Picks use only the refreshed forensic match samples and the Forensics assessment. Historical frequencies are small-sample descriptions, not calibrated forecasts or real-world probabilities.
+        Confidence reflects sample coverage and agreement, not a calibrated probability or proven accuracy rate. Correct-score confidence stays low because it is inferred from rounded averages.
       </p>
     </section>
   );

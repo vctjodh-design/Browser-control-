@@ -9,6 +9,12 @@ The five-match Tactical Root-Cause review is separate from simulation. Preserve 
 
 The Forensics tab shows 1X2, BTTS, Over/Under 2.5, and a sample-based correct-score pick. Derive these directly from the two teams' forensic match samples and the Forensics assessment; do not call or depend on the separate FAIR AI simulator. Label sample frequencies as historical small-sample descriptions, not calibrated forecasts or real-world probabilities.
 
+Show a separate confidence label for each Forensics pick. Base it on the available sample coverage and how consistently the sampled outcomes support the pick; label it as evidence confidence, not a probability or proven accuracy estimate. Keep exact-score confidence low when it is inferred only from rounded average goals.
+
+**Why:** The user wants each prediction to communicate how much confidence the evidence supports.
+
+**How to apply:** Show the confidence tier and the sample count/reason beside each market pick, and state that the tier is not calibrated.
+
 When Forensics is opened from a fixture, exclude that fixture ID from both teams' recent-five samples even if it is completed. Filter it out before requesting individual match details, then use the next older eligible completed match to fill the five-match sample.
 
 **Why:** The user explicitly says the match being analyzed must not be among its own five forensic examples.
