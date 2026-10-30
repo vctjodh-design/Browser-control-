@@ -157,13 +157,43 @@ test('xGOT and team-attributed red cards affect the live state indices', () => {
   assert.ok(withRedCard.home.resistanceDecay > baseline.home.resistanceDecay);
 });
 
-test('does not produce a scoreline forecast before any usable shot signals arrive', () => {
+test('forecasts a live 0–0 at 10 minutes instead of freezing at the current score', () => {
   const result = analyzeLiveMatch({
-    liveAction: liveAction({ shotEvents: [] }),
+    liveAction: liveAction({
+      status: 'First Half',
+      elapsedMinute: 10,
+      homeScore: 0,
+      awayScore: 0,
+      shotEvents: [],
+    }),
+    matchCenter: matchCenter({
+      match: {
+        fixtureId: 123,
+        home: { id: 1, name: 'Harbor FC', score: 0 },
+        away: { id: 2, name: 'Valley United', score: 0 },
+        status: 'First Half',
+      },
+      elapsedMinute: 10,
+    }),
+  });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.home.score, 0);
+  assert.equal(result.away.score, 0);
+  assert.ok(result.simulation.topScorelines[0].homeScore + result.simulation.topScorelines[0].awayScore > 0);
+  assert.ok(result.confidence.reasons.some((reason) => /general scoring baseline/i.test(reason)));
+});
+
+test('sums only reported shot xG values instead of spreading them across missing shots', () => {
+  const result = analyzeLiveMatch({
+    liveAction: liveAction({
+      shotEvents: [
+        { minute: '62', teamSide: 'home', playerName: null, outcome: 'Saved', bodyPart: null, xg: '0.3', xgot: null, x: null, y: null, sourceOrder: 1 },
+        { minute: '67', teamSide: 'home', playerName: null, outcome: 'Missed', bodyPart: null, xg: null, xgot: null, x: null, y: null, sourceOrder: 2 },
+      ],
+    }),
     matchCenter: matchCenter(),
   });
-  assert.equal(result.status, 'insufficient-data');
-  assert.equal(result.simulation, null);
+  assert.equal(result.home.xg, 0.3);
 });
 
 test('rejects a 365Scores source whose teams do not match the fixture', () => {

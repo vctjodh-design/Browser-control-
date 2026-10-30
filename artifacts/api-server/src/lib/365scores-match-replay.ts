@@ -1,3 +1,4 @@
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import type {
   FootballLiveAction,
   FootballMatchReplayFormationPlayer,
@@ -25,11 +26,13 @@ const PAGE_LOAD_SETTLE_MS = 3_500;
 const REPLAY_CACHE_TTL_MS = 10 * 60 * 1_000;
 const LIVE_SHOT_FEED_CACHE_TTL_MS = 55_000;
 const REPLAY_SOURCE_TIMEOUT_MS = 45_000;
+const LIVE_FIXTURE_DATE_WINDOW_MS = 36 * 60 * 60 * 1_000;
 const MAX_REPLAY_CACHE_ENTRIES = 60;
 const MIN_365SCORES_REQUEST_INTERVAL_MS = 1_500;
 const BLOCKED_SOURCE_COOLDOWN_MS = 30 * 60 * 1_000;
 const SERVER_ERROR_COOLDOWN_MS = 5 * 60 * 1_000;
 const MAX_RATE_LIMIT_BACKOFF_MS = 15 * 60 * 1_000;
+const SOURCE_PAUSE_FILE = "/tmp/browser-control-365scores-source-pause.json";
 
 type BrowserSnapshot = Awaited<ReturnType<typeof getBrowserState>>;
 type SectionKey = FootballMatchReplaySection["key"];
@@ -193,7 +196,40 @@ type SourcePause = {
   kind: "rate-limited" | "blocked";
 };
 
-let sourcePause: SourcePause | null = null;
+function readPersistedSourcePause(): SourcePause | null {
+  try {
+    const value = JSON.parse(readFileSync(SOURCE_PAUSE_FILE, "utf8")) as {
+      until?: unknown;
+      kind?: unknown;
+    };
+    return typeof value.until === "number" &&
+      value.until > Date.now() &&
+      (value.kind === "rate-limited" || value.kind === "blocked")
+      ? { until: value.until, kind: value.kind }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistSourcePause(): void {
+  if (!sourcePause) return;
+  try {
+    writeFileSync(SOURCE_PAUSE_FILE, JSON.stringify(sourcePause), "utf8");
+  } catch {
+    // Keep the in-process pause even if the temporary state file is unavailable.
+  }
+}
+
+function clearPersistedSourcePause(): void {
+  try {
+    unlinkSync(SOURCE_PAUSE_FILE);
+  } catch {
+    // The file may not exist if this process has not persisted a pause yet.
+  }
+}
+
+let sourcePause: SourcePause | null = readPersistedSourcePause();
 let consecutiveRateLimits = 0;
 let nextSourceRequestAt = 0;
 let sourceRequestTail: Promise<void> = Promise.resolve();
@@ -268,6 +304,7 @@ function retryAfterMilliseconds(value: string | null): number | null {
 function activeSourcePauseError(): Error | null {
   if (!sourcePause || sourcePause.until <= Date.now()) {
     sourcePause = null;
+    clearPersistedSourcePause();
     return null;
   }
   const seconds = Math.max(
@@ -321,6 +358,7 @@ function pauseAfterRateLimit(retryAfter: string | null): number {
     retryAfterMilliseconds(retryAfter) ?? fallbackDelay,
   );
   sourcePause = { until: Date.now() + delay, kind: "rate-limited" };
+  persistSourcePause();
   return delay;
 }
 
@@ -334,6 +372,7 @@ function pauseAfterSourceBlock(
       Math.max(1_000, retryAfterMilliseconds(retryAfter) ?? fallbackDelay),
     kind: "blocked",
   };
+  persistSourcePause();
 }
 
 async function request365ScoresDocument(
@@ -412,6 +451,8 @@ async function request365ScoresDocument(
       );
     }
     consecutiveRateLimits = 0;
+    sourcePause = null;
+    clearPersistedSourcePause();
     return response;
   });
 }
@@ -458,6 +499,15 @@ function containsTeam(source: string, name: string): boolean {
 
 function matchDate(value: Date): string {
   return value.toISOString().slice(0, 10);
+}
+
+function neighboringMatchDates(date: string): string[] {
+  const day = new Date(`${date}T00:00:00.000Z`);
+  return [-1, 1].map((offset) => {
+    const neighboring = new Date(day);
+    neighboring.setUTCDate(neighboring.getUTCDate() + offset);
+    return neighboring.toISOString().slice(0, 10);
+  });
 }
 
 function isAllowedMatchUrl(value: string): boolean {
@@ -1354,10 +1404,14 @@ function gameMatchesFixture(
     return false;
   }
   const sourceDate = new Date(gameDate);
-  if (
-    !Number.isFinite(sourceDate.getTime()) ||
-    matchDate(sourceDate) !== matchDate(fixtureDate)
-  ) {
+  if (!Number.isFinite(sourceDate.getTime())) {
+    return false;
+  }
+  const dateMatches = requireCurrentScore
+    ? matchDate(sourceDate) === matchDate(fixtureDate)
+    : Math.abs(sourceDate.getTime() - fixtureDate.getTime()) <=
+      LIVE_FIXTURE_DATE_WINDOW_MS;
+  if (!dateMatches) {
     return false;
   }
   const homeName =
@@ -1411,26 +1465,32 @@ async function load365ScoresMatchReplay(
     const isLiveFixture = isLiveMatchStatus(details.match.status);
 
     if (isLiveFixture) {
-      const liveListUrl = liveGamesListApiUrl(date);
-      const liveListPayload = sourceObject(
-        await readSourceJson(sessionId, liveListUrl.toString()),
-      );
-      const liveGames = sourceEntries(
-        liveListPayload?.games as
-          | SourceGame[]
-          | Record<string, SourceGame>
-          | undefined,
-      );
-      const liveMatches = liveGames.filter((candidate) =>
-        gameMatchesFixture(candidate, details, fixtureDate, false),
-      );
-      if (liveMatches.length > 1) {
-        throw new MatchReplayNotFoundError(
-          "More than one live 365Scores match matched these fixture teams and date. The replay was stopped to avoid attaching the wrong match.",
+      const liveSearchDates = [date, ...neighboringMatchDates(date)];
+      for (const liveDate of liveSearchDates) {
+        const liveListUrl = liveGamesListApiUrl(liveDate);
+        const liveListPayload = sourceObject(
+          await readSourceJson(sessionId, liveListUrl.toString()),
         );
+        const liveGames = sourceEntries(
+          liveListPayload?.games as
+            | SourceGame[]
+            | Record<string, SourceGame>
+            | undefined,
+        );
+        const liveMatches = liveGames.filter((candidate) =>
+          gameMatchesFixture(candidate, details, fixtureDate, false),
+        );
+        if (liveMatches.length > 1) {
+          throw new MatchReplayNotFoundError(
+            "More than one live 365Scores match matched these fixture teams and kickoff time. The replay was stopped to avoid attaching the wrong match.",
+          );
+        }
+        if (liveMatches.length === 1) {
+          matchedGame = liveMatches[0] ?? null;
+          sourceDateListUrl = liveListUrl.toString();
+          break;
+        }
       }
-      matchedGame = liveMatches[0] ?? null;
-      if (matchedGame) sourceDateListUrl = liveListUrl.toString();
     }
 
     if (!matchedGame && competitionId !== null) {

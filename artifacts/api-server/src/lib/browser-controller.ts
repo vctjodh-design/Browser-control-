@@ -655,30 +655,38 @@ export async function navigateBrowserJsonDocument(
 
   const page = getActivePage(session);
   try {
-    const response = await page.goto(safeUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: 12_000,
+    await page.setExtraHTTPHeaders({
+      accept: "application/json, text/plain, */*",
+      referer: new URL(safeUrl).origin + "/",
     });
-    const headers = response?.headers() ?? {};
-    const statusCode = response?.status() ?? 200;
-    const contentType = headers["content-type"] ?? "";
-    const retryAfter = headers["retry-after"] ?? null;
-    let document: unknown | null = null;
-    if (statusCode >= 200 && statusCode < 300) {
-      try {
-        document = await readBrowserJsonDocument(sessionId);
-      } catch {
-        // Let the source-specific policy decide whether a non-JSON response
-        // means a temporary source change or an access-denied challenge.
+    try {
+      const response = await page.goto(safeUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 12_000,
+      });
+      const headers = response?.headers() ?? {};
+      const statusCode = response?.status() ?? 200;
+      const contentType = headers["content-type"] ?? "";
+      const retryAfter = headers["retry-after"] ?? null;
+      let document: unknown | null = null;
+      if (statusCode >= 200 && statusCode < 300) {
+        try {
+          document = await readBrowserJsonDocument(sessionId);
+        } catch {
+          // Let the source-specific policy decide whether a non-JSON response
+          // means a temporary source change or an access-denied challenge.
+        }
       }
+      return {
+        currentUrl: page.url(),
+        document,
+        statusCode,
+        contentType,
+        retryAfter,
+      };
+    } finally {
+      await page.setExtraHTTPHeaders({});
     }
-    return {
-      currentUrl: page.url(),
-      document,
-      statusCode,
-      contentType,
-      retryAfter,
-    };
   } catch (error) {
     if (error instanceof BrowserOperationError) throw error;
     logger.warn(
