@@ -519,7 +519,7 @@ export function buildFairAiTacticalMatchupAssessment(
     resultLean,
     confidence,
     scoringLean,
-    summary: `${outcomeText}. ${scoringText}. This is a qualitative five-match comparison across form, chance creation, build-up indicators, defending, formation results, game-state events, and player ratings; it is not a probability.`,
+    summary: `${outcomeText}. ${scoringText}. This is a qualitative comparison across up to ten recent matches per team, covering form, chance creation, build-up indicators, defending, formation results, game-state events, and player ratings; it is not a probability.`,
     factors,
   };
 }

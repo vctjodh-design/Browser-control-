@@ -5,7 +5,7 @@ description: The user's interaction-first target for football simulation and the
 
 The user is building an interaction-first football simulator: start from the odds-translation scoreline and goals baseline, then explain how player roles, tactical systems, opponent strength, chance quality, and score phase support or contradict it. Keep the market baseline visible beside the FAIR AI adjustment and identify the evidence and coverage behind changes. Do not claim an exact proprietary FAIR AI replica unless that is verified. The current match-result models are not the FAIR reinforcement-learning simulator.
 
-The five-match Tactical Root-Cause review is separate from simulation. Preserve match-by-match events/comments, full and half statistics, formations, lineups, and player evidence. It may give a qualitative, evidence-backed matchup and goal-environment lean, but no calibrated probabilities; never feed forensic summaries into simulation or claim unobserved tactical causes.
+The ten-match Tactical Root-Cause review is separate from simulation. Preserve match-by-match events/comments, full and half statistics, formations, lineups, and player evidence. It may give a qualitative, evidence-backed matchup and goal-environment lean, but no calibrated probabilities; never feed forensic summaries into simulation or claim unobserved tactical causes.
 
 The Forensics tab shows 1X2, BTTS, Over/Under 2.5, and a sample-based correct-score pick. Derive these directly from the two teams' forensic match samples and the Forensics assessment; do not call or depend on the separate FAIR AI simulator. Label sample frequencies as historical small-sample descriptions, not calibrated forecasts or real-world probabilities.
 
@@ -15,11 +15,15 @@ Show a separate confidence label for each Forensics pick. Base it on the availab
 
 **How to apply:** Show the confidence tier and the sample count/reason beside each market pick, and state that the tier is not calibrated.
 
-When Forensics is opened from a fixture, exclude that fixture ID from both teams' recent-five samples even if it is completed. Filter it out before requesting individual match details, then use the next older eligible completed match to fill the five-match sample.
+When Forensics is opened from a fixture, exclude that fixture ID from both teams' recent-ten samples even if it is completed. Filter it out before requesting individual match details, then use the next older eligible completed match to fill the ten-match sample.
 
-**Why:** The user explicitly says the match being analyzed must not be among its own five forensic examples.
+**Why:** The user explicitly says the match being analyzed must not be among its own Forensics examples.
 
 **How to apply:** Pass the viewed fixture ID from the match page through the Forensics request. Keep standalone team comparisons unchanged when no target fixture exists.
+
+**Why:** The user asked to test ten matches per team instead of five in Forensics.
+
+**How to apply:** Use up to ten most recent eligible completed matches per team for Forensics only; keep the separate simulator's sample window unchanged.
 
 **Why:** The user corrected the Forensics flow: market picks belong to the forensic samples and assessment, not the separate FAIR AI simulator.
 

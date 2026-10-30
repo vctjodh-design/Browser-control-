@@ -198,8 +198,12 @@ test("matchup lean weighs multiple evidence areas rather than win count alone", 
   const snapshots = [];
   const atlasFixtures = [];
   const tideFixtures = [];
-  const atlasResults = [[1, 1], [1, 1], [1, 1], [0, 1], [1, 1]];
-  const tideResults = [[3, 0], [3, 0], [3, 0], [3, 0], [0, 1]];
+  const atlasResults = Array.from({ length: 10 }, (_, index) =>
+    index < 8 ? [1, 1] : [0, 1],
+  );
+  const tideResults = Array.from({ length: 10 }, (_, index) =>
+    index < 8 ? [3, 0] : [0, 1],
+  );
 
   atlasResults.forEach(([forGoals, againstGoals], index) => {
     const id = 200 + index;
@@ -294,12 +298,17 @@ test("matchup lean weighs multiple evidence areas rather than win count alone", 
     "Tide",
   );
 
-  assert.deepEqual(result.home.results, { wins: 0, draws: 4, losses: 1 });
-  assert.deepEqual(result.away.results, { wins: 4, draws: 0, losses: 1 });
+  assert.equal(result.home.matchesExpected, 10);
+  assert.equal(result.home.matchesAnalyzed, 10);
+  assert.equal(result.away.matchesExpected, 10);
+  assert.equal(result.away.matchesAnalyzed, 10);
+  assert.deepEqual(result.home.results, { wins: 0, draws: 8, losses: 2 });
+  assert.deepEqual(result.away.results, { wins: 8, draws: 0, losses: 2 });
   assert.equal(result.assessment.resultLean, "home");
   assert.equal(result.assessment.factors.length, 7);
   assert.equal(result.home.formationSummaries[0].formation, "4-3-3");
-  assert.equal(result.home.eventTimelineMatches, 5);
-  assert.equal(result.home.completeGoalTimelines, 5);
-  assert.match(result.assessment.summary, /qualitative five-match comparison/);
+  assert.equal(result.home.eventTimelineMatches, 10);
+  assert.equal(result.home.completeGoalTimelines, 10);
+  assert.match(result.assessment.summary, /up to ten recent matches per team/);
+  assert.match(result.source, /up to ten completed matches per team/);
 });

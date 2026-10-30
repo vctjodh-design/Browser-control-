@@ -383,10 +383,10 @@ export default function MatchDetailsPage() {
                 <div hidden={activeTab !== 'fair-ai'}>
                   <section className="space-y-4" aria-labelledby="fair-ai-match-title" data-testid="panel-fair-ai">
                     <div className="rounded-xl border border-[#d9e0d6] bg-[#f0f4ed] px-4 py-3.5">
-                      <p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">Post-match review · last five completed games</p>
+                      <p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">Post-match review · last ten completed games</p>
                       <h2 id="fair-ai-match-title" className="mt-1 text-[14px] font-extrabold text-[#344550]">Tactical forensics for {match.home.name} vs {match.away.name}</h2>
                       <p className="mt-1 text-[9px] leading-5 text-[#727973]">
-                        Compare each team&apos;s five latest match timelines, commentary, full/half statistics, formations, lineups and player impact, then view FAIR AI picks for 1X2, BTTS, goals over/under 2.5 and correct score.
+                        Compare each team&apos;s ten latest match timelines, commentary, full/half statistics, formations, lineups and player impact, then view FAIR AI picks for 1X2, BTTS, goals over/under 2.5 and correct score.
                       </p>
                     </div>
                     <FairAiForensicsPanel
