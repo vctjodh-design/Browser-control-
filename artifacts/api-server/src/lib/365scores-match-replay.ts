@@ -1013,6 +1013,16 @@ function gamesListApiUrl(date: string, competitionId: number): URL {
   return url;
 }
 
+function liveGamesListApiUrl(date: string): URL {
+  const url = new URL("https://webws.365scores.com/web/games/");
+  url.searchParams.set("appTypeId", "5");
+  url.searchParams.set("langId", "1");
+  url.searchParams.set("timezoneName", "UTC");
+  url.searchParams.set("userCountryId", "355");
+  url.searchParams.set("date", date);
+  return url;
+}
+
 function gameApiUrl(game: SourceGame): URL {
   const homeId = game.homeCompetitor?.id;
   const awayId = game.awayCompetitor?.id;
@@ -1337,6 +1347,7 @@ function gameMatchesFixture(
   game: SourceGame,
   details: ReplayFixtureContext,
   fixtureDate: Date,
+  requireCurrentScore = true,
 ): boolean {
   const gameDate = game.startTime ?? game.date;
   if (!gameDate || !game.homeCompetitor || !game.awayCompetitor) {
@@ -1361,7 +1372,7 @@ function gameMatchesFixture(
   }
   const homeScore = game.homeCompetitor.score;
   const awayScore = game.awayCompetitor.score;
-  return (
+  return !requireCurrentScore || (
     (details.match.home.score === null ||
       homeScore === details.match.home.score) &&
     (details.match.away.score === null ||
@@ -1397,8 +1408,32 @@ async function load365ScoresMatchReplay(
     let sourceDateListUrl = dayListUrl.toString();
     let matchedGame: SourceGame | null = null;
     let initialMatchArea = "";
+    const isLiveFixture = isLiveMatchStatus(details.match.status);
 
-    if (competitionId !== null) {
+    if (isLiveFixture) {
+      const liveListUrl = liveGamesListApiUrl(date);
+      const liveListPayload = sourceObject(
+        await readSourceJson(sessionId, liveListUrl.toString()),
+      );
+      const liveGames = sourceEntries(
+        liveListPayload?.games as
+          | SourceGame[]
+          | Record<string, SourceGame>
+          | undefined,
+      );
+      const liveMatches = liveGames.filter((candidate) =>
+        gameMatchesFixture(candidate, details, fixtureDate, false),
+      );
+      if (liveMatches.length > 1) {
+        throw new MatchReplayNotFoundError(
+          "More than one live 365Scores match matched these fixture teams and date. The replay was stopped to avoid attaching the wrong match.",
+        );
+      }
+      matchedGame = liveMatches[0] ?? null;
+      if (matchedGame) sourceDateListUrl = liveListUrl.toString();
+    }
+
+    if (!matchedGame && competitionId !== null) {
       const listPayload = sourceObject(
         await readSourceJson(
           sessionId,
@@ -1412,7 +1447,12 @@ async function load365ScoresMatchReplay(
           | undefined,
       );
       const matches = games.filter((candidate) =>
-        gameMatchesFixture(candidate, details, fixtureDate),
+        gameMatchesFixture(
+          candidate,
+          details,
+          fixtureDate,
+          !isLiveFixture,
+        ),
       );
       if (matches.length > 1) {
         throw new MatchReplayNotFoundError(
@@ -1487,7 +1527,12 @@ async function load365ScoresMatchReplay(
 
     if (
       !matchedGame ||
-      !gameMatchesFixture(matchedGame, details, fixtureDate) ||
+      !gameMatchesFixture(
+        matchedGame,
+        details,
+        fixtureDate,
+        !isLiveFixture,
+      ) ||
       typeof matchedGame.id !== "number" ||
       !Number.isInteger(matchedGame.id)
     ) {
@@ -1504,7 +1549,7 @@ async function load365ScoresMatchReplay(
     const game = sourceObject(gamePayload?.game) as SourceGame | null;
     if (
       !game ||
-      !gameMatchesFixture(game, details, fixtureDate) ||
+      !gameMatchesFixture(game, details, fixtureDate, !isLiveFixture) ||
       typeof game.id !== "number" ||
       !Number.isInteger(game.id)
     ) {
