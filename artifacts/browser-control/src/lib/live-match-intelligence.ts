@@ -9,6 +9,8 @@ export const LIVE_SIMULATION_RUNS = 10_000;
 
 type TeamSide = 'home' | 'away';
 type SourceStat = { label: string; value: string | number | null };
+export const LIVE_LEARNING_FEATURE_COUNT = 10;
+export type LiveLearningWeights = { home: number[]; away: number[] };
 
 const BASELINE_SCORING_RATE: Record<TeamSide, number> = {
   home: 1.4 / 90,
@@ -29,6 +31,7 @@ export interface LiveTeamSignals {
   centralShotShare: number | null;
   averageRating: number | null;
   ratedPlayers: number;
+  yellowCards: number;
   redCards: number;
   injurySignals: number;
   substitutions: number;
@@ -37,6 +40,7 @@ export interface LiveTeamSignals {
   scoringRateBasis: 'observed-xg' | 'shot-volume-proxy' | 'neutral-prior';
   resistanceDecay: number | null;
   projectedGoalsRemaining: number | null;
+  calibrationMultiplier: number;
   shotEvents: FootballMatchReplayShotEvent[];
 }
 
@@ -97,10 +101,13 @@ export interface LiveMatchIntelligence {
 interface LiveMatchIntelligenceInput {
   matchCenter?: FootballMatchCenter | null;
   liveAction?: FootballLiveAction | null;
+  calibrationWeights?: LiveLearningWeights;
+  completedMatches?: number;
   now?: Date;
 }
 
 interface TeamEventSignals {
+  yellowCards: number;
   redCards: number;
   injurySignals: number;
   substitutions: number;
@@ -191,19 +198,75 @@ function matchEventSide(
   return null;
 }
 
+function recentGoalsBySide(
+  matchCenter: FootballMatchCenter | null | undefined,
+  elapsedMinute: number,
+): Record<TeamSide, number> {
+  const goals: Record<TeamSide, number> = { home: 0, away: 0 };
+  for (const event of matchCenter?.events ?? []) {
+    const minute = event.minute;
+    if (minute === null || minute > elapsedMinute || elapsedMinute - minute > 15) continue;
+    const type = event.type.toLowerCase().replace(/[_-]+/g, ' ');
+    if (!/\bgoal\b/.test(type)) continue;
+    const side = matchEventSide(event, matchCenter);
+    if (side) goals[side] += 1;
+  }
+  return goals;
+}
+
+export function buildLiveLearningFeatures(
+  team: LiveTeamSignals,
+  opponent: LiveTeamSignals,
+  matchCenter: FootballMatchCenter | null | undefined,
+  elapsedMinute: number,
+  totalMinutes = 90,
+): number[] {
+  const recentGoals = recentGoalsBySide(matchCenter, elapsedMinute);
+  const teamRecentGoals = recentGoals[team.side];
+  const opponentRecentGoals = recentGoals[opponent.side];
+  return [
+    1,
+    clamp((totalMinutes - elapsedMinute) / totalMinutes, 0, 1),
+    team.score < opponent.score ? 1 : 0,
+    clamp(opponent.redCards - team.redCards, -2, 2) / 2,
+    clamp(teamRecentGoals - opponentRecentGoals, -2, 2) / 2,
+    clamp(
+      ((team.kineticIntensity ?? 50) - (opponent.kineticIntensity ?? 50)) / 50,
+      -1,
+      1,
+    ),
+    clamp(((team.xg ?? 0) - (opponent.xg ?? 0)) / 3, -1, 1),
+    clamp(opponent.injurySignals - team.injurySignals, -3, 3) / 3,
+    clamp(team.substitutions - opponent.substitutions, -5, 5) / 5,
+    clamp(opponent.yellowCards - team.yellowCards, -3, 3) / 3,
+  ];
+}
+
+function learnedCalibrationMultiplier(weights: number[] | undefined, features: number[]): number {
+  if (!weights?.length) return 1;
+  const correction = features.reduce(
+    (total, feature, index) => total + feature * (weights[index] ?? 0),
+    0,
+  );
+  return Math.exp(clamp(correction, -0.5, 0.5));
+}
+
 function eventSignals(
   matchCenter: FootballMatchCenter | null | undefined,
   elapsedMinute: number,
 ): Record<TeamSide, TeamEventSignals> {
   const totals: Record<TeamSide, TeamEventSignals> = {
-    home: { redCards: 0, injurySignals: 0, substitutions: 0 },
-    away: { redCards: 0, injurySignals: 0, substitutions: 0 },
+    home: { yellowCards: 0, redCards: 0, injurySignals: 0, substitutions: 0 },
+    away: { yellowCards: 0, redCards: 0, injurySignals: 0, substitutions: 0 },
   };
   for (const event of matchCenter?.events ?? []) {
     if (event.minute !== null && event.minute > elapsedMinute) continue;
     const side = matchEventSide(event, matchCenter);
     if (!side) continue;
     const text = [event.type, event.detail, event.comments].filter(Boolean).join(' ');
+    if (/\b(yellow card|second yellow)\b/i.test(text)) {
+      totals[side].yellowCards += 1;
+    }
     if (/\b(red card|sent off|sending off|second yellow)\b/i.test(text)) {
       totals[side].redCards += 1;
     }
@@ -402,6 +465,7 @@ function buildTeamSignals(
       : null,
     averageRating: ratingAverage,
     ratedPlayers: ratings.length,
+    yellowCards: events.yellowCards,
     redCards: events.redCards,
     injurySignals: events.injurySignals,
     substitutions: events.substitutions,
@@ -410,6 +474,7 @@ function buildTeamSignals(
     scoringRateBasis,
     resistanceDecay: null,
     projectedGoalsRemaining: 0,
+    calibrationMultiplier: 1,
     shotEvents,
   };
 }
@@ -452,6 +517,9 @@ function simulateFinalScores(
   away: LiveTeamSignals,
   remainingMinutes: number,
   elapsedMinute: number,
+  matchCenter: FootballMatchCenter | null | undefined,
+  calibrationWeights: LiveLearningWeights | undefined,
+  totalMinutes: number,
 ): NonNullable<LiveMatchIntelligence['simulation']> {
   const homeRate = home.attackingRatePerMinute;
   const awayRate = away.attackingRatePerMinute;
@@ -472,8 +540,20 @@ function simulateFinalScores(
     (1 + home.redCards * 0.2);
   const homeAgainstStress = 0.9 + (away.resistanceDecay ?? 50) / 500;
   const awayAgainstStress = 0.9 + (home.resistanceDecay ?? 50) / 500;
-  const expectedHome = clamp(homeRate * remainingMinutes * homeAttack * homeAgainstStress, 0, 10);
-  const expectedAway = clamp(awayRate * remainingMinutes * awayAttack * awayAgainstStress, 0, 10);
+  const homeFeatures = buildLiveLearningFeatures(home, away, matchCenter, elapsedMinute, totalMinutes);
+  const awayFeatures = buildLiveLearningFeatures(away, home, matchCenter, elapsedMinute, totalMinutes);
+  home.calibrationMultiplier = learnedCalibrationMultiplier(calibrationWeights?.home, homeFeatures);
+  away.calibrationMultiplier = learnedCalibrationMultiplier(calibrationWeights?.away, awayFeatures);
+  const expectedHome = clamp(
+    homeRate * remainingMinutes * homeAttack * homeAgainstStress * home.calibrationMultiplier,
+    0,
+    10,
+  );
+  const expectedAway = clamp(
+    awayRate * remainingMinutes * awayAttack * awayAgainstStress * away.calibrationMultiplier,
+    0,
+    10,
+  );
   home.projectedGoalsRemaining = expectedHome;
   away.projectedGoalsRemaining = expectedAway;
   const random = randomGenerator([
@@ -534,6 +614,8 @@ function simulateFinalScores(
 export function analyzeLiveMatch({
   matchCenter,
   liveAction,
+  calibrationWeights,
+  completedMatches = 0,
   now = new Date(),
 }: LiveMatchIntelligenceInput): LiveMatchIntelligence {
   if (!liveAction) {
@@ -623,7 +705,16 @@ export function analyzeLiveMatch({
     playerRatings: home.ratedPlayers + away.ratedPlayers > 0,
     commentary: liveAction.events.length > 0,
   };
-  const simulation = simulateFinalScores(liveAction, home, away, remainingMinutes, elapsedMinute);
+  const simulation = simulateFinalScores(
+    liveAction,
+    home,
+    away,
+    remainingMinutes,
+    elapsedMinute,
+    matchCenter,
+    calibrationWeights,
+    totalMinutes,
+  );
   const reasons: string[] = [];
   const totalShots = home.shots + away.shots;
   if (totalShots === 0 && home.xg === null && away.xg === null) {
@@ -635,7 +726,11 @@ export function analyzeLiveMatch({
   if (!signalCoverage.commentary) reasons.push('No live commentary events were returned.');
   if (age !== null && age > 90) reasons.push('The latest live snapshot is over 90 seconds old.');
   if (totalShots < 6) reasons.push('The match sample is still small.');
-  if (!reasons.length) reasons.push('Inputs are broad, but the scenario model is not calibrated against historical outcomes.');
+  if (!completedMatches) {
+    reasons.push('No completed matches have trained this browser’s calibration yet.');
+  } else {
+    reasons.push(`Calibration has been updated from ${completedMatches} completed match${completedMatches === 1 ? '' : 'es'} in this browser.`);
+  }
   const coverageScore = [
     signalCoverage.xg,
     signalCoverage.xgot,

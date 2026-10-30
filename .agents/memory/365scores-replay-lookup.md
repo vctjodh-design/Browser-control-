@@ -13,7 +13,9 @@ Keep 365Scores requests serialized and paced, reuse cached results, honor `Retry
 
 **Why:** The user wants 365Scores collection to reduce repeat traffic and avoid rate limits, blocks, or IP bans.
 
-**How to apply:** Route all 365Scores lookup paths through the shared request policy. Its cooldown is process-local, so use shared coordination if the API later runs multiple instances.
+**How to apply:** Route all 365Scores lookup paths through the shared request policy. Persist cooldowns across workflow restarts; use shared coordination if the API later runs multiple instances.
+
+**Why:** Restarting the API after a provider challenge must not immediately retry and evade the required pause.
 
 For FAIR AI Forensics, use a date/team/score-verified 365Scores replay to supplement incomplete KickoffScore match details. Preserve KickoffScore values when present, and report fields that remain unavailable after fallback.
 

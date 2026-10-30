@@ -23,6 +23,13 @@ import { MatchReplayPanel } from '@/components/match-replay-panel';
 import { MatchCenterPanel } from '@/components/match-center-panel';
 import { LiveActionSourcePanel } from '@/components/live-action-source-panel';
 import { LiveIntelligencePanel } from '@/components/live-intelligence-panel';
+import {
+  finalizeLiveLearningFixture,
+  hasPendingLiveLearningFixture,
+  LIVE_LEARNING_UPDATED_EVENT,
+  loadLiveLearningState,
+  saveLiveLearningState,
+} from '@/lib/live-intelligence-learning';
 import { OddsTranslationPanel } from '@/components/odds-translation-panel';
 import {
   ArrowLeft,
@@ -283,7 +290,8 @@ export default function MatchDetailsPage() {
       enabled:
         validId &&
         (activeTab === 'match-center' ||
-          isLiveMatchStatus(details?.match.status)),
+          isLiveMatchStatus(details?.match.status) ||
+          (isCompleteMatchStatus(details?.match.status) && hasPendingLiveLearningFixture(fixtureId))),
       queryKey: getGetFootballMatchCenterQueryKey(fixtureId),
       retry: false,
       staleTime: 0,
@@ -297,6 +305,32 @@ export default function MatchDetailsPage() {
     },
   });
   const matchCenter = matchCenterQuery.data as FootballMatchCenter | undefined;
+  useEffect(() => {
+    const homeScore = matchCenter?.match.home.score;
+    const awayScore = matchCenter?.match.away.score;
+    if (
+      !validId ||
+      !matchCenter ||
+      !isCompleteMatchStatus(matchCenter.match.status) ||
+      homeScore === null ||
+      homeScore === undefined ||
+      awayScore === null ||
+      awayScore === undefined
+    ) {
+      return;
+    }
+    const current = loadLiveLearningState();
+    const learned = finalizeLiveLearningFixture(current, fixtureId, homeScore, awayScore);
+    if (!learned) return;
+    saveLiveLearningState(learned);
+    window.dispatchEvent(new Event(LIVE_LEARNING_UPDATED_EVENT));
+  }, [
+    fixtureId,
+    validId,
+    matchCenter?.match.status,
+    matchCenter?.match.home.score,
+    matchCenter?.match.away.score,
+  ]);
   const match = matchCenter?.match ?? details?.match;
   const isLive = isLiveMatchStatus(match?.status);
   const isComplete = isCompleteMatchStatus(match?.status);

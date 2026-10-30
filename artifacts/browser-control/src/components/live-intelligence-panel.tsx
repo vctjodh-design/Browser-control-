@@ -29,7 +29,17 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
-import { analyzeLiveMatch, LIVE_SIMULATION_RUNS } from '@/lib/live-match-intelligence';
+import {
+  analyzeLiveMatch,
+  buildLiveLearningFeatures,
+  LIVE_SIMULATION_RUNS,
+} from '@/lib/live-match-intelligence';
+import {
+  LIVE_LEARNING_UPDATED_EVENT,
+  loadLiveLearningState,
+  recordLiveLearningObservation,
+  saveLiveLearningState,
+} from '@/lib/live-intelligence-learning';
 
 function readableError(error: unknown) {
   if (typeof error === 'string') return error;
@@ -76,6 +86,18 @@ function formatTime(value?: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Time unavailable';
   return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(date);
+}
+
+function incidentFingerprint(matchCenter?: FootballMatchCenter) {
+  const source = (matchCenter?.events ?? [])
+    .map((event) => `${event.minute ?? ''}:${event.type}:${event.teamId ?? ''}:${event.detail ?? ''}`)
+    .join('|');
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 function amount(value: number | null | undefined, digits = 2) {
@@ -167,7 +189,7 @@ function TeamSignalCard({ team }: { team: NonNullable<ReturnType<typeof analyzeL
         <div className="bg-[#fbfaf6] px-3 py-2.5"><p className="mono text-[7px] uppercase text-[#9a9d93]">λ Kinetic intensity</p><p className="mono mt-1 text-[10px] font-medium text-[#40564e]">{amount(team.kineticIntensity, 1)}<span className="text-[8px] text-[#9a9d93]"> / 100</span></p></div>
         <div className="bg-[#fbfaf6] px-3 py-2.5"><p className="mono text-[7px] uppercase text-[#9a9d93]">μ Resistance decay</p><p className="mono mt-1 text-[10px] font-medium text-[#40564e]">{amount(team.resistanceDecay, 1)}<span className="text-[8px] text-[#9a9d93]"> / 100</span></p></div>
         <div className="bg-[#fbfaf6] px-3 py-2.5"><p className="mono text-[7px] uppercase text-[#9a9d93]">Expected remaining goals</p><p className="mono mt-1 text-[10px] font-medium text-[#40564e]">{amount(team.projectedGoalsRemaining)}</p></div>
-        <div className="bg-[#fbfaf6] px-3 py-2.5"><p className="mono text-[7px] uppercase text-[#9a9d93]">Incidents</p><p className="mt-1 flex flex-wrap gap-x-2 text-[8px] text-[#69766e]"><span>{team.redCards} red</span><span>{team.injurySignals} injury</span><span>{team.substitutions} subs</span></p></div>
+        <div className="bg-[#fbfaf6] px-3 py-2.5"><p className="mono text-[7px] uppercase text-[#9a9d93]">Incidents</p><p className="mt-1 flex flex-wrap gap-x-2 text-[8px] text-[#69766e]"><span>{team.yellowCards} yellow</span><span>{team.redCards} red</span><span>{team.injurySignals} injury</span><span>{team.substitutions} subs</span></p></div>
       </div>
     </article>
   );
@@ -190,6 +212,7 @@ export function LiveIntelligencePanel({
 }) {
   const automaticSourceUrl = replay?.sourceMatchUrl ?? '';
   const [manualSourceUrl, setManualSourceUrl] = useState('');
+  const [learningState, setLearningState] = useState(loadLiveLearningState);
   const effectiveSourceUrl = manualSourceUrl || automaticSourceUrl;
   const sourceForm = useForm<{ sourceUrl: string }>({
     defaultValues: { sourceUrl: manualSourceUrl || automaticSourceUrl },
@@ -201,6 +224,11 @@ export function LiveIntelligencePanel({
       setFormSourceUrl('sourceUrl', automaticSourceUrl, { shouldDirty: false, shouldValidate: false });
     }
   }, [automaticSourceUrl, manualSourceUrl, setFormSourceUrl]);
+  useEffect(() => {
+    const refreshLearningState = () => setLearningState(loadLiveLearningState());
+    window.addEventListener(LIVE_LEARNING_UPDATED_EVENT, refreshLearningState);
+    return () => window.removeEventListener(LIVE_LEARNING_UPDATED_EVENT, refreshLearningState);
+  }, []);
   const liveActionQuery = useGetFootballLiveAction(
     { sourceUrl: effectiveSourceUrl },
     {
@@ -225,9 +253,63 @@ export function LiveIntelligencePanel({
   const liveSnapshot = liveAction ?? fallbackLiveAction;
   const isUsingMatchCenterFallback = !liveAction && Boolean(fallbackLiveAction);
   const intelligence = useMemo(
-    () => analyzeLiveMatch({ matchCenter, liveAction: liveSnapshot }),
-    [matchCenter, liveSnapshot],
+    () => analyzeLiveMatch({
+      matchCenter,
+      liveAction: liveSnapshot,
+      calibrationWeights: learningState.weights,
+      completedMatches: learningState.completedMatches,
+    }),
+    [matchCenter, liveSnapshot, learningState.weights, learningState.completedMatches],
   );
+  const learningObservation = useMemo(() => {
+    if (
+      intelligence.status !== 'ready' ||
+      !intelligence.home ||
+      !intelligence.away ||
+      !liveSnapshot ||
+      !matchCenter ||
+      intelligence.elapsedMinute === null
+    ) {
+      return null;
+    }
+    const elapsedMinute = intelligence.elapsedMinute;
+    const totalMinutes = /\b(extra time|extra-time)\b/i.test(liveSnapshot.status) ? 120 : 90;
+    return {
+      fixtureId,
+      signature: `${Math.floor(elapsedMinute / 5)}:${liveSnapshot.homeScore}:${liveSnapshot.awayScore}:${incidentFingerprint(matchCenter)}`,
+      observedAt: liveSnapshot.observedAt ?? new Date().toISOString(),
+      minute: elapsedMinute,
+      homeScore: liveSnapshot.homeScore ?? 0,
+      awayScore: liveSnapshot.awayScore ?? 0,
+      homeExpectedGoals: Math.max(0, intelligence.home.projectedGoalsRemaining ?? 0) /
+        Math.max(0.1, intelligence.home.calibrationMultiplier),
+      awayExpectedGoals: Math.max(0, intelligence.away.projectedGoalsRemaining ?? 0) /
+        Math.max(0.1, intelligence.away.calibrationMultiplier),
+      homeFeatures: buildLiveLearningFeatures(
+        intelligence.home,
+        intelligence.away,
+        matchCenter,
+        elapsedMinute,
+        totalMinutes,
+      ),
+      awayFeatures: buildLiveLearningFeatures(
+        intelligence.away,
+        intelligence.home,
+        matchCenter,
+        elapsedMinute,
+        totalMinutes,
+      ),
+    };
+  }, [fixtureId, intelligence, liveSnapshot, matchCenter]);
+  useEffect(() => {
+    if (!learningObservation) return;
+    setLearningState((current) => {
+      const next = recordLiveLearningObservation(current, learningObservation);
+      if (next === current) return current;
+      saveLiveLearningState(next);
+      return next;
+    });
+  }, [learningObservation]);
   const playerGroups = matchCenter?.players ?? [];
   const teams = intelligence.home && intelligence.away ? [intelligence.home, intelligence.away] : [];
   const ratings = teams.map((team) => {
@@ -398,8 +480,13 @@ export function LiveIntelligencePanel({
                   </div>
                 </article>
                 <article className="rounded-xl border border-[#e8dfca] bg-[#faf5e9] p-4 sm:p-5">
-                  <div className="flex items-center gap-2"><ShieldAlert size={15} className="text-[#9b754f]" /><div><p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">Model limits</p><h3 className="text-[12px] font-extrabold text-[#6f5d42]">Confidence: {intelligence.confidence?.level}</h3></div></div>
-                  <p className="mt-2 text-[8px] leading-4 text-[#7d6c4d]">Transparent heuristic, not trained AI. Scenario shares are not calibrated forecasts.</p>
+                  <div className="flex items-center gap-2"><ShieldAlert size={15} className="text-[#9b754f]" /><div><p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">Self-learning calibration</p><h3 className="text-[12px] font-extrabold text-[#6f5d42]">{learningState.completedMatches} completed matches learned</h3></div></div>
+                  <p className="mt-2 text-[8px] leading-4 text-[#7d6c4d]">Live snapshots and incidents are saved on this browser. When a match ends, the model compares its earlier goal forecasts with the confirmed final score and makes small bounded adjustments.</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2 border-y border-[#eadfc9] py-2">
+                    <div><p className="text-[7px] uppercase text-[#9a8568]">{intelligence.home.name} adjustment</p><p className="mono mt-1 text-[11px] text-[#6f5d42]">{intelligence.home.calibrationMultiplier >= 1 ? '+' : ''}{((intelligence.home.calibrationMultiplier - 1) * 100).toFixed(1)}%</p></div>
+                    <div><p className="text-[7px] uppercase text-[#9a8568]">{intelligence.away.name} adjustment</p><p className="mono mt-1 text-[11px] text-[#6f5d42]">{intelligence.away.calibrationMultiplier >= 1 ? '+' : ''}{((intelligence.away.calibrationMultiplier - 1) * 100).toFixed(1)}%</p></div>
+                  </div>
+                  <p className="mt-2 text-[8px] leading-4 text-[#7d6c4d]">{learningState.fixtures.length} match{learningState.fixtures.length === 1 ? '' : 'es'} waiting for a confirmed final score. Learning stays on this browser and does not make the forecasts certain.</p>
                   <ul className="mt-3 space-y-2">{(intelligence.confidence?.reasons ?? []).map((reason, index) => <li key={`${reason}-${index}`} className="flex items-start gap-2 text-[8px] leading-4 text-[#786c55]"><span className="mt-1 size-1 shrink-0 rounded-full bg-[#b68b57]" />{reason}</li>)}</ul>
                   {!intelligence.signalCoverage.xg && <p className="mt-3 rounded-lg border border-[#ead9c4] bg-[#fffaf0] px-2.5 py-2 text-[8px] leading-4 text-[#84684f]">At least one side lacks source xG. A shot-count proxy is used when shots exist; a neutral scoring prior prevents a shotless side from being treated as unable to score.</p>}
                 </article>
