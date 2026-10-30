@@ -38,6 +38,39 @@ function readableError(error: unknown) {
   return 'The source could not be reached. Try the lookup again.';
 }
 
+function matchCenterLiveSnapshot(matchCenter?: FootballMatchCenter): FootballLiveAction | undefined {
+  if (
+    !matchCenter ||
+    matchCenter.match.home.score === null ||
+    matchCenter.match.away.score === null
+  ) {
+    return undefined;
+  }
+  return {
+    sourceMatchUrl: matchCenter.sourceUrl,
+    gameId: matchCenter.match.fixtureId,
+    competition: matchCenter.match.competition,
+    status: matchCenter.match.status,
+    elapsedMinute: matchCenter.elapsedMinute,
+    homeTeam: matchCenter.match.home.name,
+    awayTeam: matchCenter.match.away.name,
+    homeScore: matchCenter.match.home.score,
+    awayScore: matchCenter.match.away.score,
+    observedAt: matchCenter.observedAt,
+    events: matchCenter.events.map((event, sourceOrder) => ({
+      minute: event.minute === null
+        ? '—'
+        : `${event.minute}${event.extraMinute === null ? '' : `+${event.extraMinute}`}`,
+      kind: event.type,
+      title: event.detail ?? event.type,
+      detail: event.comments ?? '',
+      sourceOrder,
+    })),
+    shotEvents: [],
+    formationPlayers: [],
+  };
+}
+
 function formatTime(value?: string | null) {
   if (!value) return 'Time unavailable';
   const date = new Date(value);
@@ -56,10 +89,6 @@ const coverageLabels = [
   ['playerRatings', 'Player ratings'],
   ['commentary', 'Commentary'],
 ] as const;
-
-const userProvidedSources: Record<number, string> = {
-  1549724: 'https://www.365scores.com/football/match/liga-betplay-620/atletico-nacional-independiente-santa-fe-7644-8640-620#id=4732057',
-};
 
 function ShotOriginMap({
   homeName,
@@ -160,7 +189,7 @@ export function LiveIntelligencePanel({
   onRetryReplay: () => void;
 }) {
   const automaticSourceUrl = replay?.sourceMatchUrl ?? '';
-  const [manualSourceUrl, setManualSourceUrl] = useState(() => userProvidedSources[fixtureId] ?? '');
+  const [manualSourceUrl, setManualSourceUrl] = useState('');
   const effectiveSourceUrl = manualSourceUrl || automaticSourceUrl;
   const sourceForm = useForm<{ sourceUrl: string }>({
     defaultValues: { sourceUrl: manualSourceUrl || automaticSourceUrl },
@@ -189,9 +218,15 @@ export function LiveIntelligencePanel({
     },
   );
   const liveAction = liveActionQuery.data as FootballLiveAction | undefined;
+  const fallbackLiveAction = useMemo(
+    () => matchCenterLiveSnapshot(matchCenter),
+    [matchCenter],
+  );
+  const liveSnapshot = liveAction ?? fallbackLiveAction;
+  const isUsingMatchCenterFallback = !liveAction && Boolean(fallbackLiveAction);
   const intelligence = useMemo(
-    () => analyzeLiveMatch({ matchCenter, liveAction }),
-    [matchCenter, liveAction],
+    () => analyzeLiveMatch({ matchCenter, liveAction: liveSnapshot }),
+    [matchCenter, liveSnapshot],
   );
   const playerGroups = matchCenter?.players ?? [];
   const teams = intelligence.home && intelligence.away ? [intelligence.home, intelligence.away] : [];
@@ -201,7 +236,8 @@ export function LiveIntelligencePanel({
     ) ?? playerGroups.find((group) => group.teamName.toLowerCase() === team.name.toLowerCase());
     return { team, players: (sourceGroup?.players ?? []).filter((player) => player.rating !== null && player.rating.trim() !== '') };
   });
-  const hasCurrentScores = liveAction?.homeScore !== null && liveAction?.homeScore !== undefined && liveAction?.awayScore !== null && liveAction?.awayScore !== undefined;
+  const hasCurrentScores = liveSnapshot?.homeScore !== null && liveSnapshot?.homeScore !== undefined && liveSnapshot?.awayScore !== null && liveSnapshot?.awayScore !== undefined;
+  const sourceLink = liveAction ? effectiveSourceUrl : matchCenter?.sourceUrl;
   const submitSource = sourceForm.handleSubmit(({ sourceUrl: submittedUrl }) => {
     const normalizedUrl = submittedUrl.trim();
     setManualSourceUrl(normalizedUrl === automaticSourceUrl ? '' : normalizedUrl);
@@ -218,11 +254,11 @@ export function LiveIntelligencePanel({
           <div>
             <p className="mono text-[8px] uppercase tracking-[.16em] text-[#9b7160]">Live match intelligence · fixture {fixtureId}</p>
             <h2 className="mt-1 text-[16px] font-extrabold tracking-[-.04em] text-[#344550]">Evidence first. Scenarios second.</h2>
-            <p className="mt-1 max-w-2xl text-[9px] leading-5 text-[#727973]">A source-grounded snapshot with a transparent, heuristic simulation. The current score is held as the simulation baseline.</p>
+            <p className="mt-1 max-w-2xl text-[9px] leading-5 text-[#727973]">Forecasts continue from the live score and estimate what may happen in the remaining minutes using match state and live chances.</p>
           </div>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-[#d9dfd5] bg-[#f8faf5] px-2.5 py-1.5 text-[8px] font-extrabold uppercase tracking-wide text-[#68796e]">
             <Activity size={11} className={liveActionQuery.isFetching ? 'animate-pulse text-[#c5654a]' : 'text-[#68816e]'} />
-            {liveActionQuery.isFetching ? 'Refreshing' : liveAction ? 'Source snapshot' : 'Awaiting source'}
+            {liveActionQuery.isFetching ? 'Refreshing' : liveAction ? '365Scores snapshot' : fallbackLiveAction ? 'Live match-center data' : 'Awaiting source'}
           </span>
         </div>
         <div className="grid gap-2 border-t border-[#dfe5db] bg-[#f7f8f2] px-4 py-3 text-[8px] leading-4 text-[#788178] sm:grid-cols-3 sm:px-5">
@@ -236,8 +272,8 @@ export function LiveIntelligencePanel({
         <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">Source resolution</p>
-            <h3 className="mt-1 text-[12px] font-extrabold text-[#344550]">{manualSourceUrl ? 'Manual 365Scores source active' : automaticSourceUrl ? 'Replay-linked source active' : 'No automatic source resolved'}</h3>
-            <p className="mt-1 max-w-2xl text-[8px] leading-4 text-[#858982]">Automatic replay lookup is preferred when available. Paste a full 365Scores football match URL to replace it; the server validates the provider link and match identifiers.</p>
+            <h3 className="mt-1 text-[12px] font-extrabold text-[#344550]">{manualSourceUrl ? 'Manual 365Scores source active' : automaticSourceUrl ? 'Match link found automatically' : 'Finding this fixture on 365Scores'}</h3>
+            <p className="mt-1 max-w-2xl text-[8px] leading-4 text-[#858982]">The app matches the fixture’s teams and kickoff time to 365Scores. The optional link below is only needed if you want to override that match.</p>
           </div>
           {manualSourceUrl && (
             <button type="button" onClick={clearManualSource} className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[#d9dfd5] bg-[#f6f7f1] px-2.5 text-[8px] font-extrabold text-[#62776a] hover:bg-[#edf3ed]" data-testid="button-clear-live-source-override">
@@ -251,8 +287,8 @@ export function LiveIntelligencePanel({
               control={sourceForm.control}
               name="sourceUrl"
               rules={{
-                required: 'Enter a full 365Scores match URL.',
                 validate: (value) => {
+                  if (!value.trim()) return true;
                   try {
                     const url = new URL(value);
                     return /^https?:$/.test(url.protocol) && /(^|\.)365scores\.com$/i.test(url.hostname)
@@ -277,14 +313,14 @@ export function LiveIntelligencePanel({
                       data-testid="input-live-intelligence-source-url"
                     />
                   </FormControl>
-                  <FormDescription className="text-[8px] leading-4 text-[#858982]">A manual source replaces the replay-linked source until you switch back.</FormDescription>
+                  <FormDescription className="text-[8px] leading-4 text-[#858982]">Optional override. Leave blank to use the automatically resolved fixture.</FormDescription>
                   <FormMessage className="text-[8px] text-[#a85c49]" />
                 </FormItem>
               )}
             />
             <button type="submit" disabled={liveActionQuery.isFetching} className="mt-auto inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-[#314d40] px-3 text-[9px] font-extrabold text-[#f7f2e6] hover:bg-[#263f34] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-submit-live-source-override">
               {liveActionQuery.isFetching ? <Activity size={11} className="animate-pulse" /> : <Signal size={11} />}
-              {manualSourceUrl ? 'Update manual source' : 'Use this source'}
+              {manualSourceUrl ? 'Update manual link' : 'Apply manual link'}
             </button>
           </form>
         </Form>
@@ -304,34 +340,39 @@ export function LiveIntelligencePanel({
         </section>
       )}
       {!replayLoading && !replayError && !automaticSourceUrl && !manualSourceUrl && (
-        <div className="rounded-xl border border-dashed border-[#deddd4] bg-[#f7f6f0] px-4 py-4 text-[9px] leading-5 text-[#858982]" data-testid="status-live-intelligence-replay-empty">No verified replay source link has been returned for this fixture. Add a 365Scores match URL above to continue.</div>
+        <div className="rounded-xl border border-dashed border-[#deddd4] bg-[#f7f6f0] px-4 py-4 text-[9px] leading-5 text-[#858982]" data-testid="status-live-intelligence-replay-empty">365Scores has not returned a verified link for this fixture yet. You can retry the automatic lookup or use an optional manual link.</div>
       )}
-      {effectiveSourceUrl && liveActionQuery.isLoading && !liveAction && (
+      {effectiveSourceUrl && liveActionQuery.isLoading && !liveSnapshot && (
         <section className="space-y-3" role="status" aria-label="Loading live intelligence source" data-testid="status-live-intelligence-loading">
           <div className="h-24 animate-pulse rounded-xl bg-[#e8e9df]" /><div className="h-36 animate-pulse rounded-xl bg-[#e8e9df]" />
           <p className="mono text-[8px] uppercase tracking-wide text-[#899087]">Fetching 365Scores live snapshot…</p>
         </section>
       )}
-      {effectiveSourceUrl && liveActionQuery.isError && !liveAction && (
+      {effectiveSourceUrl && liveActionQuery.isError && !liveSnapshot && (
         <section className="flex flex-col items-start gap-3 rounded-xl border border-[#e3c3b6] bg-[#fff6f0] p-4" role="alert" data-testid="status-live-intelligence-error">
           <div className="flex items-start gap-2.5"><AlertTriangle size={15} className="mt-0.5 text-[#b85b46]" /><div><h3 className="text-[10px] font-extrabold text-[#784b3e]">Live snapshot unavailable</h3><p className="mt-1 text-[9px] leading-5 text-[#8c6b5e]">{readableError(liveActionQuery.error)}</p></div></div>
           <button type="button" onClick={() => { void liveActionQuery.refetch(); }} className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[#e5c5b8] bg-[#fffaf6] px-2.5 text-[8px] font-extrabold text-[#855542] hover:bg-white" data-testid="button-retry-live-intelligence"><RefreshCw size={11} /> Try again</button>
         </section>
       )}
-      {liveAction && (
+      {isUsingMatchCenterFallback && (
+        <p className="rounded-lg border border-[#ead9c4] bg-[#fbf3e9] px-3 py-2.5 text-[8px] leading-4 text-[#84684f]" role="status" data-testid="status-live-intelligence-match-center-fallback">
+          Forecasting from the live score, match minute, events, and statistics while the 365Scores source is unavailable.
+        </p>
+      )}
+      {liveSnapshot && (
         <>
-          {liveActionQuery.isError && <p className="rounded-lg border border-[#ead9c4] bg-[#fbf3e9] px-3 py-2.5 text-[8px] leading-4 text-[#84684f]" role="status" data-testid="status-live-intelligence-stale">Refresh failed; showing the last successful live snapshot.</p>}
+          {liveActionQuery.isError && liveAction && <p className="rounded-lg border border-[#ead9c4] bg-[#fbf3e9] px-3 py-2.5 text-[8px] leading-4 text-[#84684f]" role="status" data-testid="status-live-intelligence-stale">Refresh failed; showing the last successful live snapshot.</p>}
           <section className="grid gap-3 sm:grid-cols-[1.1fr_.9fr]" data-testid="section-live-intelligence-baseline">
             <article className="rounded-xl border border-[#283d4b] bg-[#2d4350] p-4 text-[#f5f1e7]">
-              <div className="flex items-start justify-between gap-3"><div><p className="mono text-[8px] uppercase tracking-[.16em] text-[#d6a38b]">Locked simulation baseline</p><p className="mt-2 text-[12px] font-bold">{liveAction.homeTeam}<span className="mx-2 text-[#aab4ae]">vs</span>{liveAction.awayTeam}</p></div><span className="rounded-full border border-white/15 px-2 py-1 text-[8px] font-bold uppercase text-[#d9e4d6]">{liveAction.status}</span></div>
-              <div className="mt-3 flex items-end gap-2"><span className="mono text-[38px] leading-none tracking-[-.08em]">{hasCurrentScores ? `${liveAction.homeScore}–${liveAction.awayScore}` : '—'}</span><span className="mono pb-1 text-[9px] text-[#c6d0c8]">{intelligence.elapsedMinute ?? liveAction.elapsedMinute ?? '—'}′ · {intelligence.remainingMinutes ?? '—'}′ remaining</span></div>
-              <p className="mt-3 border-t border-white/10 pt-2 text-[8px] leading-4 text-[#c7d0c8]">Final score scenarios add goals to this observed score. The baseline is not re-simulated.</p>
+              <div className="flex items-start justify-between gap-3"><div><p className="mono text-[8px] uppercase tracking-[.16em] text-[#d6a38b]">Current match state</p><p className="mt-2 text-[12px] font-bold">{liveSnapshot.homeTeam}<span className="mx-2 text-[#aab4ae]">vs</span>{liveSnapshot.awayTeam}</p></div><span className="rounded-full border border-white/15 px-2 py-1 text-[8px] font-bold uppercase text-[#d9e4d6]">{liveSnapshot.status}</span></div>
+              <div className="mt-3 flex items-end gap-2"><span className="mono text-[38px] leading-none tracking-[-.08em]">{hasCurrentScores ? `${liveSnapshot.homeScore}–${liveSnapshot.awayScore}` : '—'}</span><span className="mono pb-1 text-[9px] text-[#c6d0c8]">{intelligence.elapsedMinute ?? liveSnapshot.elapsedMinute ?? '—'}′ · {intelligence.remainingMinutes ?? '—'}′ remaining</span></div>
+              <p className="mt-3 border-t border-white/10 pt-2 text-[8px] leading-4 text-[#c7d0c8]">The forecast starts from this observed score and estimates goals during the remaining minutes.</p>
             </article>
             <article className="rounded-xl border border-[#dfded5] bg-[#fbfaf6] p-4">
               <div className="flex items-start justify-between gap-3"><div><p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">Source freshness</p><h3 className="mt-1 text-[12px] font-extrabold text-[#40534e]">Latest observation</h3></div><Clock3 size={15} className="text-[#758779]" /></div>
-              <p className="mono mt-3 text-[16px] text-[#40564e]">{formatTime(liveAction.observedAt)}</p>
+              <p className="mono mt-3 text-[16px] text-[#40564e]">{formatTime(liveSnapshot.observedAt)}</p>
               <p className="mt-1 text-[8px] text-[#858982]">{intelligence.observedAgeSeconds === null ? 'Age unavailable' : `${intelligence.observedAgeSeconds}s old at render`}</p>
-              <a href={effectiveSourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex text-[8px] font-extrabold text-[#597563] underline decoration-[#b5c6b4] underline-offset-2" data-testid="link-live-intelligence-source">{manualSourceUrl ? 'Open manual 365Scores source' : 'Verified 365Scores match source'}</a>
+              {sourceLink && <a href={sourceLink} target="_blank" rel="noreferrer" className="mt-3 inline-flex text-[8px] font-extrabold text-[#597563] underline decoration-[#b5c6b4] underline-offset-2" data-testid="link-live-intelligence-source">{liveAction ? manualSourceUrl ? 'Open manual 365Scores source' : 'Open 365Scores match source' : 'Open live match-center source'}</a>}
             </article>
           </section>
 

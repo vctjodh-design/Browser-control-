@@ -10,6 +10,12 @@ export const LIVE_SIMULATION_RUNS = 10_000;
 type TeamSide = 'home' | 'away';
 type SourceStat = { label: string; value: string | number | null };
 
+const BASELINE_SCORING_RATE: Record<TeamSide, number> = {
+  home: 1.4 / 90,
+  away: 1.1 / 90,
+};
+const PRIOR_MATCH_MINUTES = 24;
+
 export interface LiveTeamSignals {
   side: TeamSide;
   name: string;
@@ -126,7 +132,14 @@ function parseNumber(value: unknown): number | null {
 }
 
 function statNumber(rows: SourceStat[], expression: RegExp): number | null {
-  const row = rows.find((candidate) => expression.test(candidate.label));
+  const row = rows.find((candidate) => {
+    const label = candidate.label
+      .toLowerCase()
+      .replace(/^(?:full match|full time|first half|second half)\s*[·:-]\s*/i, '')
+      .replace(/[_-]+/g, ' ')
+      .trim();
+    return expression.test(label);
+  });
   return row ? parseNumber(row.value) : null;
 }
 
@@ -272,10 +285,10 @@ function buildTeamSignals(
   const statsXg = statNumber(sourceStats, /^(?:expected goals|xg)$/i);
   const statsXgot = statNumber(sourceStats, /^(?:expected goals on target|xgot)$/i);
   const eventXg = xgValues.length
-    ? xgValues.reduce((sum, value) => sum + value, 0) / xgValues.length * shotEvents.length
+    ? xgValues.reduce((sum, value) => sum + value, 0)
     : null;
   const eventXgot = xgotValues.length
-    ? xgotValues.reduce((sum, value) => sum + value, 0) / xgotValues.length * shotEvents.length
+    ? xgotValues.reduce((sum, value) => sum + value, 0)
     : null;
   const xg = eventXg === null
     ? statsXg
@@ -314,39 +327,44 @@ function buildTeamSignals(
     const value = parseNumber(shot.xgot);
     return value !== null && value >= 0 ? [value] : [];
   });
-  const shotProxyRate =
-    ((shotsOnTarget ?? 0) * 0.2 + Math.max(0, shots - (shotsOnTarget ?? 0)) * 0.05) /
-    Math.max(1, elapsedMinute);
-  const scoringRateBasis = xg !== null && xg > 0
+  const shotProxyGoals =
+    (shotsOnTarget ?? 0) * 0.12 +
+    Math.max(0, shots - (shotsOnTarget ?? 0)) * 0.04;
+  const scoringRateBasis = xg !== null
     ? 'observed-xg'
     : shots > 0
       ? 'shot-volume-proxy'
       : 'neutral-prior';
-  const currentRate = scoringRateBasis === 'observed-xg'
-    ? xg! / Math.max(1, elapsedMinute)
-    : scoringRateBasis === 'shot-volume-proxy'
-      ? shotProxyRate
-      : 0.012;
-  const recentRate = scoringRateBasis === 'observed-xg' && recentXgValues.length
-    ? (
-      recentXgValues.reduce((sum, value) => sum + value, 0) /
-      recentXgValues.length *
-      recentShots.length
-    ) / recentWindow
-    : currentRate;
+  const baselineRate = BASELINE_SCORING_RATE[side];
+  const observedGoals = xg ?? (shots > 0 ? shotProxyGoals : null);
+  const observedRate = observedGoals === null
+    ? baselineRate
+    : observedGoals / Math.max(1, elapsedMinute);
+  const liveEvidenceWeight = elapsedMinute / (elapsedMinute + PRIOR_MATCH_MINUTES);
+  const shrunkRate =
+    baselineRate * (1 - liveEvidenceWeight) +
+    observedRate * liveEvidenceWeight;
+  const recentObservedRate = recentXgValues.length
+    ? recentXgValues.reduce((sum, value) => sum + value, 0) / recentWindow
+    : null;
+  const recentEvidenceWeight = recentObservedRate !== null && recentShots.length >= 2
+    ? Math.min(0.2, recentShots.length * 0.04)
+    : 0;
+  const recentTrendRate = recentObservedRate === null
+    ? shrunkRate
+    : clamp(recentObservedRate, shrunkRate * 0.65, shrunkRate * 1.65);
+  const projectedRate =
+    shrunkRate * (1 - recentEvidenceWeight) +
+    recentTrendRate * recentEvidenceWeight;
   const recentXgotRate = recentXgotValues.length
-    ? (
-      recentXgotValues.reduce((sum, value) => sum + value, 0) /
-      recentXgotValues.length *
-      recentShots.length
-    ) / recentWindow
+    ? recentXgotValues.reduce((sum, value) => sum + value, 0) / recentWindow
     : xgot !== null
       ? xgot / Math.max(1, elapsedMinute)
       : null;
   const recentShotCount = recentShots.length
     ? recentShots.length
     : shots * recentWindow / Math.max(1, elapsedMinute);
-  const xgIntensity = clamp((recentRate * 15 / 0.6) * 100, 0, 100);
+  const xgIntensity = clamp((projectedRate * 15 / 0.6) * 100, 0, 100);
   const xgotIntensity = recentXgotRate === null
     ? null
     : clamp((recentXgotRate * 15 / 0.6) * 100, 0, 100);
@@ -368,7 +386,6 @@ function buildTeamSignals(
     ? clamp(weightedInputs.reduce((sum, entry) => sum + entry.value * entry.weight, 0) / totalWeight, 0, 100)
     : null;
   const events = eventTotals[side];
-  const expectedGoalsRate = currentRate;
 
   return {
     side,
@@ -389,10 +406,10 @@ function buildTeamSignals(
     injurySignals: events.injurySignals,
     substitutions: events.substitutions,
     kineticIntensity,
-    attackingRatePerMinute: recentRate,
+    attackingRatePerMinute: projectedRate,
     scoringRateBasis,
     resistanceDecay: null,
-    projectedGoalsRemaining: expectedGoalsRate * 0,
+    projectedGoalsRemaining: 0,
     shotEvents,
   };
 }
@@ -438,10 +455,23 @@ function simulateFinalScores(
 ): NonNullable<LiveMatchIntelligence['simulation']> {
   const homeRate = home.attackingRatePerMinute;
   const awayRate = away.attackingRatePerMinute;
-  const homeAttack = 0.85 + (home.kineticIntensity ?? 50) / 333;
-  const awayAttack = 0.85 + (away.kineticIntensity ?? 50) / 333;
-  const homeAgainstStress = 0.85 + (away.resistanceDecay ?? 50) / 333;
-  const awayAgainstStress = 0.85 + (home.resistanceDecay ?? 50) / 333;
+  const matchProgress = clamp(elapsedMinute / 90, 0, 1);
+  const scoreStateFactor = (teamScore: number, opponentScore: number) => {
+    if (teamScore === opponentScore) return 1;
+    const deficit = Math.abs(teamScore - opponentScore);
+    const urgency = 0.06 + matchProgress * 0.16 + Math.min(0.08, (deficit - 1) * 0.04);
+    return teamScore < opponentScore ? 1 + urgency : 1 - urgency * 0.3;
+  };
+  const homeAttack =
+    (0.9 + (home.kineticIntensity ?? 50) / 500) *
+    scoreStateFactor(home.score, away.score) *
+    (1 + away.redCards * 0.2);
+  const awayAttack =
+    (0.9 + (away.kineticIntensity ?? 50) / 500) *
+    scoreStateFactor(away.score, home.score) *
+    (1 + home.redCards * 0.2);
+  const homeAgainstStress = 0.9 + (away.resistanceDecay ?? 50) / 500;
+  const awayAgainstStress = 0.9 + (home.resistanceDecay ?? 50) / 500;
   const expectedHome = clamp(homeRate * remainingMinutes * homeAttack * homeAgainstStress, 0, 10);
   const expectedAway = clamp(awayRate * remainingMinutes * awayAttack * awayAgainstStress, 0, 10);
   home.projectedGoalsRemaining = expectedHome;
@@ -571,9 +601,6 @@ export function analyzeLiveMatch({
       0,
       100,
     );
-  const hasUsableLiveSignals =
-    home.shots > 0 || away.shots > 0 ||
-    home.xg !== null || away.xg !== null;
   const observedAt = liveAction.observedAt;
   const age = observedAt ? Math.max(0, Math.floor((now.getTime() - new Date(observedAt).getTime()) / 1000)) : null;
   const timeline = [...liveAction.events]
@@ -596,23 +623,12 @@ export function analyzeLiveMatch({
     playerRatings: home.ratedPlayers + away.ratedPlayers > 0,
     commentary: liveAction.events.length > 0,
   };
-  if (!hasUsableLiveSignals) {
-    return {
-      ...unavailable('insufficient-data', 'Waiting for live shot or xG data before running score scenarios.'),
-      home,
-      away,
-      elapsedMinute,
-      remainingMinutes,
-      observedAt,
-      observedAgeSeconds: age,
-      timeline,
-      signalCoverage,
-    };
-  }
-
   const simulation = simulateFinalScores(liveAction, home, away, remainingMinutes, elapsedMinute);
   const reasons: string[] = [];
   const totalShots = home.shots + away.shots;
+  if (totalShots === 0 && home.xg === null && away.xg === null) {
+    reasons.push('No live shots or xG have arrived; this estimate starts from a general scoring baseline.');
+  }
   if (!signalCoverage.xg) reasons.push('At least one side lacks source xG; a shot-count proxy or neutral scoring prior is used.');
   if (!signalCoverage.shotCoordinates) reasons.push('Shot locations are unavailable in this snapshot.');
   if (!signalCoverage.playerRatings) reasons.push('No source-reported player ratings were returned.');
