@@ -22,6 +22,7 @@ import FairAiForensicsPanel from '@/components/fair-ai-forensics-panel';
 import { MatchReplayPanel } from '@/components/match-replay-panel';
 import { MatchCenterPanel } from '@/components/match-center-panel';
 import { LiveActionSourcePanel } from '@/components/live-action-source-panel';
+import { LiveIntelligencePanel } from '@/components/live-intelligence-panel';
 import { OddsTranslationPanel } from '@/components/odds-translation-panel';
 import {
   ArrowLeft,
@@ -36,11 +37,12 @@ import {
   Trophy,
 } from 'lucide-react';
 
-type MatchTab = 'table' | 'fair-ai' | 'match-center' | 'live-action' | 'replay' | 'odds' | 'odds-translation' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
+type MatchTab = 'table' | 'fair-ai' | 'match-center' | 'live-intelligence' | 'live-action' | 'replay' | 'odds' | 'odds-translation' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
 const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'table', label: 'Table', short: '01' },
   { id: 'fair-ai', label: 'Forensics', short: '02' },
   { id: 'match-center', label: 'Match centre', short: '12' },
+  { id: 'live-intelligence', label: 'Live intelligence', short: '15' },
   { id: 'live-action', label: 'Live action', short: '13' },
   { id: 'replay', label: 'Match replay', short: '11' },
   { id: 'odds', label: 'Odds', short: '03' },
@@ -66,7 +68,7 @@ function isCompleteMatchStatus(status: string | undefined) {
 }
 
 function isLiveMatchStatus(status: string | undefined) {
-  return /\b(live|in play|in progress|first half|second half|1st half|2nd half|1h|2h|half[ -]?time|halftime)\b/i.test(status ?? '');
+  return /\b(live|in play|in progress|first half|second half|1st half|2nd half|1h|2h|half[ -]?time|halftime|extra time|extra-time)\b/i.test(status ?? '');
 }
 
 function formatDate(value: string) {
@@ -274,7 +276,7 @@ export default function MatchDetailsPage() {
     setActiveTab('fair-ai');
   }, [fixtureId]);
   useEffect(() => {
-    if (isLiveMatchStatus(details?.match.status)) setActiveTab('match-center');
+    if (isLiveMatchStatus(details?.match.status)) setActiveTab('live-intelligence');
   }, [fixtureId, details?.match.status]);
   const matchCenterQuery = useGetFootballMatchCenter(validId ? fixtureId : 0, {
     query: {
@@ -309,7 +311,8 @@ export default function MatchDetailsPage() {
       enabled:
         validId &&
         ((activeTab === 'replay' && isComplete) ||
-          (activeTab === 'match-center' && (isLive || isComplete))),
+          (activeTab === 'match-center' && (isLive || isComplete)) ||
+          (activeTab === 'live-intelligence' && isLive)),
       queryKey: getGetFootballMatchReplayQueryKey(fixtureId),
       retry: false,
       staleTime: isLive ? 30_000 : 10 * 60_000,
@@ -318,7 +321,7 @@ export default function MatchDetailsPage() {
     },
   });
   const visibleTabs = tabs.filter((tab) =>
-    tab.id === 'replay' ? isComplete : tab.id === 'live-action' ? isLive : true,
+    tab.id === 'replay' ? isComplete : tab.id === 'live-action' || tab.id === 'live-intelligence' ? isLive : true,
   );
 
   return (
@@ -422,6 +425,17 @@ export default function MatchDetailsPage() {
                 )}
                 {activeTab === 'live-action' && isLive && (
                   <LiveActionSourcePanel key={match.fixtureId} match={match} />
+                )}
+                {activeTab === 'live-intelligence' && isLive && (
+                  <LiveIntelligencePanel
+                    key={match.fixtureId}
+                    fixtureId={fixtureId}
+                    matchCenter={matchCenter}
+                    replay={replayQuery.data}
+                    replayLoading={replayQuery.isLoading}
+                    replayError={replayQuery.error}
+                    onRetryReplay={() => { void replayQuery.refetch(); }}
+                  />
                 )}
                 {activeTab === 'replay' && isComplete && (
                   <MatchReplayPanel
