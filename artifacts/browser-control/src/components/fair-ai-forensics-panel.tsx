@@ -71,7 +71,7 @@ function TeamSelector({
           <span className="mono shrink-0 text-[7px] text-[#718172]">
             {selected.recentMatchCount
               ? `${selected.recentMatchCount} archive matches`
-              : 'latest five refresh on run'}
+              : 'latest ten refresh on run'}
           </span>
         </div>
       )}
@@ -543,7 +543,7 @@ export default function FairAiForensicsPanel({
           <span className="grid size-9 place-items-center rounded-xl bg-[#deeadf] text-[#557b63]" aria-hidden="true"><Activity size={16} /></span>
           <div>
             <p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">FAIR AI / post-match review</p>
-            <h2 id="fair-forensics-title" className="mt-0.5 text-[13px] font-extrabold text-[#344550]">Tactical patterns across the last five</h2>
+            <h2 id="fair-forensics-title" className="mt-0.5 text-[13px] font-extrabold text-[#344550]">Tactical patterns across the last ten</h2>
           </div>
         </div>
         <span className="rounded-full border border-[#d7dfd5] bg-white px-2.5 py-1 text-[8px] font-extrabold uppercase tracking-[.08em] text-[#627b67]">
@@ -555,7 +555,7 @@ export default function FairAiForensicsPanel({
         <div className="flex max-w-[1000px] items-start gap-2 rounded-lg border border-[#e8dfca] bg-[#faf5e9] px-3 py-2.5 text-[8px] leading-[1.65] text-[#7d6c4d]" role="note">
           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
           <p>
-            This review compares each team&apos;s five latest eligible completed matches, including event timelines, source comments, full/half statistics, formations, lineups and player ratings. Market picks below are derived from those samples and the Forensics assessment; they are not calibrated forecasts.
+            This review compares each team&apos;s ten latest eligible completed matches, including event timelines, source comments, full/half statistics, formations, lineups and player ratings. Market picks below are derived from those samples and the Forensics assessment; they are not calibrated forecasts.
             {excludeFixtureId !== undefined && " The fixture being viewed is excluded from both samples, even if it has finished."}
           </p>
         </div>
@@ -588,8 +588,8 @@ export default function FairAiForensicsPanel({
             data-testid="button-run-forensic-review"
           >
             {forensics.isPending
-              ? <><RefreshCw size={12} className="animate-spin" /> Refreshing last five…</>
-              : <><ShieldAlert size={12} /> {forensics.data ? 'Refresh forensic review' : 'Analyze last five'}</>}
+              ? <><RefreshCw size={12} className="animate-spin" /> Refreshing last ten…</>
+              : <><ShieldAlert size={12} /> {forensics.data ? 'Refresh forensic review' : 'Analyze last ten'}</>}
           </button>
           {home && away && home.teamKey === away.teamKey && (
             <span className="text-[8px] text-[#a35f4d]" role="status">Select two different teams.</span>

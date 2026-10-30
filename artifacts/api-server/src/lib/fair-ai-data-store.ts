@@ -1012,7 +1012,10 @@ function mergeForensicsFallback(
 
 async function refreshFairAiTeamsFromSource(
   teamKeys: string[],
-  options: { excludeFixtureIds?: readonly number[] } = {},
+  options: {
+    matchesPerTeam?: number;
+    excludeFixtureIds?: readonly number[];
+  } = {},
 ): Promise<{
   sourceTeamIds: number[];
   recentFixtureIdsByTeam: Record<number, number[]>;
@@ -1033,7 +1036,7 @@ async function refreshFairAiTeamsFromSource(
   });
   const refreshed = await getFreshKickoffScoreFairAiSnapshots(
     selectedTeams,
-    5,
+    options.matchesPerTeam ?? 5,
     options.excludeFixtureIds,
   );
   for (const snapshot of refreshed.snapshots) {
@@ -2118,6 +2121,7 @@ export async function runFairAiArchiveForensics(
     input.homeTeamKey,
     input.awayTeamKey,
   ], {
+    matchesPerTeam: 10,
     excludeFixtureIds:
       input.excludeFixtureId === undefined ? [] : [input.excludeFixtureId],
   });

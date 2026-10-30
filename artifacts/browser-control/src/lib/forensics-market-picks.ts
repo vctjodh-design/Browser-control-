@@ -14,7 +14,7 @@ export type ForensicsMarketPick = {
   confidenceReason: string;
 };
 
-const EXPECTED_TEAM_MATCHES = 5;
+const EXPECTED_TEAM_MATCHES = 10;
 
 function average(values: Array<number | null>): number | null {
   const available = values.filter(

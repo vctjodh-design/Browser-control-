@@ -723,26 +723,26 @@ export function buildFairAiTacticalForensics(
   );
   const homeSample = collectTeamSample(
     homeTeamId,
-    (recentFixtureIdsByTeam[homeTeamId] ?? []).slice(0, 5),
+    (recentFixtureIdsByTeam[homeTeamId] ?? []).slice(0, 10),
     snapshotsByFixture,
   );
   const awaySample = collectTeamSample(
     awayTeamId,
-    (recentFixtureIdsByTeam[awayTeamId] ?? []).slice(0, 5),
+    (recentFixtureIdsByTeam[awayTeamId] ?? []).slice(0, 10),
     snapshotsByFixture,
   );
   const home = teamProfile(homeTeamName, homeSample);
   const away = teamProfile(awayTeamName, awaySample);
 
   return {
-    source: "Fresh KickoffScore match timelines/comments, full and half statistics, formations, lineups, and player ratings from up to five completed matches per team.",
+    source: "Fresh KickoffScore match timelines/comments, full and half statistics, formations, lineups, and player ratings from up to ten completed matches per team.",
     home,
     away,
     assessment: buildFairAiTacticalMatchupAssessment(home, away),
     opponentRecentStrengthStatus: "unavailable",
     matchupNote: "The matchup outlook is a qualitative comparison of the evidence areas shown below, not a calibrated probability or a claim that aggregate data proves tactical causation.",
     limitations: [
-      "The source does not provide these historical opponents' own as-of-match five-game strength records, so opponent recent strength is unavailable rather than guessed.",
+      "The source does not provide these historical opponents' own as-of-match ten-game strength records, so opponent recent strength is unavailable rather than guessed.",
       "Aggregate match statistics do not identify pressing height or efficiency, high-line behavior, overloads, rest-defense shape, counterattacks, tactical confidence, or managerial adaptations.",
       "Scores and BTTS/goal-line frequencies describe only this small historical sample; the outlook is a qualitative lean, not a probability or calibrated forecast.",
       "Pass completion, long-ball completion, recoveries, tackles, interceptions, and shots conceded are indicators, not proof of the tactical mechanisms behind a scoreline.",

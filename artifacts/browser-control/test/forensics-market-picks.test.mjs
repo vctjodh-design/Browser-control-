@@ -5,20 +5,20 @@ import { buildForensicsMarketPicks } from "../src/lib/forensics-market-picks.ts"
 function forensics(overrides = {}) {
   const home = {
     teamName: "North",
-    matchesAnalyzed: 5,
-    results: { wins: 3, draws: 1, losses: 1 },
-    bttsMatches: 4,
-    over25Matches: 4,
+    matchesAnalyzed: 10,
+    results: { wins: 6, draws: 2, losses: 2 },
+    bttsMatches: 8,
+    over25Matches: 7,
     averageGoalsFor: 1.8,
     averageGoalsAgainst: 1.2,
     ...overrides.home,
   };
   const away = {
     teamName: "South",
-    matchesAnalyzed: 5,
-    results: { wins: 1, draws: 1, losses: 3 },
-    bttsMatches: 2,
-    over25Matches: 2,
+    matchesAnalyzed: 10,
+    results: { wins: 2, draws: 2, losses: 6 },
+    bttsMatches: 4,
+    over25Matches: 5,
     averageGoalsFor: 1.2,
     averageGoalsAgainst: 1.8,
     ...overrides.away,
@@ -51,15 +51,15 @@ test("market picks use forensic samples and assessment without simulation inputs
   assert.equal(picks[0].confidence, "Moderate");
   assert.equal(picks[1].confidence, "Moderate");
   assert.equal(picks[3].confidence, "Low");
-  assert.match(picks[0].confidenceReason, /6\/10 analyzed team matches/);
+  assert.match(picks[0].confidenceReason, /12\/20 analyzed team matches/);
   assert.match(picks[3].confidenceReason, /rounded averages/);
   assert.match(picks[1].details, /historical frequency/);
 });
 
 test("the Forensics assessment breaks an even goal-market sample tie", () => {
   const picks = buildForensicsMarketPicks(forensics({
-    home: { bttsMatches: 2, over25Matches: 2 },
-    away: { bttsMatches: 3, over25Matches: 3 },
+    home: { bttsMatches: 5, over25Matches: 5 },
+    away: { bttsMatches: 5, over25Matches: 5 },
     assessment: { resultLean: "no_clear_edge", scoringLean: "tight" },
   }));
 
@@ -102,10 +102,10 @@ test("insufficient forensic samples produce no unsupported market picks", () => 
 
 test("high confidence requires near-complete coverage and strong sample agreement", () => {
   const picks = buildForensicsMarketPicks(forensics({
-    home: { bttsMatches: 5, over25Matches: 5 },
-    away: { bttsMatches: 4, over25Matches: 4 },
+    home: { bttsMatches: 10, over25Matches: 10 },
+    away: { bttsMatches: 8, over25Matches: 8 },
   }));
 
   assert.equal(picks[1].confidence, "High");
-  assert.match(picks[1].confidenceReason, /9\/10 analyzed team matches/);
+  assert.match(picks[1].confidenceReason, /18\/20 analyzed team matches/);
 });
