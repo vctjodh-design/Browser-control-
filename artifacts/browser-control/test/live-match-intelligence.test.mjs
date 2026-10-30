@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeLiveMatch, LIVE_SIMULATION_RUNS } from '../src/lib/live-match-intelligence.ts';
+import {
+  analyzeLiveMatch,
+  buildLiveLearningFeatures,
+  LIVE_SIMULATION_RUNS,
+} from '../src/lib/live-match-intelligence.ts';
 
 function liveAction(overrides = {}) {
   return {
@@ -194,6 +198,82 @@ test('sums only reported shot xG values instead of spreading them across missing
     matchCenter: matchCenter(),
   });
   assert.equal(result.home.xg, 0.3);
+});
+
+test('applies learned calibration weights to remaining-goal estimates', () => {
+  const input = {
+    liveAction: liveAction(),
+    matchCenter: matchCenter(),
+  };
+  const baseline = analyzeLiveMatch(input);
+  const calibrated = analyzeLiveMatch({
+    ...input,
+    calibrationWeights: { home: [0.1], away: [0] },
+    completedMatches: 4,
+  });
+  assert.ok(calibrated.home.projectedGoalsRemaining > baseline.home.projectedGoalsRemaining);
+  assert.equal(calibrated.away.projectedGoalsRemaining, baseline.away.projectedGoalsRemaining);
+  assert.equal(calibrated.home.calibrationMultiplier, Math.exp(0.1));
+  assert.ok(calibrated.confidence.reasons.some((reason) => /4 completed matches/i.test(reason)));
+});
+
+test('learning features reflect recent goals and red-card incidents', () => {
+  const state = analyzeLiveMatch({
+    liveAction: liveAction(),
+    matchCenter: matchCenter({
+      events: [
+        {
+          minute: 63,
+          extraMinute: null,
+          teamId: 1,
+          teamName: 'Harbor FC',
+          player: 'A. Player',
+          playerId: 10,
+          assist: null,
+          assistId: null,
+          type: 'Goal',
+          detail: 'Goal',
+          comments: null,
+        },
+        {
+          minute: 68,
+          extraMinute: null,
+          teamId: 2,
+          teamName: 'Valley United',
+          player: 'B. Player',
+          playerId: 11,
+          assist: null,
+          assistId: null,
+          type: 'Card',
+          detail: 'Red card',
+          comments: null,
+        },
+        {
+          minute: 69,
+          extraMinute: null,
+          teamId: 2,
+          teamName: 'Valley United',
+          player: 'C. Player',
+          playerId: 12,
+          assist: null,
+          assistId: null,
+          type: 'Card',
+          detail: 'Yellow card',
+          comments: null,
+        },
+      ],
+    }),
+  });
+  const homeFeatures = buildLiveLearningFeatures(state.home, state.away, matchCenter({
+    events: [
+      { minute: 63, extraMinute: null, teamId: 1, teamName: 'Harbor FC', player: null, playerId: null, assist: null, assistId: null, type: 'Goal', detail: 'Goal', comments: null },
+      { minute: 68, extraMinute: null, teamId: 2, teamName: 'Valley United', player: null, playerId: null, assist: null, assistId: null, type: 'Card', detail: 'Red card', comments: null },
+      { minute: 69, extraMinute: null, teamId: 2, teamName: 'Valley United', player: null, playerId: null, assist: null, assistId: null, type: 'Card', detail: 'Yellow card', comments: null },
+    ],
+  }), 70);
+  assert.equal(homeFeatures[3], 0.5);
+  assert.equal(homeFeatures[4], 0.5);
+  assert.equal(homeFeatures[9], 1 / 3);
 });
 
 test('rejects a 365Scores source whose teams do not match the fixture', () => {
