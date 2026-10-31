@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import {
+  buildImpersonation,
+  STEALTH_LAUNCH_ARGS,
+  type Impersonation,
+} from "./browser-fingerprint";
 import { logger } from "./logger";
 import {
   BrowserPolicyError,
@@ -98,7 +103,11 @@ async function ensureBrowser(): Promise<Browser> {
           server: proxy.url,
           bypass: "<-loopback>",
         },
-        args: ["--no-sandbox", "--disable-dev-shm-usage"],
+        args: [
+          "--no-sandbox",
+          "--disable-dev-shm-usage",
+          ...STEALTH_LAUNCH_ARGS,
+        ],
       });
       return browser;
     } catch (error) {
@@ -506,10 +515,7 @@ export async function createBrowserSession(
   validateTabCount(tabCount);
   await cleanupExpiredSessions();
   if (sessions.size + pendingSessionCreations >= MAX_SESSIONS) {
-    throw new BrowserOperationError(
-      "All browser sessions are currently in use. Close another session or wait for an inactive session to expire.",
-      503,
-    );
+    await makeRoomForSession();
   }
 
   pendingSessionCreations += 1;
@@ -518,12 +524,17 @@ export async function createBrowserSession(
   let sessionId: string | undefined;
   try {
     const browserInstance = await ensureBrowser();
+    const impersonation: Impersonation = buildImpersonation(browserInstance.version());
     context = await browserInstance.newContext({
       viewport: VIEWPORT,
       deviceScaleFactor: 1,
       acceptDownloads: false,
       serviceWorkers: "allow",
+      ...impersonation.contextOptions,
     });
+    // Runs in every tab and frame before page scripts: hides the automation
+    // surface and installs the impersonated fingerprint.
+    await context.addInitScript(impersonation.initScript);
     const page = await context.newPage();
     sessionId = randomUUID();
     const session: BrowserSession = {
@@ -976,6 +987,56 @@ async function closeBrowserWhenUnused(): Promise<void> {
   await currentBrowser.close().catch(() => undefined);
   await proxy?.close().catch(() => undefined);
   proxy = undefined;
+}
+
+/**
+ * The session cap must not turn into a dead end: the request that just
+ * arrived is the one the user is actively waiting on, so the least-recently-
+ * used sessions are closed to free a slot instead of rejecting it.
+ */
+async function makeRoomForSession(): Promise<void> {
+  const overflow = sessions.size + pendingSessionCreations - MAX_SESSIONS + 1;
+  const victims = Array.from(sessions.values())
+    .sort((left, right) => left.lastUsedAt - right.lastUsedAt)
+    .slice(0, overflow);
+
+  if (victims.length < overflow) {
+    // Every slot belongs to a creation still in flight; let that finish.
+    throw new BrowserOperationError(
+      "All browser sessions are currently in use. Close another session or wait for an inactive session to expire.",
+      503,
+    );
+  }
+
+  // Hold a reservation while closing so the shared browser is not torn down
+  // and relaunched between the eviction and the new context.
+  pendingSessionCreations += 1;
+  try {
+    await Promise.all(
+      victims.map((victim) =>
+        closeBrowserSession(victim.id).catch((error: unknown) => {
+          logger.warn(
+            { errorName: error instanceof Error ? error.name : "UnknownError" },
+            "A busy browser session could not be closed to make room",
+          );
+        }),
+      ),
+    );
+  } finally {
+    pendingSessionCreations -= 1;
+  }
+
+  logger.info(
+    { closed: victims.length, remaining: sessions.size },
+    "Closed idle browser sessions to make room for a new one",
+  );
+
+  if (sessions.size + pendingSessionCreations >= MAX_SESSIONS) {
+    throw new BrowserOperationError(
+      "All browser sessions are currently in use. Close another session or wait for an inactive session to expire.",
+      503,
+    );
+  }
 }
 
 async function cleanupExpiredSessions(): Promise<void> {

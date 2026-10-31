@@ -221,13 +221,16 @@ function BrowserConsole() {
   }, [state?.currentUrl]);
 
   useEffect(() => {
-    const releaseActiveSession = () => {
-      releaseBrowserSession(activeSessionIdRef.current);
-    };
-    window.addEventListener('pagehide', releaseActiveSession);
+    // No page-exit release here on purpose. Mobile Chrome fires `pagehide`
+    // whenever the tab goes to the background (new tab, app switch) — often
+    // with `persisted: false` even though the page comes back untouched — and
+    // the keepalive DELETE then goes out while the connection is being torn
+    // down. The server honours it, the SPA keeps its sessionId, and the user
+    // returns to "This browser session has ended or expired" with every tab
+    // gone. Abandonment is handled server-side instead: sessions expire after
+    // 30 minutes idle and are evicted least-recently-used at the cap.
     return () => {
-      window.removeEventListener('pagehide', releaseActiveSession);
-      releaseActiveSession();
+      releaseBrowserSession(activeSessionIdRef.current);
     };
   }, []);
 

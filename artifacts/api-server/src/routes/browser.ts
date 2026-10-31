@@ -102,6 +102,14 @@ router.delete(
       return;
     }
 
+    // Logged here rather than relying on pino-http: a close request that
+    // arrives as its connection is torn down never completes, so pino-http
+    // would drop it and the close would look unexplained in the logs.
+    req.log.info(
+      { sessionId: params.data.sessionId },
+      "Session close requested",
+    );
+
     try {
       await closeBrowserSession(params.data.sessionId);
       res.status(204).json(CloseBrowserSessionResponse.parse(undefined));
