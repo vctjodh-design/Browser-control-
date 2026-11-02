@@ -22,7 +22,19 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/api-server` — Express API behind `/api` (fixtures, match details, replay, models).
+- `artifacts/browser-control` — the React app (fixtures, match centre, browser console).
+- `artifacts/browser-control/sim.html` + `src/sim3d/` — the stadium match simulation embedded in the match page; it reads the fixture's teams, kit colours and venue from query parameters.
+- `lib/api-spec`, `lib/api-zod`, `lib/api-client-react` — OpenAPI contract and its generated client.
+- `lib/db` — Drizzle schema and pool.
+
+## Match simulation
+
+Opening a fixture (`/matches/:id`) shows the fixture overview and then a live 3D
+match: `sim.html` runs the simulation in an iframe so the game keeps its own HUD
+and styles. It is a self-contained engine (utility-driven agents, fatigue,
+tactics, fouls and cards, set pieces) under `src/sim3d/`; the host page only
+supplies the two clubs, their colours and the venue.
 
 ## Architecture decisions
 

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Match simulation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene"></canvas>
+      <div id="vignette"></div>
+      <div id="grain"></div>
+
+      <div id="hud">
+        <div class="scoreboard">
+          <div class="team home">
+            <span class="crest" style="--c1: #e0142c; --c2: #7a0512"></span>
+            <span class="name">NORTHGATE</span>
+            <span class="cards" id="cards-home"></span>
+          </div>
+          <div class="score-box">
+            <div class="score"><span id="score-home">0</span><i>–</i><span id="score-away">0</span></div>
+            <div class="clock"><span id="match-clock">00:00</span></div>
+          </div>
+          <div class="team away">
+            <span class="cards" id="cards-away"></span>
+            <span class="name">RIVERMOUTH</span>
+            <span class="crest" style="--c1: #1b4dd8; --c2: #0a2a80"></span>
+          </div>
+        </div>
+
+        <div class="match-strip">
+          <div class="tactic home" id="tactic-home">HIGH PRESS</div>
+          <div class="strip-stats">
+            <div class="stat"><span id="shots-home">0</span><label>SHOTS</label><span id="shots-away">0</span></div>
+            <div class="stat"><span id="ontarget-home">0</span><label>ON TARGET</label><span id="ontarget-away">0</span></div>
+            <div class="stat"><span id="fouls-home">0</span><label>FOULS</label><span id="fouls-away">0</span></div>
+            <div class="stat"><span id="corners-home">0</span><label>CORNERS</label><span id="corners-away">0</span></div>
+          </div>
+          <div class="tactic away" id="tactic-away">MID BLOCK</div>
+        </div>
+
+        <div class="statline">
+          <span class="label">POSSESSION</span>
+          <div class="bar">
+            <div class="fill home" id="poss-home"></div>
+            <div class="fill away" id="poss-away"></div>
+          </div>
+          <span class="pct"><b id="poss-home-pct">50</b>% · <b id="poss-away-pct">50</b>%</span>
+        </div>
+
+        <div id="ticker"></div>
+
+        <div id="banner">
+          <div class="banner-inner">
+            <div class="banner-kicker">LIVE · 20:45 KICK-OFF</div>
+            <h1>THE<br />NIGHT<br />MATCH</h1>
+            <p>Junction Stadium · 54,300 sold out</p>
+            <button id="kickoff-btn">KICK OFF</button>
+            <div class="banner-hint">Sound on for crowd atmosphere · move with WASD · C changes camera</div>
+          </div>
+        </div>
+
+        <div id="dock">
+          <div class="dock-group">
+            <span class="dock-label">CAMERA</span>
+            <button data-cam="broadcast" class="active">BROADCAST</button>
+            <button data-cam="tactical">TACTICAL</button>
+            <button data-cam="behind">BEHIND GOAL</button>
+            <button data-cam="player">PLAYER</button>
+          </div>
+          <div class="dock-group">
+            <span class="dock-label">SPEED</span>
+            <button data-speed="1" class="active">1×</button>
+            <button data-speed="1.5">1.5×</button>
+            <button data-speed="2.5">2.5×</button>
+          </div>
+          <div class="dock-group">
+            <button id="toggle-facecam">BE A PLAYER</button>
+            <button id="toggle-audio" class="active">SOUND</button>
+          </div>
+        </div>
+
+        <div id="player-hint" class="hidden">
+          <div class="ph-top">
+            <b>YOU</b>
+            <span id="ph-name">No.9 L. MARSH</span>
+            <span class="ph-stamina"><i id="ph-stamina"></i></span>
+          </div>
+          <div class="ph-keys">
+            Move <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · Sprint <kbd>SHIFT</kbd> · Pass <kbd>SPACE</kbd> · Shoot <kbd>F</kbd> · Slide <kbd>X</kbd>
+          </div>
+        </div>
+
+        <div id="card-flash" class="hidden">
+          <span class="card-chip" id="card-chip"></span>
+          <span id="card-flash-text">YELLOW CARD</span>
+        </div>
+
+        <div id="goal-overlay">
+          <div class="goal-word">GOAL!</div>
+          <div class="goal-sub" id="goal-sub">No.9 · NORTHGATE</div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/sim3d/boot.js"></script>
+  </body>
+</html>

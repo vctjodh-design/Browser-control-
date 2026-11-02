@@ -11,6 +11,7 @@ import {
   useGetFootballMatchTmp,
 } from '@workspace/api-client-react';
 import type { FootballMatchCenter, FootballMatchDetails, FootballMatchLastFive, FootballMatchTmpContext, FootballRecentMatch } from '@workspace/api-client-react';
+import { MatchSimPanel } from '@/components/match-sim-panel';
 import { MatchTmpPanel } from '@/components/match-tmp-panel';
 import { MatchInsightsPanel } from '@/components/match-insights-panel';
 import { MatchupAnalysisPanel } from '@/components/matchup-analysis-panel';
@@ -410,6 +411,8 @@ export default function MatchDetailsPage() {
                 <div className="flex items-center gap-2"><Shield size={13} className="text-[#9b7160]" /><span>{match.leagueId ? `League ${match.leagueId}` : match.competition}</span></div>
               </div>
             </section>
+
+            <MatchSimPanel home={match.home.name} away={match.away.name} venue={match.venue} />
 
             <section className="mt-5 overflow-hidden rounded-[16px] border border-[#d6d5cc] bg-[#f9f8f3] shadow-[0_12px_40px_rgba(47,59,64,.04)]">
               <div role="tablist" aria-label="Match details sections" className="flex gap-1 overflow-x-auto border-b border-[#deddd4] bg-[#f4f3ed] p-2 sm:p-2.5" data-testid="tabs-match-details">

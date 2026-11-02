@@ -63,6 +63,14 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, 'dist/public'),
     emptyOutDir: true,
+    // Two pages: the app itself and the standalone simulation the match page
+    // embeds in an iframe (it keeps the game's own HUD and styles isolated).
+    rollupOptions: {
+      input: {
+        main: path.resolve(import.meta.dirname, 'index.html'),
+        sim: path.resolve(import.meta.dirname, 'sim.html'),
+      },
+    },
   },
   server: {
     port,
