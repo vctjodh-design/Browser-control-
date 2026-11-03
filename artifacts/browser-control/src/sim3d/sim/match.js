@@ -1159,6 +1159,21 @@ export class Match {
     return null; // keep dribbling
   }
 
+  /**
+   * How open the match is right now. Sides feel each other out, the game
+   * loosens before the break, and the last twenty minutes are the ones where
+   * tired teams chase it: a real match rarely has its goals shared evenly.
+   */
+  tempoCurve() {
+    const minute = this.clock / 60;
+    if (minute < 8) return 0.72;
+    if (minute < 20) return 0.9;
+    if (minute < 45) return 1;
+    if (minute < 62) return 1.02;
+    if (minute < 76) return 1.07;
+    return 1.12;
+  }
+
   utilityShoot(a, ctx, dGoal) {
     const team = this.teams[a.teamIdx];
     const goal = this.oppGoal(team);
@@ -1186,7 +1201,7 @@ export class Match {
       if (at.shooting > 0.76 && at.flair > 0.6) u *= 2.2;
       else if (chance(0.02)) u *= 3;
     }
-    return u;
+    return u * this.tempoCurve();
   }
 
   utilityDribble(a, ctx, dGoal) {
@@ -1460,11 +1475,25 @@ export class Match {
     // crude expected goals, useful for the stats panel
     this.stats[team.idx].xg += clamp(Math.exp(-dist / 11) * (1 - Math.abs(a.pos.z) / 60) * 0.9, 0.02, 0.85);
     this.excite = Math.max(this.excite, 0.3 + (1 - Math.min(1, dist / 34)) * 0.3);
+    // A shot has a place as well as a taker: close range, the edge of the box,
+    // or a hopeful one from distance. Saying so is what makes a 9m scramble and
+    // a 28m strike read differently in the commentary.
+    const inBox = this.inOppBox(a.pos.x, a.pos.z, team);
+    const range = Math.round(dist);
+    const where = inBox
+      ? range < 9
+        ? 'from close range'
+        : 'from inside the box'
+      : range >= 25
+        ? `lets fly from ${range}m`
+        : 'shoots from outside the box';
     this.onEvent({
       type: 'shot',
-      text: `${a.name} ${dist > 24 ? 'lets fly from range' : 'shoots'} for ${team.name}`,
+      text: `${a.name} ${where} for ${team.name}`,
       team: team.idx,
       player: a.name,
+      range,
+      inBox,
     });
   }
 

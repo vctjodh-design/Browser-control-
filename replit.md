@@ -171,6 +171,19 @@ sprint at all, and tired legs cost real time on the ball (reaction rises by up
 to 0.16s), turn a tired midfielder into a sideways passer, spread shots wider
 and weaken tackles and saves. The last twenty minutes visibly slow down.
 
+A match also has a clock in the football sense. Shooting appetite follows a tempo
+curve — sides feel each other out for the first eight minutes, the game loosens
+before the break, and the last twenty minutes are the ones where tired teams
+chase it. Before this, goals arrived almost uniformly and only about one match
+in eight reached half time goalless; the bench now reads roughly a third, which
+is what a real league does.
+
+Shots also say where they came from. Commentary distinguishes a close-range
+scramble from a shot at the edge of the box and from a hopeful one 28m out, and
+the shot carries its range with it, so a live match does not read as twenty
+identical entries. Measured over the bench, about two thirds of shots come from
+inside the box and the rest from outside it.
+
 Nobody decides instantly either: every action waits out a reaction timer of
 roughly 0.16–0.40s that lengthens with fatigue and shortens with composure, and
 then picks from scored options — space, risk, whether the pass goes forward, how
@@ -187,6 +200,15 @@ chosen as the line nearest a coin flip rather than the 98% certain under that
 would flatter the model; the selection it calls is tagged `pick` inside the
 group. The edge against the price stays on the right of the header, so a market
 can be read without expanding it.
+
+What the player is actually fed: the last fifteen results, eight of them opened
+up for team statistics and team sheets, the resulting per-player shot, pass and
+duel output, the predicted XI and the league table. That becomes attribute
+nudges, a formation and pressing/line/width/risk/tempo/direct settings — never a
+result. What it does **not** read is commentary text, and the recent-results feed
+carries no half-time scores, so first-half/second-half form is modelled from the
+match clock rather than from each club's own splits. The fixture's own half-time
+score is known to the page but only for the match being played.
 
 The market simulation sits **above** the bookmaker board, not under it: fifty-odd
 markets of prices push a panel below them out of sight, which is where it used
