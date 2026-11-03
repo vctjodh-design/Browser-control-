@@ -477,12 +477,13 @@ export default function MatchDetailsPage() {
                       <p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">Post-match review · last ten completed games</p>
                       <h2 id="fair-ai-match-title" className="mt-1 text-[14px] font-extrabold text-[#344550]">Tactical forensics for {match.home.name} vs {match.away.name}</h2>
                       <p className="mt-1 text-[9px] leading-5 text-[#727973]">
-                        Compare each team&apos;s ten latest match timelines, commentary, full/half statistics, formations, lineups and player impact, then view FAIR AI picks for 1X2, BTTS, goals over/under 2.5 and correct score.
+                        Compare each team&apos;s ten latest match timelines, commentary, full/half statistics, formations, lineups and player impact, then view the market board: 1X2, double chance, draw no bet, BTTS, goals over/under 1.5/2.5/3.5, total goals odd/even, team totals, clean sheets, win to nil, handicap and correct score, all priced from the fixture odds model.
                       </p>
                     </div>
                     <FairAiForensicsPanel
                       key={match.fixtureId}
                       excludeFixtureId={match.fixtureId}
+                      oddsMarkets={details?.oddsMarkets}
                       initialHome={{
                         teamKey: `id:${match.home.id}`,
                         name: match.home.name,

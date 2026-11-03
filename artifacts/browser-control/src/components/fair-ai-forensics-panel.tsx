@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   getGetFootballFairAiTeamsQueryKey,
   useGetFootballFairAiTeams,
@@ -8,9 +8,15 @@ import {
   type FootballFairAiTacticalMatchEvidence,
   type FootballFairAiTacticalMatchupAssessment,
   type FootballFairAiTeam,
+  type FootballOddsMarket,
 } from '@workspace/api-client-react';
 import { Activity, AlertTriangle, RefreshCw, Search, ShieldAlert } from 'lucide-react';
-import { buildForensicsMarketPicks } from '@/lib/forensics-market-picks';
+import { analyzeOddsExpectation, type OddsExpectationReport } from '@/lib/odds-expectation';
+import {
+  buildForensicsMarketPicks,
+  strongestForensicsPick,
+  type ForensicsMarketPick,
+} from '@/lib/forensics-market-picks';
 
 type TeamChoice = Pick<FootballFairAiTeam, 'teamKey' | 'name' | 'recentMatchCount'>;
 
@@ -18,6 +24,8 @@ type FairAiForensicsPanelProps = {
   initialHome?: TeamChoice;
   initialAway?: TeamChoice;
   excludeFixtureId?: number;
+  /** Full fixture odds board; turns the sample picks into a priced market board. */
+  oddsMarkets?: FootballOddsMarket[];
 };
 
 function TeamSelector({
@@ -160,10 +168,14 @@ function Metric({
 
 function ForensicsPredictionMarkets({
   result,
+  odds,
 }: {
   result: FootballFairAiTacticalForensics;
+  odds?: OddsExpectationReport | null;
 }) {
-  const cards = buildForensicsMarketPicks(result);
+  const cards = buildForensicsMarketPicks(result, odds);
+  const strongest = strongestForensicsPick(cards);
+  const priced = cards.some((card) => card.basis === 'odds');
 
   return (
     <section
@@ -173,12 +185,34 @@ function ForensicsPredictionMarkets({
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <p className="mono text-[7px] uppercase tracking-[.13em] text-[#9b7160]">Forensics evidence · sample-based picks</p>
+          <p className="mono text-[7px] uppercase tracking-[.13em] text-[#9b7160]">
+            {priced ? 'Fixture odds board · every market priced' : 'Form model · no fixture odds supplied'}
+          </p>
           <h3 id="forensics-predictions-title" className="mt-1 text-[11px] font-extrabold text-[#40534b]">
-            Market picks
+            Market board · {cards.length} markets
           </h3>
         </div>
+        <span
+          className="rounded-full border border-[#d7dfd5] bg-[#f3f7f0] px-2.5 py-1 text-[7px] font-extrabold uppercase tracking-[.08em] text-[#5d7565]"
+          data-testid="text-forensics-market-source"
+        >
+          {priced ? `Odds model · ${odds?.marketSourceCount ?? 0} markets` : 'Form sample only'}
+        </span>
       </div>
+
+      {strongest && (
+        <div
+          className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-[#cfe0cb] bg-[#eef5eb] px-3 py-2"
+          data-testid="text-forensics-strongest-pick"
+        >
+          <span className="mono text-[7px] font-extrabold uppercase tracking-[.1em] text-[#54755c]">Strongest pick</span>
+          <span className="text-[11px] font-extrabold text-[#2f5741]">{strongest.pick}</span>
+          <span className="mono rounded-full bg-white px-2 py-0.5 text-[8px] font-extrabold text-[#456b58]">
+            {strongest.probability === null ? '—' : `${(strongest.probability * 100).toFixed(1)}%`}
+          </span>
+          <span className="text-[7px] font-bold uppercase tracking-[.06em] text-[#7b8a7c]">{strongest.title}</span>
+        </div>
+      )}
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => (
@@ -189,6 +223,10 @@ function ForensicsPredictionMarkets({
           >
             <p className="text-[7px] font-extrabold uppercase tracking-[.08em] text-[#858982]">{card.title}</p>
             <p className="mt-1.5 text-[11px] font-extrabold text-[#456b58]">{card.pick}</p>
+            <p className="mono mt-1 block text-[8px] font-bold text-[#5f7d6b]" data-testid={`text-forensics-pick-probability-${card.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
+              Chance {card.probability === null ? '—' : `${(card.probability * 100).toFixed(1)}%`}
+              {card.alternative ? ` · next ${card.alternative}` : ''}
+            </p>
             <p
               className={`mt-1 inline-flex rounded-full border px-1.5 py-0.5 text-[7px] font-extrabold ${
                 card.confidence === 'High'
@@ -212,7 +250,10 @@ function ForensicsPredictionMarkets({
         ))}
       </div>
       <p className="mt-2 text-[7px] leading-4 text-[#8a785d]" data-testid="text-forensics-prediction-limit">
-        Confidence reflects sample coverage and agreement, not a calibrated probability or proven accuracy rate. Correct-score confidence stays low because it is inferred from rounded averages.
+        {priced
+          ? 'Probabilities come from a Poisson scoreline model fitted to this fixture\u2019s live odds board, so every market above is priced from the same distribution; recent form is shown as a cross-check.'
+          : 'The fixture odds board was not supplied, so these probabilities come from a Poisson model built on the recent scoring samples alone.'}{' '}
+        Percentages are modelled probabilities, not guaranteed outcomes, and confidence also reflects sample coverage.
       </p>
     </section>
   );
@@ -233,10 +274,12 @@ function MatchupAssessment({
   assessment,
   homeName,
   awayName,
+  odds,
 }: {
   assessment: FootballFairAiTacticalMatchupAssessment;
   homeName: string;
   awayName: string;
+  odds?: OddsExpectationReport | null;
 }) {
   const resultLabel = assessment.resultLean === 'home'
     ? `${homeName} edge`
@@ -269,6 +312,18 @@ function MatchupAssessment({
         </div>
       </div>
       <p className="mt-2 text-[8px] leading-5 text-[#66736a]" data-testid="text-forensics-assessment-summary">{assessment.summary}</p>
+      {odds && (
+        <p className="mt-2 rounded-lg border border-[#d6e0d2] bg-white px-2.5 py-2 text-[8px] leading-5 text-[#4e6b57]" data-testid="text-forensics-priced-read">
+          <strong className="font-extrabold text-[#3c5c47]">Priced read:</strong>{' '}
+          {odds.result.map((option) => `${option.label} ${(option.probability * 100).toFixed(1)}%`).join(' · ')}
+          {(() => {
+            const line = odds.totals.find((entry) => entry.line === 2.5);
+            if (!line) return null;
+            return ` · ${line.over >= line.under ? 'over' : 'under'} 2.5 goals ${(Math.max(line.over, line.under) * 100).toFixed(1)}%`;
+          })()}
+          {` · both score ${(odds.btts[0].probability * 100).toFixed(1)}%`}
+        </p>
+      )}
       <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {assessment.factors.map((item) => (
           <article key={item.area} className="rounded-lg border border-[#e0e5dc] bg-white p-2.5" data-testid={`forensics-factor-${item.area.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
@@ -516,11 +571,22 @@ export default function FairAiForensicsPanel({
   initialHome,
   initialAway,
   excludeFixtureId,
+  oddsMarkets,
 }: FairAiForensicsPanelProps) {
   const [home, setHome] = useState<TeamChoice | null>(initialHome ?? null);
   const [away, setAway] = useState<TeamChoice | null>(initialAway ?? null);
   const forensics = useRunFootballFairAiForensics();
   const [analysisPair, setAnalysisPair] = useState<string | null>(null);
+
+  // Price the picks from the fixture's own odds board when the match page has it.
+  const oddsReport = useMemo<OddsExpectationReport | null>(() => {
+    if (!oddsMarkets?.length || !initialHome?.name || !initialAway?.name) return null;
+    try {
+      return analyzeOddsExpectation(oddsMarkets, initialHome.name, initialAway.name);
+    } catch {
+      return null;
+    }
+  }, [oddsMarkets, initialHome?.name, initialAway?.name]);
 
   useEffect(() => {
     setHome(initialHome ?? null);
@@ -555,7 +621,7 @@ export default function FairAiForensicsPanel({
         <div className="flex max-w-[1000px] items-start gap-2 rounded-lg border border-[#e8dfca] bg-[#faf5e9] px-3 py-2.5 text-[8px] leading-[1.65] text-[#7d6c4d]" role="note">
           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
           <p>
-            This review compares each team&apos;s ten latest eligible completed matches, including event timelines, source comments, full/half statistics, formations, lineups and player ratings. Market picks below are derived from those samples and the Forensics assessment; they are not calibrated forecasts.
+            This review compares each team&apos;s ten latest eligible completed matches, including event timelines, source comments, full/half statistics, formations, lineups and player ratings. The market board below prices every market from the fixture odds model and shows the recent samples as a cross-check; without a fixture odds board it falls back to a form-only model.
             {excludeFixtureId !== undefined && " The fixture being viewed is excluded from both samples, even if it has finished."}
           </p>
         </div>
@@ -612,11 +678,12 @@ export default function FairAiForensicsPanel({
             <p className="text-[8px] leading-4 text-[#737c73]" data-testid="text-forensics-source">
               Source: {forensics.data.source} {forensics.data.matchupNote}
             </p>
-            <ForensicsPredictionMarkets result={forensics.data} />
+            <ForensicsPredictionMarkets result={forensics.data} odds={oddsReport} />
             <MatchupAssessment
               assessment={forensics.data.assessment}
               homeName={forensics.data.home.teamName}
               awayName={forensics.data.away.teamName}
+              odds={oddsReport}
             />
             <div className="grid gap-3 xl:grid-cols-2">
               <TeamForensics profile={forensics.data.home} />

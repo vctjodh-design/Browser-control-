@@ -182,6 +182,36 @@ straight off the team key and the last ten matches are pulled from KickoffScore
 before the analysis runs. Saving those matches is a side effect, so the "Source
 backed data" counters fill in after the first review.
 
+## Forensics prices every market
+
+The Forensics tab used to end in the same two chips — "No clear result edge" and
+"Open scoring lean" — because its four picks were sample rates, and a pick was
+withheld ("No clear pick") whenever the points-per-match gap was under 0.35. With
+two evenly matched clubs that condition is almost always true, so the review
+could not answer the question it exists to answer.
+
+The market board now builds a scoreline matrix instead of tallying wins, draws
+and losses. When the match page hands the panel the fixture's odds board, the
+matrix is the one already fitted to the bookmaker prices by
+`analyzeOddsExpectation` (all 55 markets, normalised); otherwise it falls back to
+a Poisson model of each side's scoring and conceding averages, shrunk toward 1.35
+goals so a short sample cannot swing it. Every market is then a sum over that
+same matrix: 1X2, double chance, draw no bet, BTTS, over/under 1.5/2.5/3.5, goal
+parity, each side's 1.5 line, clean sheets, win to nil, home -1 and correct
+score — fifteen cards, each with a modelled percentage, the next-best outcome
+and a confidence band. A strip above the grid names the strongest pick, and
+skipping the coin-flip parity market keeps it honest. Boxes marked `high` are
+≥72%, `moderate` ≥58%: a 44.9% home win is correctly labelled Low confidence
+even when it is the most likely outcome.
+
+The direction card was also stale. Area winners can tie 3-3 while most
+individual metrics point one way, which left every review on "no clear edge"
+even with a decisive split underneath. It now counts the metrics as well as the
+areas, calls a lean when the metric split is ≥55% and the area margin is at
+least one, prints the actual split ("4-5 across 9 measures") and the model goal
+total, and shows a **Priced read** line with the 1X2, over/under 2.5 and BTTS
+probabilities so the evidence and the prices sit side by side.
+
 ## The board prices the afternoon
 
 The live match is now asked to land near what the market and the clubs' own

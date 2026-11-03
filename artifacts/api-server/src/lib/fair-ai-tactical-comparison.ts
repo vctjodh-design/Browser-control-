@@ -64,13 +64,17 @@ function metricLines(profile: TeamProfile, pairs: MetricPair[], team: "home" | "
   }).join("; ");
 }
 
+type FactorWithMetrics = FootballFairAiTacticalMatchupFactor & {
+  metricEdges: Edge[];
+};
+
 function factor(
   area: string,
   summary: string,
   home: TeamProfile,
   away: TeamProfile,
   pairs: MetricPair[],
-): FootballFairAiTacticalMatchupFactor {
+): FactorWithMetrics {
   const available = pairs.map(direction).filter((edge) => edge !== "unavailable");
   const edge = combinedEdge(pairs.map(direction));
   const homeCount = available.filter((value) => value === "home").length;
@@ -84,6 +88,7 @@ function factor(
     summary: comparison,
     homeEvidence: metricLines(home, pairs, "home"),
     awayEvidence: metricLines(away, pairs, "away"),
+    metricEdges: pairs.map(direction),
   };
 }
 
@@ -128,7 +133,7 @@ function goalDifferencePerMatch(profile: TeamProfile): number | null {
 function formationFactor(
   home: TeamProfile,
   away: TeamProfile,
-): FootballFairAiTacticalMatchupFactor {
+): FactorWithMetrics {
   const homeShape = home.formationSummaries[0];
   const awayShape = away.formationSummaries[0];
   const homeSamples = homeShape?.matches ?? 0;
@@ -453,7 +458,7 @@ export function buildFairAiTacticalMatchupAssessment(
       ),
     ],
   );
-  const factors = [
+  const builtFactors = [
     form,
     chanceCreation,
     buildUp,
@@ -462,16 +467,43 @@ export function buildFairAiTacticalMatchupAssessment(
     timeline,
     playerImpact,
   ];
+  const factors: FootballFairAiTacticalMatchupFactor[] = builtFactors.map(
+    ({ metricEdges: _metricEdges, ...item }) => item,
+  );
   const homeEdges = factors.filter((item) => item.edge === "home").length;
   const awayEdges = factors.filter((item) => item.edge === "away").length;
   const knownFactors = factors.filter((item) => item.edge !== "unavailable").length;
   const edgeMargin = homeEdges - awayEdges;
   const sharedSample = Math.min(home.matchesAnalyzed, away.matchesAnalyzed);
+
+  // Area winners can tie out even when most individual metrics point one way,
+  // which used to leave every review stuck on "no clear edge". Count the
+  // metrics themselves as a second, finer signal.
+  const metricEdges = builtFactors
+    .flatMap((item) => item.metricEdges)
+    .filter((item) => item === "home" || item === "away");
+  const metricHome = metricEdges.filter((item) => item === "home").length;
+  const metricAway = metricEdges.filter((item) => item === "away").length;
+  const metricMargin = metricHome - metricAway;
+  const metricShare = metricEdges.length
+    ? Math.abs(metricMargin) / metricEdges.length
+    : 0;
+  const decisiveMetrics = metricEdges.length >= 8 && metricShare >= 0.55;
+  const goals = goalEnvironment(home, away);
+
   let resultLean: FootballFairAiTacticalMatchupAssessment["resultLean"] =
     "no_clear_edge";
-  if (sharedSample >= 3 && knownFactors >= 4 && edgeMargin >= 2) {
+  if (
+    sharedSample >= 3 &&
+    knownFactors >= 4 &&
+    (edgeMargin >= 2 || (edgeMargin >= 1 && decisiveMetrics && metricMargin > 0))
+  ) {
     resultLean = "home";
-  } else if (sharedSample >= 3 && knownFactors >= 4 && edgeMargin <= -2) {
+  } else if (
+    sharedSample >= 3 &&
+    knownFactors >= 4 &&
+    (edgeMargin <= -2 || (edgeMargin <= -1 && decisiveMetrics && metricMargin < 0))
+  ) {
     resultLean = "away";
   } else {
     const homeDrawRate = home.matchesAnalyzed
@@ -497,7 +529,7 @@ export function buildFairAiTacticalMatchupAssessment(
       : knownFactors >= 6 && Math.abs(edgeMargin) >= 3
         ? "moderate"
         : "low";
-  const scoringLean = goalEnvironment(home, away);
+  const scoringLean = goals;
   const outcomeText = resultLean === "home"
     ? `${home.teamName} has the clearer evidence edge`
     : resultLean === "away"
@@ -505,21 +537,41 @@ export function buildFairAiTacticalMatchupAssessment(
       : resultLean === "draw"
         ? "A draw is a live scenario because the evidence is close and both samples include regular draws"
         : "There is no strong result edge from the available evidence";
+  const expectedTotal = (() => {
+    const values = [
+      home.averageGoalsFor,
+      home.averageGoalsAgainst,
+      away.averageGoalsFor,
+      away.averageGoalsAgainst,
+    ];
+    if (values.some((value) => value === null)) return null;
+    return (
+      (home.averageGoalsFor! +
+        home.averageGoalsAgainst! +
+        away.averageGoalsFor! +
+        away.averageGoalsAgainst!) /
+      2
+    );
+  })();
+  const totalText = expectedTotal === null ? "" : ` (model total ${expectedTotal.toFixed(1)} goals)`;
+  const splitText = metricEdges.length
+    ? ` Comparable metrics split ${metricHome}-${metricAway} across ${metricEdges.length} measures.`
+    : "";
   const scoringText = scoringLean === "open_btts"
-    ? "Both recent samples support an open, BTTS-leaning game"
+    ? `Both recent samples support an open, BTTS-leaning game${totalText}`
     : scoringLean === "open_goals"
-      ? "The combined scoring history leans toward an open game"
+      ? `The combined scoring history leans toward an open game${totalText}`
       : scoringLean === "tight"
-        ? "Both samples lean toward a tighter, lower-scoring game"
+        ? `Both samples lean toward a tighter, lower-scoring game${totalText}`
         : scoringLean === "mixed"
-          ? "The recent goal patterns are mixed"
+          ? `The recent goal patterns are mixed${totalText}`
           : "There is not enough scoring data for a goal-environment lean";
 
   return {
     resultLean,
     confidence,
     scoringLean,
-    summary: `${outcomeText}. ${scoringText}. This is a qualitative comparison across up to ten recent matches per team, covering form, chance creation, build-up indicators, defending, formation results, game-state events, and player ratings; it is not a probability.`,
+    summary: `${outcomeText}.${splitText} ${scoringText}. This is a qualitative comparison across up to ten recent matches per team, covering form, chance creation, build-up indicators, defending, formation results, game-state events, and player ratings; it is not a probability.`,
     factors,
   };
 }
