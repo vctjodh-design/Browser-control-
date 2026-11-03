@@ -119,7 +119,7 @@ export class Match {
         formation,
         formationName: setup?.formation ?? cfg.formation,
         profile: setup,
-        tactics: createTactics(t, setup?.tactics ?? null),
+        tactics: createTactics(t, setup?.tactics ?? null, setup?.name ?? cfg.name),
         goalFlash: 0,
       };
       this.teams.push(team);
@@ -343,7 +343,7 @@ export class Match {
     for (const team of this.teams) {
       // the half-time switch flips attackDir, so put the sides back first
       team.attackDir = team.cfg.attackDir;
-      team.tactics = createTactics(team.idx, team.profile?.tactics ?? null);
+      team.tactics = createTactics(team.idx, team.profile?.tactics ?? null, team.name);
       team.goalFlash = 0;
       for (const a of team.agents) {
         a.sentOff = false;
@@ -580,7 +580,11 @@ export class Match {
     }
 
     // ---- speed with fatigue ----
-    const fatigue = 0.84 + a.stamina * 0.16;
+    // A ninety-minute match has to show on the legs: a fresh player runs at
+    // full pace, a half-spent one at ~80%, and an exhausted one below 70% — and
+    // an exhausted player can no longer sprint at all.
+    const fatigue = 0.62 + a.stamina * 0.38;
+    if (a.stamina < 0.3) sprint = false;
     const sprintMul = sprint ? 1.13 : 0.97;
     let speedCap = a.maxSpeed * fatigue * sprintMul * urgency;
     if (a.actionTimer > 0) speedCap *= 0.25;
@@ -644,8 +648,9 @@ export class Match {
 
   updateStamina(a, dt, speed) {
     const work = Math.pow(clamp(speed / 8, 0, 1.4), 2.15);
-    const drain = work * 0.0052 * (1.18 - a.attrs.stamina * 0.36);
-    const recovery = speed < 2.4 ? 0.0032 : speed < 4.5 ? 0.0011 : 0.0002;
+    const drain = work * 0.0058 * (1.18 - a.attrs.stamina * 0.36);
+    // Jogging and standing still actually get the legs back; running does not.
+    const recovery = speed < 2.4 ? 0.0055 : speed < 4.5 ? 0.0022 : 0.0006;
     a.stamina = clamp(a.stamina + (recovery - drain) * dt, 0.08, 1);
     a.exhausted = a.stamina < 0.22;
   }
@@ -1085,7 +1090,7 @@ export class Match {
     if (b.y > 2.18) p *= 0.5;
     p *= clamp(1.12 - speed / 76, 0.55, 1);
     p *= 0.88 + keeper.attrs.composure * 0.18;
-    p *= 0.86 + keeper.stamina * 0.14;
+    p *= 0.88 + keeper.stamina * 0.14;
     if (!chance(p)) return false;
 
     // He gets across and smothers it on the line.
@@ -1397,7 +1402,7 @@ export class Match {
     // pressure. Accuracy here scales the angular spread, so a crowded box and
     // tired legs push shots wide and over rather than into the net.
     const spreadRad =
-      (0.105 + (1 - acc) * 0.3) *
+      (0.128 + (1 - acc) * 0.32) *
       (1 + dist / 42) *
       (1 + pressure * 0.75) *
       (1 + (1 - a.stamina) * 0.65);

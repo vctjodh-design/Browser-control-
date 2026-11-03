@@ -18,16 +18,28 @@ export const STYLES = [
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
+/** Stable, side-independent pick of a base style for a club name. */
+function clubStyleIndex(name) {
+  let hash = 7;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) % 9973;
+  return hash % STYLES.length;
+}
+
 const blend = (fallback, value) =>
   typeof value === 'number' && Number.isFinite(value)
     ? clamp(fallback * 0.35 + value * 0.65, 0.12, 1)
     : fallback;
 
-export function createTactics(idx, override = null) {
+export function createTactics(idx, override = null, name = '') {
   // A host page can hand over a style read from the club's own matches. It is
   // blended with the default identity so the shape of play still reads like
   // football rather than a raw statistical average.
-  const base = STYLES[idx % STYLES.length];
+  //
+  // The identity comes from the club, not from the team index: keying it on
+  // home/away handed the home side a high line in every fixture, and this
+  // engine punishes a high line hard, so the home team lost about two thirds
+  // of the goals it should have scored.
+  const base = STYLES[clubStyleIndex(name || String(idx))];
   const style = override
     ? {
         key: 'data',

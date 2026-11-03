@@ -160,6 +160,25 @@ the batch model, so a played match and a simulated one agree. `engine-bench.mjs`
 at the repo root replays N matches headlessly and prints the distribution, which
 is how these numbers were checked.
 
+### Legs, and thinking before the pass
+
+A match also has to look like ninety minutes rather than a sprint. Each player
+carries stamina that drains with the square of his speed and comes back only
+when he is jogging, with a top-up at half time. Fatigue used to be cosmetic —
+the speed multiplier bottomed out at 0.84 — so everyone ran the full game at
+near full pace. It now bottoms out around 0.62, an exhausted player cannot
+sprint at all, and tired legs cost real time on the ball (reaction rises by up
+to 0.16s), turn a tired midfielder into a sideways passer, spread shots wider
+and weaken tackles and saves. The last twenty minutes visibly slow down.
+
+Nobody decides instantly either: every action waits out a reaction timer of
+roughly 0.16–0.40s that lengthens with fatigue and shortens with composure, and
+then picks from scored options — space, risk, whether the pass goes forward, how
+far the man is from goal, and whether he is making a run. Anything that still
+has to be won is won physically: `tryTackle` is a contest weighted by strength,
+defending and a tired opponent's drop in balance, blocked shots need a defender
+goal-side inside 3.4m, and the rest of the shots simply miss.
+
 ### Reading the predictions
 The simulation's answer sits above the markets: the result it favours, its most
 likely scoreline and the nine scorelines that came up most. Every market header
@@ -168,6 +187,12 @@ chosen as the line nearest a coin flip rather than the 98% certain under that
 would flatter the model; the selection it calls is tagged `pick` inside the
 group. The edge against the price stays on the right of the header, so a market
 can be read without expanding it.
+
+The market simulation sits **above** the bookmaker board, not under it: fifty-odd
+markets of prices push a panel below them out of sight, which is where it used
+to live. The replay tab also carries a card linking straight to it, because a
+tab that plays one match at a time is not where anyone would look for ten
+thousand.
 
 One divergence is deliberate: the model's card rate (~3.9 a match) sits above
 what this source's card lines imply (~2.6), so card markets show a systematic

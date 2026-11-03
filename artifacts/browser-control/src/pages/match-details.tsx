@@ -35,6 +35,7 @@ import { OddsTranslationPanel } from '@/components/odds-translation-panel';
 import { OddsSimulationPanel } from '@/components/odds-simulation-panel';
 import {
   ArrowLeft,
+  ArrowRight,
   ArrowUpRight,
   BarChart3,
   CalendarDays,
@@ -182,6 +183,12 @@ function OddsPanel({ details, fixtureId }: { details: FootballMatchDetails; fixt
   return (
     <section data-testid="panel-odds">
       <SectionIssue details={details} section="odds" />
+      {/* The simulation and its predictions come first: the bookmaker board runs
+          to fifty-odd markets below, and a panel under all of it is a panel
+          nobody finds. */}
+      <div className="mb-6">
+        <OddsSimulationPanel fixtureId={fixtureId} />
+      </div>
       <SectionHeading eyebrow="Market board" title="Available odds" detail="Selections and bookmaker coverage as provided by the source." />
       {details.oddsMarkets.length ? (
         <div className="space-y-3">
@@ -205,7 +212,6 @@ function OddsPanel({ details, fixtureId }: { details: FootballMatchDetails; fixt
           ))}
         </div>
       ) : <EmptySection title="No odds markets available" detail="The source did not return odds for this fixture." testId="empty-odds" />}
-      <OddsSimulationPanel fixtureId={fixtureId} />
     </section>
   );
 }
@@ -429,6 +435,40 @@ export default function MatchDetailsPage() {
                 {/* Kept mounted so switching tabs never restarts the match. */}
                 <div hidden={activeTab !== 'simulation'}>
                   <MatchSimPanel fixtureId={fixtureId} home={match.home.name} away={match.away.name} venue={match.venue} variant="theatre" />
+                  {/* This tab replays one match at a time; the thousands of
+                      rounds and the per-market predictions live in Odds, which
+                      is easy to miss from here. */}
+                  <div
+                    className="m-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#d8ded3] bg-[#f5f7f0] px-4 py-3"
+                    data-testid="sim-shortcut"
+                  >
+                    <div className="min-w-0">
+                      <p className="mono text-[8px] uppercase tracking-[.14em] text-[#7f8a76]">
+                        Thousands of replays
+                      </p>
+                      <p className="mt-1 max-w-[62ch] text-[10px] leading-5 text-[#5f6b63]">
+                        This tab plays one match at a time. The market simulation replays this fixture
+                        up to 10,000 times and gives a prediction for every bookmaker market from what
+                        happened — never from the price.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        chooseTab('odds');
+                        window.requestAnimationFrame(() =>
+                          document
+                            .querySelector('[data-testid="panel-odds-simulation"]')
+                            ?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+                        );
+                      }}
+                      className="flex items-center gap-1.5 rounded-lg bg-[#2f6b4f] px-3.5 py-2 text-[10px] font-extrabold uppercase tracking-[.08em] text-[#f2f7f1] transition hover:bg-[#285c44]"
+                      data-testid="button-open-odds-sim"
+                    >
+                      Simulate 1,000–10,000
+                      <ArrowRight size={12} />
+                    </button>
+                  </div>
                 </div>
                 {activeTab === 'table' && <StandingsPanel details={details} />}
                 <div hidden={activeTab !== 'fair-ai'}>
