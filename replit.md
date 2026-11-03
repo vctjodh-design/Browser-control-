@@ -171,6 +171,17 @@ sprint at all, and tired legs cost real time on the ball (reaction rises by up
 to 0.16s), turn a tired midfielder into a sideways passer, spread shots wider
 and weaken tackles and saves. The last twenty minutes visibly slow down.
 
+## Forensics reads KickoffScore, not just the import
+
+The Forensics tab used to answer `404 One or both teams do not have imported
+match records` on a fresh install, because it bailed out when `fair_ai_teams`
+had no row for the selected club — and the import database starts empty. A match
+page names its clubs straight from the fixture as `id:<teamId>`, which is already
+a KickoffScore ID, so the archive lookup is now only a first try: the ID is read
+straight off the team key and the last ten matches are pulled from KickoffScore
+before the analysis runs. Saving those matches is a side effect, so the "Source
+backed data" counters fill in after the first review.
+
 ## The board prices the afternoon
 
 The live match is now asked to land near what the market and the clubs' own

@@ -1024,16 +1024,7 @@ async function refreshFairAiTeamsFromSource(
     NonNullable<Awaited<ReturnType<typeof getFreshKickoffScoreFairAiSnapshots>>["snapshots"][number]>
   >;
 }> {
-  const selectedTeams = [...new Set(teamKeys)].map((key) => {
-    const row = database
-      .prepare("SELECT source_team_id FROM fair_ai_teams WHERE team_key = ?")
-      .get(key) as SqlRow | undefined;
-    const sourceTeamId = integer(row?.source_team_id);
-    if (sourceTeamId === null) {
-      throw new Error("This team has no KickoffScore ID, so its live match details cannot be refreshed.");
-    }
-    return sourceTeamId;
-  });
+  const selectedTeams = [...new Set(teamKeys)].map(sourceTeamIdFor);
   const refreshed = await getFreshKickoffScoreFairAiSnapshots(
     selectedTeams,
     options.matchesPerTeam ?? 5,
@@ -1315,6 +1306,26 @@ function count(table: string, where = ""): number {
     .prepare(`SELECT COUNT(*) AS total FROM ${table} ${where}`)
     .get() as SqlRow | undefined;
   return integer(row?.total) ?? 0;
+}
+
+/**
+ * The KickoffScore ID behind a selected team. The archive knows it once a team
+ * has been imported, but the team picker on a match page names teams straight
+ * from the fixture as `id:<teamId>`, so a fresh install with an empty archive
+ * can still pull the last ten matches from KickoffScore itself.
+ */
+function sourceTeamIdFor(teamKey: string): number {
+  const row = database
+    .prepare("SELECT source_team_id FROM fair_ai_teams WHERE team_key = ?")
+    .get(teamKey) as SqlRow | undefined;
+  const stored = integer(row?.source_team_id);
+  if (stored !== null) return stored;
+  const fromKey = /^id:(\d+)$/.exec(teamKey);
+  const keyed = fromKey ? integer(fromKey[1]) : null;
+  if (keyed !== null) return keyed;
+  throw new Error(
+    "This team has no KickoffScore ID, so its live match details cannot be refreshed.",
+  );
 }
 
 function fairAiTeamRows(search: string, teamKey?: string): FootballFairAiTeam[] {
@@ -2085,9 +2096,8 @@ function simulationTeam(team: FootballFairAiTeam): FootballFairAiTeam {
 export async function runFairAiArchiveSimulation(
   input: FootballFairAiSimulationInput,
 ): Promise<FootballFairAiSimulation | null> {
-  const homeBase = fairAiTeamRows("", input.homeTeamKey)[0];
-  const awayBase = fairAiTeamRows("", input.awayTeamKey)[0];
-  if (!homeBase || !awayBase) return null;
+  // KickoffScore is the source of truth here; the local archive only stands in
+  // when it can be refreshed. Nothing is served from an untouched archive.
   const refreshed = await refreshFairAiTeamsFromSource([
     input.homeTeamKey,
     input.awayTeamKey,
@@ -2113,10 +2123,6 @@ export async function runFairAiArchiveSimulation(
 export async function runFairAiArchiveForensics(
   input: FootballFairAiForensicsInput,
 ): Promise<FootballFairAiTacticalForensics | null> {
-  const homeBase = fairAiTeamRows("", input.homeTeamKey)[0];
-  const awayBase = fairAiTeamRows("", input.awayTeamKey)[0];
-  if (!homeBase || !awayBase) return null;
-
   const refreshed = await refreshFairAiTeamsFromSource([
     input.homeTeamKey,
     input.awayTeamKey,
@@ -2150,6 +2156,10 @@ export async function runFairAiArchiveForensics(
       fallbackFailures += 1;
     }
   }
+
+  const homeBase = fairAiTeamRows("", input.homeTeamKey)[0];
+  const awayBase = fairAiTeamRows("", input.awayTeamKey)[0];
+  if (!homeBase || !awayBase) return null;
 
   const result = buildFairAiTacticalForensics(
     [...refreshed.snapshotsByFixture.values()],
