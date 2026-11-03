@@ -87,17 +87,36 @@ const match = new Match(scene, ball, {
     } else if (ev.type === 'foul' || ev.type === 'yellow' || ev.type === 'red' || ev.type === 'penalty') {
       audio.whistle(1);
     }
-    if (ev.type === 'fulltime') finishRound();
+    if (ev.type === 'fulltime') {
+      const summary = matchSummary();
+      lastSummary = summary;
+      postToHost({
+        type: 'sim-match-summary',
+        summary,
+        teams: [match.teams[0].name, match.teams[1].name],
+      });
+      finishRound(summary);
+    }
   },
   onGoal: (data) => {
     hud.showGoal(data);
     goalFlash = 1;
+    goalLog.push({
+      side: data.team === 0 ? 'home' : 'away',
+      minute: data.minute ?? 0,
+      scorer: data.scorer,
+      assist: data.assist ?? null,
+      ownGoal: Boolean(data.ownGoal),
+    });
   },
   onCard: (card) => {
     hud.showCard(card);
     audio.whistle(1);
   },
-  onReset: () => hud.reset(),
+  onReset: () => {
+    hud.reset();
+    goalLog = [];
+  },
 });
 
 const hud = new HUD(match);
@@ -134,6 +153,47 @@ const MAX_SPEED = 20;
 // form never change between rounds, only the match itself is replayed.
 const hostWindow = window.parent && window.parent !== window ? window.parent : null;
 const series = { active: false, total: 0, done: 0, results: [] };
+
+// Everything the odds board needs to settle a bet after the match: goals with
+// minutes and scorers, both halves, corners, cards and shots on target.
+let goalLog = [];
+let lastSummary = null;
+
+function blankSummaryLine() {
+  return { goals: 0, corners: 0, cards: 0, shotsOnTarget: 0 };
+}
+
+function matchSummary() {
+  const home = blankSummaryLine();
+  const away = blankSummaryLine();
+  const sides = [home, away];
+  for (let t = 0; t < 2; t++) {
+    sides[t].goals = match.score[t];
+    sides[t].corners = match.stats[t].corners;
+    sides[t].cards = match.stats[t].yellows + match.stats[t].reds;
+    sides[t].shotsOnTarget = Math.round(match.stats[t].onTarget);
+  }
+  const half = match.halfTimeScore || [0, 0];
+  const players = match.agents
+    .filter((agent) => agent.stats)
+    .map((agent) => ({
+      name: agent.name,
+      side: agent.teamIdx === 0 ? 'home' : 'away',
+      goals: agent.stats.goals || 0,
+      assists: agent.stats.assists || 0,
+      shotsOnTarget: agent.stats.onTarget || 0,
+    }));
+
+  return {
+    home,
+    away,
+    goals: goalLog.map((goal) => ({ ...goal })),
+    halfTime: { home: half[0], away: half[1] },
+    secondHalf: { home: match.score[0] - half[0], away: match.score[1] - half[1] },
+    firstGoal: goalLog.length ? goalLog[0].side : 'none',
+    players,
+  };
+}
 
 function postToHost(message) {
   if (!hostWindow) return;
@@ -182,11 +242,12 @@ function stopSeries() {
   postToHost({ type: 'sim-series-done', results: series.results, stopped: true });
 }
 
-function finishRound() {
+function finishRound(summary) {
   if (!series.active) return;
   forceRender = true;
   series.done += 1;
   const result = {
+    summary: summary ?? matchSummary(),
     round: series.done,
     home: match.teams[0].name,
     away: match.teams[1].name,
@@ -321,6 +382,7 @@ window.__scene = scene;
 window.__cam = camRig;
 window.__three = THREE;
 window.__series = series;
+window.__lastSummary = () => lastSummary;
 window.__setSpeed = applySpeed;
 
 postToHost({

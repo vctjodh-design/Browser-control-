@@ -80,6 +80,66 @@ the pace; the pitch shows a progress card instead, and the results list follows
 the batch. The panel and frame are same-origin, so messages are matched on
 `event.origin` and `event.source`.
 
+### Odds, and settling them against the match
+
+The Odds tab keeps the whole board, not just the best price. `GET
+/api/football/matches/:id/odds-board` (`lib/odds-board.ts`) reads the source's
+odds endpoint and keeps every bookmaker's price, opening price and previous move
+for every selection — around 2,300 quotes across 26 books and 55 markets for a
+typical fixture — with the margin-free probability alongside wherever the market
+is a closed set of outcomes.
+
+Two things about that feed need correcting before settlement can be trusted, and
+both are handled at ingestion:
+
+- **Inverted away handicaps.** The feed writes one side's handicap with the
+opposite sign (away `-0.5` is priced like away `+0.5`). The board reads each
+side's price ladder instead of trusting the label — in the usual convention a
+bigger head start is always more likely — and flips that side's lines when the
+curve runs the other way. Each selection carries the corrected `handicapLine`, so
+settlement uses the line the price actually means.
+- **Odd selection strings.** The same feed mixes `"Over 2.5"`, `"Over 1"`,
+`"Player - 2"`, bare player names and `"more 3"` under headings that suggest
+something else. Settlement parses each one and falls back to the 1+ line where a
+book lists only the player.
+
+Settlement itself (`lib/match-settlement.ts`) covers every market in the board —
+1X2 and its halves, double chance, Asian handicaps with quarter lines,
+goal/team/corner/card lines with pushes, exact and half scores, HT/FT, BTTS,
+clean sheets, draw-no-bet, result-and-total combinations, odd/even, exotic team
+markets and player props. Quarter lines split into two half stakes and a push
+returns the stake, so a batch reports wins, half-wins, pushes and losses rather
+than a single muddy yes/no.
+
+### Thousands of rounds
+
+A watched match costs seconds of CPU, so asking for thousands of replays needs a
+model rather than a tick loop. `lib/fast-match-sim.ts` plays the same fixture from
+the same inputs the 3D engine uses — each club's goals scored and conceded per
+game (shrunk towards the league average), the quality of the predicted XI, its
+tactics and league position — and emits the same match record: goals with minutes
+and scorers, halves, corners, cards and shots on target per player. No price ever
+enters it.
+
+`POST /api/football/matches/:id/odds-simulation` (`lib/odds-simulation.ts`) runs
+that engine for the requested number of rounds (up to 20,000), settles every
+selection on the board against every round, and returns, per selection, the
+simulated probability, the margin-free market probability, the best price and
+book, the expected value at that price and the difference between the two. 2,000
+rounds take about 10 seconds; 10,000 about a minute.
+
+`POST /api/football/matches/:id/odds-settle` grades the board against one match
+record. The match page's own frame posts `sim-match-summary` at full time
+(including a 1-round batch, which is the path that skips rendering), the Odds tab
+settles against it and shows what each selection would have returned at the best
+price. Watching a match and simulating 5,000 are therefore graded by identical
+rules.
+
+One divergence is deliberate: the model's card rate (~3.9 a match) sits above
+what this source's card lines imply (~2.6), so card markets show a systematic
+edge. That is the simulation disagreeing with the price, which is the point — the
+prices are never used to nudge the football.
+
 ## Architecture decisions
 
 _Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._

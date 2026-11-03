@@ -32,6 +32,7 @@ import {
   saveLiveLearningState,
 } from '@/lib/live-intelligence-learning';
 import { OddsTranslationPanel } from '@/components/odds-translation-panel';
+import { OddsSimulationPanel } from '@/components/odds-simulation-panel';
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -177,7 +178,7 @@ function StandingsPanel({ details }: { details: FootballMatchDetails }) {
   );
 }
 
-function OddsPanel({ details }: { details: FootballMatchDetails }) {
+function OddsPanel({ details, fixtureId }: { details: FootballMatchDetails; fixtureId: number }) {
   return (
     <section data-testid="panel-odds">
       <SectionIssue details={details} section="odds" />
@@ -204,6 +205,7 @@ function OddsPanel({ details }: { details: FootballMatchDetails }) {
           ))}
         </div>
       ) : <EmptySection title="No odds markets available" detail="The source did not return odds for this fixture." testId="empty-odds" />}
+      <OddsSimulationPanel fixtureId={fixtureId} />
     </section>
   );
 }
@@ -498,7 +500,7 @@ export default function MatchDetailsPage() {
                     onRetryLastFive={() => { void lastFiveQuery.refetch(); }}
                   />
                 )}
-                {activeTab === 'odds' && <OddsPanel details={details} />}
+                {activeTab === 'odds' && <OddsPanel details={details} fixtureId={fixtureId} />}
                 {activeTab === 'odds-translation' && <OddsTranslationPanel markets={details.oddsMarkets} homeName={match.home.name} awayName={match.away.name} />}
                 {activeTab === 'form' && <FormPanel details={details} />}
                 {activeTab === 'h2h' && <HeadToHeadPanel details={details} />}

@@ -26,6 +26,10 @@ import {
 } from "../lib/kickoffscore-last-five";
 import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
 import { getSimFormProfile } from "../lib/sim-form-profile";
+import { getOddsBoard } from "../lib/odds-board";
+import { simulateOddsBoard } from "../lib/odds-simulation";
+import { settleBoard } from "../lib/odds-settlement";
+import type { SimMatchSummary } from "../lib/match-settlement";
 import { UpstreamRateLimitError } from "../lib/upstream-rate-limit";
 import {
   get365ScoresMatchReplay,
@@ -320,6 +324,119 @@ router.get(
       );
       res.status(502).json({
         error: "Form and lineups could not be read right now. Please try again.",
+      });
+    }
+  },
+);
+
+router.get(
+  "/football/matches/:fixtureId/odds-board",
+  async (req, res): Promise<void> => {
+    const fixtureId = Number(req.params.fixtureId);
+    if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    try {
+      const board = await getOddsBoard(fixtureId);
+      res.json(board);
+    } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not build the odds board",
+      );
+      res.status(502).json({ error: "Odds could not be read right now. Please try again." });
+    }
+  },
+);
+
+router.post(
+  "/football/matches/:fixtureId/odds-simulation",
+  async (req, res): Promise<void> => {
+    const fixtureId = Number(req.params.fixtureId);
+    if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { rounds?: unknown; seed?: unknown; goalsPerMatch?: unknown };
+    const rounds = Number(body.rounds);
+    if (!Number.isFinite(rounds) || rounds < 1) {
+      res.status(400).json({ error: "Choose how many rounds to run (1 or more)." });
+      return;
+    }
+    const seedValue = Number(body.seed);
+    const goalsValue = Number(body.goalsPerMatch);
+
+    try {
+      const [profile, board] = await Promise.all([
+        getSimFormProfile(fixtureId),
+        getOddsBoard(fixtureId),
+      ]);
+
+      const result = simulateOddsBoard(board, profile, {
+        rounds,
+        seed: Number.isFinite(seedValue) && seedValue > 0 ? seedValue : undefined,
+        goalsPerMatch:
+          Number.isFinite(goalsValue) && goalsValue > 0 && goalsValue < 8
+            ? goalsValue
+            : undefined,
+      });
+      res.json(result);
+    } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not run the odds simulation",
+      );
+      res.status(502).json({
+        error: "The odds simulation could not run right now. Please try again.",
+      });
+    }
+  },
+);
+
+router.post(
+  "/football/matches/:fixtureId/odds-settle",
+  async (req, res): Promise<void> => {
+    const fixtureId = Number(req.params.fixtureId);
+    if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { summary?: unknown };
+    const summary = body.summary as SimMatchSummary | undefined;
+    if (!summary || typeof summary !== "object" || !summary.home || !summary.away) {
+      res.status(400).json({ error: "Send the played match summary to settle against." });
+      return;
+    }
+
+    try {
+      const board = await getOddsBoard(fixtureId);
+      res.json(settleBoard(board, summary));
+    } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not settle the odds board",
+      );
+      res.status(502).json({
+        error: "The market settlement could not run right now. Please try again.",
       });
     }
   },

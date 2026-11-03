@@ -361,13 +361,17 @@ export class Match {
         a.runTimer = Math.random() * 3;
         a.makingRun = false;
         a.isHuman = false;
-        a.stats = { passes: 0, passesCompleted: 0, shots: 0, goals: 0, tackles: 0, fouls: 0, headers: 0, yellows: 0 };
+        a.stats = {
+          passes: 0, passesCompleted: 0, shots: 0, onTarget: 0, goals: 0, assists: 0,
+          tackles: 0, fouls: 0, headers: 0, yellows: 0,
+        };
         if (a.rig) a.rig.root.visible = true;
       }
     }
     if (this.human && !this.human.sentOff) this.human.isHuman = this.humanEnabled;
 
     this.score = [0, 0];
+    this.halfTimeScore = [0, 0];
     this.possession = [0, 0];
     this.shots = [0, 0];
     this.stats = [this.blankStats(), this.blankStats()];
@@ -460,6 +464,7 @@ export class Match {
       for (const team of this.teams) team.attackDir *= -1;
       // a breather at the break
       for (const a of this.agents) a.stamina = clamp(a.stamina + 0.16, 0, 1);
+      this.halfTimeScore = [...this.score];
       this.resetPositions(1, 0);
       this.state = 'halftime';
       this.stateTimer = 2.6;
@@ -1376,7 +1381,10 @@ export class Match {
     this.stats[team.idx].shots++;
     this.shots[team.idx]++;
     const onTarget = Math.abs(z0) < HALF_G - 0.05 && y0 < GOAL_H;
-    if (onTarget) this.stats[team.idx].onTarget++;
+    if (onTarget) {
+      this.stats[team.idx].onTarget++;
+      a.stats.onTarget++;
+    }
     // crude expected goals, useful for the stats panel
     this.stats[team.idx].xg += clamp(Math.exp(-dist / 11) * (1 - Math.abs(a.pos.z) / 60) * 0.9, 0.02, 0.85);
     this.excite = Math.max(this.excite, 0.3 + (1 - Math.min(1, dist / 34)) * 0.3);
@@ -1444,7 +1452,8 @@ export class Match {
       this.ball.kick(v, power, lift, 0);
       a.stats.shots++;
       this.stats[team.idx].shots++;
-      this.stats[team.idx].onTarget += 0.7;
+      this.stats[team.idx].onTarget++;
+      a.stats.onTarget++;
       this.stats[team.idx].xg += 0.12;
       this.onEvent({ type: 'shot', text: `${a.name} gets his head to it!`, team: team.idx });
     } else {
@@ -2046,6 +2055,7 @@ export class Match {
       const v = new THREE.Vector3(goal.x + dir * 0.4 - bp.x, aimY - 0.11, aimZ - bp.z).normalize();
       this.ball.kick(v, 26, 0, 0);
       taker.stats.shots++;
+      taker.stats.onTarget++;
       this.stats[team.idx].shots++;
       this.stats[team.idx].onTarget++;
       this.shots[team.idx]++;
@@ -2129,11 +2139,10 @@ export class Match {
     for (const a of this.agents) {
       a.celebrate = a.teamIdx === team.idx ? 1 : 0;
       a.vel.multiplyScalar(0.3);
-    }
-
-    const assist = this.assistCandidate && this.assistTimer > 0 && this.assistCandidate.teamIdx === team.idx && this.assistCandidate !== scorer
+    }    const assist = this.assistCandidate && this.assistTimer > 0 && this.assistCandidate.teamIdx === team.idx && this.assistCandidate !== scorer
       ? this.assistCandidate
       : null;
+    if (assist) assist.stats.assists = (assist.stats.assists || 0) + 1;
     this.onEvent({
       type: 'goal',
       text: `GOAL! ${scorer.name} — ${team.name}${assist ? ` (assist ${assist.name})` : ''}`,
@@ -2141,7 +2150,14 @@ export class Match {
       scorer: scorer.name,
       number: scorer.number,
     });
-    this.onGoal({ team: team.idx, scorer: scorer.name, number: scorer.number, score: [...this.score] });
+    this.onGoal({
+      team: team.idx,
+      scorer: scorer.name,
+      number: scorer.number,
+      assist: assist ? assist.name : null,
+      minute: Math.round(this.clock / 60),
+      score: [...this.score],
+    });
     this.pendingPass = null;
     this.assistCandidate = null;
   }
