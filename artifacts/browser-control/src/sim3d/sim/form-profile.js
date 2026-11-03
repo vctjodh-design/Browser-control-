@@ -78,6 +78,12 @@ export function teamSetup(index) {
 }
 
 /** Short form string (newest last) for the scoreboard/banner copy. */
+export function matchExpectations() {
+  const expectations = profile?.expectations;
+  if (!expectations || !Number.isFinite(expectations.totalGoals)) return null;
+  return expectations;
+}
+
 export function recentForm(index, games = 5) {
   const record = profile?.teams?.[index]?.record;
   if (!record || typeof record.form !== 'string' || !record.form) return '';

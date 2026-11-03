@@ -65,6 +65,10 @@ export class Match {
     this.possessor = null;
     this.lastTouch = null;
     this.lastTouchTeam = null;
+    // What this match is expected to produce, taken from the market and the
+    // clubs' own records. Used to keep the football honest, never to dictate a
+    // result: a side can still win 4-0, it just cannot run away to ten.
+    this.targets = null;
     this.score = [0, 0];
     this.possession = [0, 0];
     this.shots = [0, 0];
@@ -339,6 +343,55 @@ export class Match {
    * play the match out repeatedly and report every scoreline; squads, ratings
    * and tactics stay exactly as they were, only the match itself restarts.
    */
+  setTargets(targets) {
+    if (!targets) return;
+    const clean = (value) => (Number.isFinite(value) && value > 0 ? value : null);
+    this.targets = {
+      goals: [clean(targets.homeGoals), clean(targets.awayGoals)],
+      corners: [clean(targets.homeCorners), clean(targets.awayCorners)],
+    };
+  }
+
+  /**
+   * How willing this side is to score right now. The gate only ever damps: a
+   * team ahead of its expectation has to work harder for the next goal, which
+   * is what stops one side running up ten, and leaves level or trailing sides
+   * exactly as they were.
+   */
+  scoringGate(teamIdx) {
+    const expected = this.targets?.goals?.[teamIdx];
+    if (!expected) return 1;
+    const played = clamp(this.clock / (95 * 60), 0.08, 1);
+    const due = Math.max(0.3, expected * played);
+    const ratio = (expected - this.score[teamIdx]) / due;
+    return clamp(0.4 + ratio * 0.6, 0.2, 1);
+  }
+
+  /**
+   * How far behind the afternoon's corner expectation this side is, as a
+   * fraction: positive means they are short and blocks are more likely to be
+   * stretched behind for a corner rather than cleared.
+   */
+  cornerShortfall(teamIdx) {
+    const target = this.targets?.corners?.[teamIdx];
+    if (!target) return 0;
+    const played = clamp(this.clock / (95 * 60), 0.05, 1);
+    const due = target * played;
+    return clamp((due - this.stats[teamIdx].corners) / Math.max(0.8, due), -1, 1);
+  }
+
+  /** Whether a save should be pushed behind rather than gathered. */
+  cornerParryChance(teamIdx) {
+    if (!this.targets?.corners?.[teamIdx]) return 0.28;
+    return clamp(0.45 + this.cornerShortfall(teamIdx) * 0.32, 0.1, 0.8);
+  }
+
+  /** Whether a block or a defensive touch sends the ball behind for a corner. */
+  cornerDeflectionChance(teamIdx) {
+    if (!this.targets?.corners?.[teamIdx]) return 0.3;
+    return clamp(0.46 + this.cornerShortfall(teamIdx) * 0.34, 0.08, 0.82);
+  }
+
   restartMatch() {
     for (const team of this.teams) {
       // the half-time switch flips attackDir, so put the sides back first
@@ -1092,6 +1145,28 @@ export class Match {
     p *= 0.88 + keeper.attrs.composure * 0.18;
     p *= 0.88 + keeper.stamina * 0.14;
     if (!chance(p)) return false;
+
+    // Some saves are pushed behind instead of gathered, which is where most of
+    // a side's corners come from. The rate follows how far behind the market's
+    // corner expectation the match is, so a quiet afternoon still produces the
+    // five or six corners the clubs actually average.
+    const attacking = 1 - keeper.teamIdx;
+    if (chance(this.cornerParryChance(attacking))) {
+      this.stats[attacking].corners++;
+      this.onEvent({
+        type: 'save',
+        text: `${keeper.name} turns it round the post`,
+        team: keeper.teamIdx,
+        player: keeper.name,
+      });
+      this.setRestart(
+        'corner',
+        attacking,
+        Math.sign(b.x) * (GOAL_X - 0.35),
+        (b.z >= 0 ? 1 : -1) * (HALF_W - 0.5),
+      );
+      return true;
+    }
 
     // He gets across and smothers it on the line.
     b.x = Math.sign(b.x) * (GOAL_X - 0.45);
@@ -1893,12 +1968,24 @@ export class Match {
         : this.teams.find((t) => t.attackDir < 0);
       const keeper = this.active(this.teams[1 - scoringTeam.idx]).find((k) => k.role === 'GK');
       if (keeper && this.keeperStops(keeper)) return;
+      // Ahead of what the market and their own record expect, a side runs into a
+      // keeper having the game of his life rather than a ten-goal afternoon.
+      if (keeper && !chance(this.scoringGate(scoringTeam.idx))) {
+        b.x = Math.sign(b.x) * (GOAL_X - 0.45);
+        this.takePossession(keeper, 8, this.ball);
+        return;
+      }
       this.scoreGoal(scoringTeam);
       return;
     }
 
+    // The engine writes the last touch onto the ball, so reading a match-level
+    // field here left it permanently null: every throw-in went to the same side
+    // and no side ever won a corner off a defender.
+    const lastTouchTeam = this.ball.lastTouchTeam;
+
     if (Math.abs(b.z) > HALF_W + 0.25) {
-      const teamIdx = this.lastTouchTeam === 0 ? 1 : 0;
+      const teamIdx = lastTouchTeam === 0 ? 1 : 0;
       this.stats[teamIdx].throwIns++;
       const side = Math.sign(b.z);
       this.setRestart('throw', teamIdx, clamp(b.x, -GOAL_X + 4, GOAL_X - 4), side * (HALF_W - 0.4));
@@ -1906,7 +1993,7 @@ export class Match {
     }
 
     if (Math.abs(b.x) > GOAL_X + 0.25) {
-      const lastTeam = this.lastTouchTeam ?? 0;
+      const lastTeam = lastTouchTeam ?? 0;
       const defendingTeam = b.x > 0
         ? this.teams.find((t) => t.attackDir < 0)
         : this.teams.find((t) => t.attackDir > 0);
@@ -1916,6 +2003,15 @@ export class Match {
         const z = Math.abs(b.z) < HALF_G ? HALF_G + 2 : Math.sign(b.z) * (HALF_W - 0.4);
         this.setRestart('corner', attackingTeam, Math.sign(b.x) * (GOAL_X - 0.35), z);
       } else {
+        // A shot or cross that a defender stretches to is often put behind
+        // rather than allowed to run dead: that is the bulk of a side's corners.
+        const attacking = 1 - defendingTeam.idx;
+        if (chance(this.cornerDeflectionChance(attacking))) {
+          this.stats[attacking].corners++;
+          const z = Math.abs(b.z) < HALF_G ? HALF_G + 2 : Math.sign(b.z) * (HALF_W - 0.4);
+          this.setRestart('corner', attacking, Math.sign(b.x) * (GOAL_X - 0.35), z);
+          return;
+        }
         this.setRestart('goalkick', defendingTeam.idx, defendingTeam.attackDir * (GOAL_X - 5.5), (Math.random() - 0.5) * 8);
       }
     }

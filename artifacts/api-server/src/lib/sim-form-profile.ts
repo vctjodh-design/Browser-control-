@@ -16,6 +16,7 @@ import type {
   FootballStandingsRow,
 } from "@workspace/api-zod";
 import { getKickoffScoreMatchDetails } from "./kickoffscore-match-details";
+import { deriveMatchModel, getOddsBoard } from "./odds-board";
 import {
   getHistoricalMatchSnapshot,
   type HistoricalMatchSnapshot,
@@ -178,7 +179,26 @@ export type SimFormProfile = {
   formGames: number;
   detailGames: number;
   teams: [SimTeamProfile, SimTeamProfile];
+  /**
+   * What the market expects of this match — total and split goals, both teams to
+   * score, clean sheets, corners — plus what the clubs' own records say when no
+   * prices are up. The engine treats these as targets, never as a result.
+   */
+  expectations: SimMatchExpectations | null;
   issues: string[];
+};
+
+export type SimMatchExpectations = {
+  source: "odds" | "form";
+  totalGoals: number;
+  homeGoals: number;
+  awayGoals: number;
+  over25: number | null;
+  bothTeamsScore: number | null;
+  homeCleanSheet: number | null;
+  awayCleanSheet: number | null;
+  homeCorners: number;
+  awayCorners: number;
 };
 
 type DetailedMatch = {
@@ -1294,7 +1314,52 @@ async function buildProfile(
     formGames,
     detailGames,
     teams: [home, away],
+    expectations: await matchExpectations(fixtureId, home, away, issues),
     issues,
+  };
+}
+
+/**
+ * The numbers the live match is asked to land near. Prices are preferred, since
+ * they already price in the lineups and the state of the season; when the board
+ * is empty the clubs' own scoring and conceding averages stand in.
+ */
+async function matchExpectations(
+  fixtureId: number,
+  home: SimTeamProfile,
+  away: SimTeamProfile,
+  issues: string[],
+): Promise<SimMatchExpectations | null> {
+  try {
+    const board = await getOddsBoard(fixtureId);
+    const model = deriveMatchModel(board);
+    if (model) return { ...model };
+    issues.push("No goal or team-to-score prices were up for this fixture, so form averages set the targets.");
+  } catch {
+    issues.push("The odds board could not be read, so form averages set the match targets.");
+  }
+
+  const homeScored = home.record.goalsForPerGame;
+  const homeConceded = home.record.goalsAgainstPerGame;
+  const awayScored = away.record.goalsForPerGame;
+  const awayConceded = away.record.goalsAgainstPerGame;
+  if (![homeScored, homeConceded, awayScored, awayConceded].every((value) => value > 0)) return null;
+
+  // Each side's expectation is its own scoring rate blended with what its
+  // opponent concedes; the home side keeps the usual small edge.
+  const homeGoals = round(((homeScored + awayConceded) / 2) * 1.08, 2);
+  const awayGoals = round(((awayScored + homeConceded) / 2) * 0.94, 2);
+  return {
+    source: "form",
+    totalGoals: round(homeGoals + awayGoals, 2),
+    homeGoals,
+    awayGoals,
+    over25: null,
+    bothTeamsScore: null,
+    homeCleanSheet: round(Math.exp(-awayGoals), 2),
+    awayCleanSheet: round(Math.exp(-homeGoals), 2),
+    homeCorners: round((home.style.crosses ?? 18) / 4, 1),
+    awayCorners: round((away.style.crosses ?? 18) / 4, 1),
   };
 }
 

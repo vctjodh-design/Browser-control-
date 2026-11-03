@@ -139,12 +139,30 @@ export type SimTeamProfile = {
   };
 };
 
+/**
+ * What the market and the clubs' own records say this match should produce.
+ * The live simulation plays to these targets; they are never a result.
+ */
+export type SimMatchExpectations = {
+  source: 'odds' | 'form';
+  totalGoals: number;
+  homeGoals: number;
+  awayGoals: number;
+  over25: number | null;
+  bothTeamsScore: number | null;
+  homeCleanSheet: number | null;
+  awayCleanSheet: number | null;
+  homeCorners: number;
+  awayCorners: number;
+};
+
 export type SimFormProfile = {
   fixtureId: number;
   observedAt: string;
   formGames: number;
   detailGames: number;
   teams: [SimTeamProfile, SimTeamProfile];
+  expectations?: SimMatchExpectations | null;
   issues: string[];
 };
 

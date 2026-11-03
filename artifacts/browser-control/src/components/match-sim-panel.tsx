@@ -553,6 +553,22 @@ export function MatchSimPanel({
             <TeamFormCard team={teams[0]} />
             <TeamFormCard team={teams[1]} />
           </div>
+          {profile?.expectations ? (
+            <p
+              className="mono mt-2 text-[7px] leading-3 text-[#6b837c]"
+              data-testid="sim-market-targets"
+            >
+              {profile.expectations.source === 'odds' ? 'Market targets' : 'Form targets'} ·{' '}
+              {profile.expectations.totalGoals.toFixed(1)} goals ({profile.expectations.homeGoals.toFixed(1)}–
+              {profile.expectations.awayGoals.toFixed(1)})
+              {profile.expectations.over25 !== null ? ` · over 2.5 ${Math.round(profile.expectations.over25 * 100)}%` : ''}
+              {profile.expectations.bothTeamsScore !== null
+                ? ` · both score ${Math.round(profile.expectations.bothTeamsScore * 100)}%`
+                : ''}
+              {` · corners ${profile.expectations.homeCorners.toFixed(1)}–${profile.expectations.awayCorners.toFixed(1)}`}
+              {` · clean sheets ${Math.round((profile.expectations.homeCleanSheet ?? 0) * 100)}%/${Math.round((profile.expectations.awayCleanSheet ?? 0) * 100)}%`}
+            </p>
+          ) : null}
           <p className="mono mt-2 text-[7px] leading-3 text-[#6b837c]">
             Ratings, shot and duel output and each club's own match style shape the players; the result still has to be played out.
           </p>

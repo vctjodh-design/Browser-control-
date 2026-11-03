@@ -58,6 +58,143 @@ type RawValue = {
   previous?: unknown;
 };
 
+// ------------------------------------------------------------- match model
+//
+// The board is a priced opinion about this match: how many goals are expected,
+// how likely either side is to score, whether both will, and how many corners
+// the afternoon should produce. The simulation is handed those expectations as
+// targets so a live match lands in the same neighbourhood as the market and
+// the clubs' own scoring records, instead of inventing its own average.
+export type OddsMatchModel = {
+  source: "odds";
+  /** Expected goals for the match, and how the market splits them. */
+  totalGoals: number;
+  homeGoals: number;
+  awayGoals: number;
+  over25: number | null;
+  bothTeamsScore: number | null;
+  homeCleanSheet: number | null;
+  awayCleanSheet: number | null;
+  /** Expected corners, per side. */
+  homeCorners: number;
+  awayCorners: number;
+};
+
+function poissonAtMost(mean: number, goals: number): number {
+  let term = Math.exp(-mean);
+  let total = 0;
+  for (let k = 0; k <= goals; k++) {
+    if (k > 0) term *= mean / k;
+    total += term;
+  }
+  return Math.min(1, total);
+}
+
+function poissonOver(mean: number, line: number): number {
+  const whole = Math.floor(line);
+  if (line === whole) return 1 - poissonAtMost(mean, whole);
+  // A quarter or half line sits halfway between the two whole lines it straddles.
+  const lower = 1 - poissonAtMost(mean, whole);
+  const upper = 1 - poissonAtMost(mean, whole - 1);
+  return (lower + upper) / 2;
+}
+
+/** Mean that best explains a set of O/U prices, searched over a coarse grid. */
+function fitMean(lines: { line: number; over: number }[]): number | null {
+  const usable = lines.filter((row) => Number.isFinite(row.line) && row.over > 0.01 && row.over < 0.99 && row.line < 6.5);
+  if (!usable.length) return null;
+  let best = null;
+  let bestError = Infinity;
+  for (let mean = 0.2; mean <= 7.001; mean += 0.02) {
+    let error = 0;
+    for (const row of usable) error += (poissonOver(mean, row.line) - row.over) ** 2;
+    if (error < bestError) {
+      bestError = error;
+      best = mean;
+    }
+  }
+  return best;
+}
+
+function selectionFair(market: OddsBoardMarket, pattern: RegExp): number | null {
+  const row = market.selections.find((entry) => pattern.test(entry.selection.trim()));
+  return row && Number.isFinite(row.fair) ? row.fair : null;
+}
+
+function findMarket(board: OddsBoard, name: RegExp): OddsBoardMarket | null {
+  return board.markets.find((market) => name.test(market.name)) ?? null;
+}
+
+export function deriveMatchModel(board: OddsBoard): OddsMatchModel | null {
+  const goals = findMarket(board, /^goals over\/under$/i) ?? findMarket(board, /goals over\/?under/i);
+  const homeScores = findMarket(board, /home team score a goal/i);
+  const awayScores = findMarket(board, /away team score a goal/i);
+  const btts = findMarket(board, /^both teams score$/i) ?? findMarket(board, /both teams to score$/i);
+  const homeCs = findMarket(board, /clean sheet\s*-\s*home/i);
+  const awayCs = findMarket(board, /clean sheet\s*-\s*away/i);
+  const homeCorners = findMarket(board, /home corners over\/?under/i);
+  const awayCorners = findMarket(board, /away corners over\/?under/i);
+
+  const goalLines = (goals?.selections ?? []).flatMap((selection) => {
+    const over = /^over\s*([\d.]+)$/i.exec(selection.selection.trim());
+    if (!over) return [];
+    return [{ line: Number(over[1]), over: selection.fair }];
+  });
+  const totalGoals = fitMean(goalLines);
+
+  const homeScoreChance = homeScores ? selectionFair(homeScores, /^yes$/i) : null;
+  const awayScoreChance = awayScores ? selectionFair(awayScores, /^yes$/i) : null;
+  if (totalGoals === null && homeScoreChance === null && awayScoreChance === null) return null;
+
+  // A side's chance of scoring at least once pins its own expectation directly:
+  // P(0) = e^-x. The total from the goal lines then keeps the two halves honest.
+  const fromChance = (chance: number | null) =>
+    chance !== null && chance > 0.02 && chance < 0.995 ? -Math.log(1 - chance) : null;
+  const homeFromChance = fromChance(homeScoreChance);
+  const awayFromChance = fromChance(awayScoreChance);
+  const total = totalGoals ?? (homeFromChance ?? 1.3) + (awayFromChance ?? 1.1);
+
+  let homeGoals: number;
+  let awayGoals: number;
+  if (homeFromChance !== null && awayFromChance !== null) {
+    const split = homeFromChance + awayFromChance;
+    homeGoals = split > 0 ? (total * homeFromChance) / split : total / 2;
+    awayGoals = total - homeGoals;
+  } else if (homeFromChance !== null) {
+    homeGoals = Math.min(total * 0.75, homeFromChance);
+    awayGoals = total - homeGoals;
+  } else if (awayFromChance !== null) {
+    awayGoals = Math.min(total * 0.75, awayFromChance);
+    homeGoals = total - awayGoals;
+  } else {
+    homeGoals = total * 0.54;
+    awayGoals = total - homeGoals;
+  }
+
+  const cornerLines = (market: OddsBoardMarket | null) =>
+    (market?.selections ?? []).flatMap((selection) => {
+      const over = /^over\s*([\d.]+)$/i.exec(selection.selection.trim());
+      if (!over) return [];
+      return [{ line: Number(over[1]), over: selection.fair }];
+    });
+
+  const homeMean = fitMean(cornerLines(homeCorners)) ?? 4.6;
+  const awayMean = fitMean(cornerLines(awayCorners)) ?? 4.1;
+
+  return {
+    source: "odds",
+    totalGoals: Math.round(total * 100) / 100,
+    homeGoals: Math.round(homeGoals * 100) / 100,
+    awayGoals: Math.round(awayGoals * 100) / 100,
+    over25: goalLines.find((row) => row.line === 2.5)?.over ?? null,
+    bothTeamsScore: btts ? selectionFair(btts, /^yes$/i) : null,
+    homeCleanSheet: homeCs ? selectionFair(homeCs, /^yes$/i) : null,
+    awayCleanSheet: awayCs ? selectionFair(awayCs, /^yes$/i) : null,
+    homeCorners: Math.round(homeMean * 10) / 10,
+    awayCorners: Math.round(awayMean * 10) / 10,
+  };
+}
+
 type RawBet = { id?: unknown; name?: unknown; values?: unknown };
 type RawBookmaker = { name?: unknown; bets?: unknown };
 

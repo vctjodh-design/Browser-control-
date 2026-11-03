@@ -171,6 +171,32 @@ sprint at all, and tired legs cost real time on the ball (reaction rises by up
 to 0.16s), turn a tired midfielder into a sideways passer, spread shots wider
 and weaken tackles and saves. The last twenty minutes visibly slow down.
 
+## The board prices the afternoon
+
+The live match is now asked to land near what the market and the clubs' own
+records say it should. `deriveMatchModel` reads the goal lines, both teams' "to
+score" prices, both teams to score, the clean-sheet markets and each side's
+corner lines, fits an expectation to them (P(0) = e^-x gives a side's own goal
+mean straight from its chance of scoring) and hands the result to the engine as
+targets. There is a small strip above the form cards — `sim-market-targets` —
+showing exactly those numbers, so the match and the board can be compared
+without guessing.
+
+Targets never pick a result. They do two things. A side that is ahead of its own
+expectation meets a scoring gate: the next goal gets meaningfully harder, which
+is what stops a ten-goal afternoon while leaving an even match untouched. And
+blocks and saves now go behind for corners at a rate driven by how far short of
+the corner expectation the match is, so a quiet game still produces the five or
+six corners the clubs actually average.
+
+That work uncovered a real bug: the engine writes the last touch onto the ball,
+but the boundary check read a match-level `lastTouchTeam` that was never
+updated. Every out-of-play restart was therefore decided from `null` — throw-ins
+all went to one side and **no side ever won a corner**, which is why corners
+looked broken and why the home team in particular never got one. Reading the
+ball's own last touch fixed the throw-ins, the goal kicks and the corner
+trigger.
+
 A match also has a clock in the football sense. Shooting appetite follows a tempo
 curve — sides feel each other out for the first eight minutes, the game loosens
 before the break, and the last twenty minutes are the ones where tired teams

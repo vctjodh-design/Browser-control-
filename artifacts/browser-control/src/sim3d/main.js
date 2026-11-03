@@ -10,6 +10,7 @@ import { Match } from './sim/match.js';
 import { CameraRig } from './camera.js';
 import { HUD } from './ui/hud.js';
 import { StadiumAudio } from './audio.js';
+import { matchExpectations } from './sim/form-profile.js';
 
 const canvas = document.getElementById('scene');
 const renderer = new THREE.WebGLRenderer({
@@ -286,6 +287,10 @@ const clock = new THREE.Clock();
 
 function startMatch() {
   if (started) return;
+  // The market and the clubs' own scoring numbers travel with the profile, so
+  // the match is played to the same expectation the board is priced around.
+  const targets = matchExpectations();
+  if (targets) match.setTargets(targets);
   started = true;
   hud.hideBanner();
   audio.init();
