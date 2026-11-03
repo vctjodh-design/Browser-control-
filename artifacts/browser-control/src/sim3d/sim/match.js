@@ -9,6 +9,7 @@ import {
 } from '../config.js';
 import { PlayerRig, randomLook } from '../entities/player.js';
 import { makeAttributes } from './attributes.js';
+import { attributeBias, teamSetup } from './form-profile.js';
 import { createTactics, updateTactics, onTurnover, backLineDistance } from './tactics.js';
 
 // ---------------------------------------------------------------- helpers
@@ -101,30 +102,42 @@ export class Match {
     const builds = [0.94, 1.02, 0.99, 1.05, 0.97, 0.96, 1.0, 0.98, 0.93, 1.02, 0.95];
     for (let t = 0; t < 2; t++) {
       const cfg = TEAMS[t];
-      const formation = t === 0 ? FORMATION_433 : FORMATION_442;
+      // The match page supplies a predicted XI, formation and style read from
+      // the club's recent matches. Without it the stand-alone game keeps its
+      // own squads.
+      const setup = teamSetup(t);
+      const formation = setup?.slots ?? (t === 0 ? FORMATION_433 : FORMATION_442);
       const names = t === 0 ? NAMES_HOME : NAMES_AWAY;
       const team = {
         idx: t,
         cfg,
-        name: cfg.name,
-        short: cfg.short,
+        name: setup?.name ?? cfg.name,
+        short: setup?.short ?? cfg.short,
         attackDir: cfg.attackDir,
         agents: [],
         formation,
-        tactics: createTactics(t),
+        formationName: setup?.formation ?? cfg.formation,
+        profile: setup,
+        tactics: createTactics(t, setup?.tactics ?? null),
         goalFlash: 0,
       };
       this.teams.push(team);
-      const squadQuality = t === 0 ? 1.01 : 0.995;
+      const squadQuality = setup?.squadQuality ?? (t === 0 ? 1.01 : 0.995);
 
       for (let i = 0; i < formation.length; i++) {
         const slot = formation[i];
         const look = randomLook();
-        const number = i + 1;
-        const attrs = makeAttributes(slot.role, squadQuality * (0.96 + Math.random() * 0.09));
+        const source = setup?.lineup?.[i] ?? null;
+        const number = source?.number ?? i + 1;
+        const name = source?.name ?? names[i];
+        const attrs = makeAttributes(
+          slot.role,
+          squadQuality * (source?.quality ?? (0.96 + Math.random() * 0.09)),
+          attributeBias(source?.signals),
+        );
         const rig = this.makeRig({
           number,
-          name: names[i].split(' ').slice(-1)[0],
+          name: name.split(' ').slice(-1)[0] || name,
           shirt: cfg.primary,
           shorts: cfg.shorts,
           socks: cfg.socks,
@@ -144,7 +157,9 @@ export class Match {
           teamIdx: t,
           role: slot.role,
           number,
-          name: names[i],
+          name,
+          rating: source?.averageRating ?? null,
+          impact: source?.impact ?? null,
           rig,
           attrs,
           pos: new THREE.Vector3(),

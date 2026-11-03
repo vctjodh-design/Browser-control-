@@ -25,6 +25,7 @@ import {
   getKickoffScoreMatchLastFive,
 } from "../lib/kickoffscore-last-five";
 import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
+import { getSimFormProfile } from "../lib/sim-form-profile";
 import { UpstreamRateLimitError } from "../lib/upstream-rate-limit";
 import {
   get365ScoresMatchReplay,
@@ -281,6 +282,44 @@ router.get(
       res.status(502).json({
         error:
           "Last-five match data could not be loaded right now. Please try again.",
+      });
+    }
+  },
+);
+
+router.get(
+  "/football/matches/:fixtureId/sim-profile",
+  async (req, res): Promise<void> => {
+    const fixtureId = Number(req.params.fixtureId);
+    if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    const readCount = (value: unknown): number | undefined => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : undefined;
+    };
+
+    try {
+      const profile = await getSimFormProfile(fixtureId, {
+        formGames: readCount(req.query.formGames),
+        detailGames: readCount(req.query.detailGames),
+      });
+      res.json(profile);
+    } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not build the simulation form profile",
+      );
+      res.status(502).json({
+        error: "Form and lineups could not be read right now. Please try again.",
       });
     }
   },

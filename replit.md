@@ -33,8 +33,23 @@ _Replace the heading above with the project's name, and this line with one sente
 Opening a fixture (`/matches/:id`) shows the fixture overview and then a live 3D
 match: `sim.html` runs the simulation in an iframe so the game keeps its own HUD
 and styles. It is a self-contained engine (utility-driven agents, fatigue,
-tactics, fouls and cards, set pieces) under `src/sim3d/`; the host page only
-supplies the two clubs, their colours and the venue.
+tactics, fouls and cards, set pieces) under `src/sim3d/`.
+
+The simulation is fed by real match data rather than scripted outcomes.
+`GET /api/football/matches/:id/sim-profile` (`lib/sim-form-profile.ts`) reads the
+last 15 results per club for form, the team statistics and player ratings of the
+eight most recent completed fixtures for style and impact, and predicts an XI by
+scoring every (formation slot, player) pair from squad grids, appearance
+frequency, ratings and recency. Nothing in the profile picks a winner; the game
+blends the style with its own baseline, nudges each player's role attributes by
+their finishing/creation/retention/defending/duel/discipline signals, and lets the
+match play out. The profile is cached for three minutes and degrades to the
+default squads when the source is thin.
+
+The match page stashes the profile in session storage for the frame
+(`sim-form-profile:<fixtureId>`), so `boot.js` applies it before the engine builds
+the squads and a Restart keeps it. The panel shows each club's form run,
+formation, points per game and predicted XI under the pitch.
 
 ## Architecture decisions
 

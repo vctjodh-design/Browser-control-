@@ -28,9 +28,10 @@ function jitter(v, spread) {
 
 /**
  * Build a full attribute set for one player.
- * `quality` nudges the whole profile (0.9 squad player .. 1.06 star).
+ * `quality` nudges the whole profile (0.9 squad player .. 1.06 star) and
+ * `bias` (optional) carries per-attribute deltas read from real match data.
  */
-export function makeAttributes(role, quality = 1) {
+export function makeAttributes(role, quality = 1, bias = null) {
   const base = ROLE_BASE[role] || ROLE_BASE.CM;
   const attrs = {};
   for (const [k, v] of Object.entries(base)) {
@@ -49,6 +50,13 @@ export function makeAttributes(role, quality = 1) {
     : role === 'CB' ? 182 + Math.round(rnd() * 10)
     : role === 'ST' ? 176 + Math.round(rnd() * 14)
     : 170 + Math.round(rnd() * 15);
+
+  if (bias) {
+    for (const [key, delta] of Object.entries(bias)) {
+      if (typeof attrs[key] !== 'number' || !Number.isFinite(delta)) continue;
+      attrs[key] = Math.max(0.05, Math.min(0.99, attrs[key] + delta));
+    }
+  }
 
   return {
     ...attrs,

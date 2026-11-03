@@ -525,3 +525,31 @@ kbd {
   .dock-group { padding-left: 6px !important; }
   #ticker { max-width: 170px; font-size: 10px; }
 }
+
+/* ---------- phones in portrait ---------- */
+/* Inside the match page's tab the pitch is often only ~390px wide, so the
+   scoreboard, stat strips and dock shrink rather than wrap across the view. */
+@media (max-width: 480px) {
+  .scoreboard { top: 8px; width: calc(100% - 16px); border-radius: 8px; }
+  .scoreboard .team { flex: 1 1 0; min-width: 0; gap: 6px; padding: 6px 8px; font-size: 11px; letter-spacing: 0.05em; line-height: 1.1; }
+  .crest { width: 12px; height: 15px; }
+  .score-box { min-width: 58px; padding: 3px 7px; }
+  .score { font-size: 19px; gap: 4px; }
+  .score i { font-size: 13px; }
+  .clock { font-size: 8px; letter-spacing: 0.14em; margin-top: 1px; }
+  .match-strip { top: 60px; gap: 7px; padding: 4px 8px; max-width: calc(100% - 20px); }
+  .match-strip .tactic { display: none; }
+  .strip-stats { gap: 7px; }
+  .strip-stats .stat { font-size: 10px; gap: 3px; }
+  .strip-stats .stat label { font-size: 6.5px; letter-spacing: 0.08em; }
+  .statline { top: 96px; gap: 6px; padding: 5px 9px; font-size: 8px; white-space: nowrap; }
+  .statline .bar { width: 62px; }
+  #ticker { top: auto; bottom: 78px; left: 8px; right: 8px; max-width: none; font-size: 10px; gap: 4px; }
+  .tick { padding: 5px 8px; }
+  #dock { flex-wrap: wrap; justify-content: center; width: calc(100% - 16px); bottom: 8px; gap: 4px 2px; padding: 5px 6px; }
+  #dock button { flex: 0 0 auto; font-size: 9px; padding: 6px; letter-spacing: 0.05em; }
+  .dock-label { display: none; }
+  .dock-group { gap: 2px; }
+  .dock-group + .dock-group { padding-left: 5px; }
+  .banner-inner { padding: 18px; }
+}

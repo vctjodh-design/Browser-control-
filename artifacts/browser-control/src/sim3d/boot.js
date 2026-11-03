@@ -5,8 +5,25 @@
 // applied to the shared TEAMS config before the engine builds the squads.
 import { TEAMS } from './config.js';
 import { labels } from './labels.js';
+import { recentForm, setFormProfile } from './sim/form-profile.js';
 
 const params = new URLSearchParams(window.location.search);
+
+// The match page reads each club's recent form, player ratings and predicted XI
+// from the API and leaves the profile in session storage for this frame. It is
+// optional: without it the game still runs its default squads.
+function readFormProfile() {
+  const fixture = (params.get('fixture') ?? '').trim();
+  if (!/^\d+$/.test(fixture)) return null;
+  try {
+    const raw = window.sessionStorage.getItem(`sim-form-profile:${fixture}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+const formProfile = setFormProfile(readFormProfile());
 
 function readColour(value, fallback) {
   const match = /^#?([0-9a-fA-F]{6})$/.exec((value || '').trim());
@@ -52,7 +69,24 @@ const setText = (selector, text) => {
 
 setText('.team.home .name', TEAMS[0].name);
 setText('.team.away .name', TEAMS[1].name);
-setText('.banner-inner p', `${TEAMS[0].name} v ${TEAMS[1].name}`);
+
+// With a form profile the crest line also carries the shape and the run of
+// results the lineups were read from.
+function teamTagline(index) {
+  const team = formProfile?.teams?.[index];
+  if (!team) return null;
+  const form = recentForm(index, 5);
+  return [team.formation, form].filter(Boolean).join(' · ');
+}
+
+const homeTag = teamTagline(0);
+const awayTag = teamTagline(1);
+setText(
+  '.banner-inner p',
+  homeTag || awayTag
+    ? `${TEAMS[0].name} ${homeTag ?? ''}  v  ${TEAMS[1].name} ${awayTag ?? ''}`.replace(/\s+/g, ' ')
+    : `${TEAMS[0].name} v ${TEAMS[1].name}`,
+);
 
 document.querySelectorAll('.crest').forEach((crest, index) => {
   const team = TEAMS[index];

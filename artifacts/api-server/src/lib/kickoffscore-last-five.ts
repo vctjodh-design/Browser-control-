@@ -1151,3 +1151,67 @@ export function getKickoffScoreMatchLastFive(
 }
 
 export { KickoffScoreMatchNotFoundError };
+
+export type HistoricalMatchSnapshot = {
+  fixtureId: number;
+  statistics: FootballLastFiveTeamStatistics[];
+  lineups: FootballLastFiveLineup[];
+  players: FootballLastFivePlayerGroup[];
+};
+
+const historicalSnapshotCache = new Map<
+  number,
+  { expiresAt: number; data: HistoricalMatchSnapshot }
+>();
+const inFlightHistoricalSnapshots = new Map<
+  number,
+  Promise<HistoricalMatchSnapshot>
+>();
+const MAX_HISTORICAL_SNAPSHOTS = 120;
+
+/**
+ * Lineups, player statistics and team statistics for any completed fixture.
+ * Used by the simulation profile, which reads deeper into a club's history than
+ * the last-five panel does. Malformed rows are dropped rather than thrown so a
+ * single sparse match cannot sink the whole profile.
+ */
+export function getHistoricalMatchSnapshot(
+  fixtureId: number,
+): Promise<HistoricalMatchSnapshot> {
+  const cached = historicalSnapshotCache.get(fixtureId);
+  if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.data);
+
+  const active = inFlightHistoricalSnapshots.get(fixtureId);
+  if (active) return active;
+
+  const request = fetchKickoffScoreJson("/api/fixtures", {
+    id: String(fixtureId),
+  })
+    .then((payload) => {
+      const fixture = fixtureObject(payload);
+      return {
+        fixtureId,
+        statistics: parseStatistics(fixture),
+        lineups: parseLineups(fixture),
+        players: parsePlayers(fixture),
+      };
+    })
+    .then((data) => {
+      historicalSnapshotCache.set(fixtureId, {
+        data,
+        expiresAt: Date.now() + LAST_FIVE_CACHE_TTL_MS,
+      });
+      if (historicalSnapshotCache.size > MAX_HISTORICAL_SNAPSHOTS) {
+        const oldest = historicalSnapshotCache.keys().next().value;
+        if (oldest !== undefined) historicalSnapshotCache.delete(oldest);
+      }
+      return data;
+    })
+    .finally(() => {
+      inFlightHistoricalSnapshots.delete(fixtureId);
+    });
+
+  inFlightHistoricalSnapshots.set(fixtureId, request);
+  return request;
+}
+

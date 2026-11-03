@@ -18,8 +18,28 @@ export const STYLES = [
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-export function createTactics(idx) {
-  const style = STYLES[idx % STYLES.length];
+const blend = (fallback, value) =>
+  typeof value === 'number' && Number.isFinite(value)
+    ? clamp(fallback * 0.35 + value * 0.65, 0.12, 1)
+    : fallback;
+
+export function createTactics(idx, override = null) {
+  // A host page can hand over a style read from the club's own matches. It is
+  // blended with the default identity so the shape of play still reads like
+  // football rather than a raw statistical average.
+  const base = STYLES[idx % STYLES.length];
+  const style = override
+    ? {
+        key: 'data',
+        label: override.label ?? base.label,
+        press: blend(base.press, override.press),
+        line: blend(base.line, override.line),
+        width: blend(base.width, override.width),
+        risk: blend(base.risk, override.risk),
+        tempo: blend(base.tempo, override.tempo),
+        direct: blend(base.direct, override.direct),
+      }
+    : base;
   return {
     style,
     press: style.press,
