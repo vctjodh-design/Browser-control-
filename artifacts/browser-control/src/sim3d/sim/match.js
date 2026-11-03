@@ -1064,6 +1064,36 @@ export class Match {
     return { x: a.pos.x, z: a.pos.z, urgency: 0.3 };
   }
 
+  /**
+   * The shot has reached the line. A keeper who is a stride away from the ball
+   * still saves most of it, and even an open corner is roughly a coin flip
+   * rather than a certain goal — there is no such thing as a shot that cannot
+   * be stopped just because the striker aimed away from him.
+   */
+  keeperStops(keeper) {
+    const b = this.ball.pos;
+    const v = this.ball.vel;
+    const speed = Math.hypot(v.x, v.y, v.z);
+    const lateral = Math.abs(keeper.pos.z - b.z);
+    const reach = 0.5 + keeper.attrs.composure * 0.7;
+    let p =
+      lateral <= reach
+        ? 0.84
+        : clamp(1.15 - lateral / 5.6, 0, 0.84);
+    // Height and power beat him: the top corner is the hardest ball to stop.
+    if (b.y > 1.85) p *= 0.74;
+    if (b.y > 2.18) p *= 0.5;
+    p *= clamp(1.12 - speed / 76, 0.55, 1);
+    p *= 0.88 + keeper.attrs.composure * 0.18;
+    p *= 0.86 + keeper.stamina * 0.14;
+    if (!chance(p)) return false;
+
+    // He gets across and smothers it on the line.
+    b.x = Math.sign(b.x) * (GOAL_X - 0.45);
+    this.takePossession(keeper, speed, this.ball);
+    return true;
+  }
+
   // ---------------------------------------------------------------- perception
   perceive(a) {
     const team = this.teams[a.teamIdx];
@@ -1362,10 +1392,18 @@ export class Match {
     // accuracy: distance, pressure, technique, fatigue
     const pressure = clamp(1 - (ctx.nearestD - 1) / 3, 0, 1);
     const acc = at.shooting * 0.55 + at.composure * 0.3 + at.flair * 0.15;
-    const spreadRad = (0.062 + (1 - acc) * 0.15) * (1 + dist / 50) * (1 + pressure * 0.5) * (1 + (1 - a.stamina) * 0.55);
+    // Real shooting is far wilder than a straight line to the corner: about a
+    // third of shots on target, and less than that from range or under
+    // pressure. Accuracy here scales the angular spread, so a crowded box and
+    // tired legs push shots wide and over rather than into the net.
+    const spreadRad =
+      (0.105 + (1 - acc) * 0.3) *
+      (1 + dist / 42) *
+      (1 + pressure * 0.75) *
+      (1 + (1 - a.stamina) * 0.65);
     const spreadM = Math.tan(spreadRad) * dist;
-    let z0 = aimZ + randn() * spreadM * 0.5;
-    let y0 = aimY + randn() * spreadM * 0.35;
+    let z0 = aimZ + randn() * spreadM * 0.66;
+    let y0 = aimY + randn() * spreadM * 0.4;
 
     const target = new THREE.Vector3(goal.x + dir * 0.4, Math.max(0.25, y0), z0);
     const v = target.clone().sub(new THREE.Vector3(a.pos.x, this.ball.pos.y, a.pos.z)).normalize();
@@ -1380,6 +1418,35 @@ export class Match {
     a.stats.shots++;
     this.stats[team.idx].shots++;
     this.shots[team.idx]++;
+
+    // Defensive shape: a defender goal-side of the shooter and close enough to
+    // close him down gets in the way. This is what keeps a packed box from
+    // turning every attack into a clear sight of goal.
+    const opp = this.teams[1 - a.teamIdx];
+    const toGoalX = goal.x - a.pos.x;
+    const toGoalZ = goal.z - a.pos.z;
+    let blocker = null;
+    for (const d of this.active(opp)) {
+      if (d.role === 'GK' || d.sentOff) continue;
+      const dd = dist2D(d.pos, a.pos);
+      if (dd > 3.4) continue;
+      const inFront = (d.pos.x - a.pos.x) * toGoalX + (d.pos.z - a.pos.z) * toGoalZ > 0;
+      if (!inFront) continue;
+      const reach = 1 - dd / 3.4;
+      const blockP = clamp((0.1 + d.attrs.defending * 0.45) * reach * (1 - dist / 60), 0.02, 0.62);
+      if (chance(blockP) && (!blocker || dd < blocker.dd)) blocker = { d, dd };
+    }
+    if (blocker) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      this.ball.vel.set(-dir * 0.55, 0.35, side * (0.7 + Math.random() * 0.5)).normalize();
+      this.ball.vel.multiplyScalar(7 + Math.random() * 7);
+      this.ball.lastTouch = blocker.d;
+      this.ball.lastTouchTeam = opp.idx;
+      this.stats[opp.idx].blocks = (this.stats[opp.idx].blocks || 0) + 1;
+      this.onEvent({ type: 'block', text: `${blocker.d.name} throws himself in the way`, team: opp.idx, player: blocker.d.name });
+      return;
+    }
+
     const onTarget = Math.abs(z0) < HALF_G - 0.05 && y0 < GOAL_H;
     if (onTarget) {
       this.stats[team.idx].onTarget++;
@@ -1790,6 +1857,8 @@ export class Match {
       const scoringTeam = b.x > 0
         ? this.teams.find((t) => t.attackDir > 0)
         : this.teams.find((t) => t.attackDir < 0);
+      const keeper = this.active(this.teams[1 - scoringTeam.idx]).find((k) => k.role === 'GK');
+      if (keeper && this.keeperStops(keeper)) return;
       this.scoreGoal(scoringTeam);
       return;
     }

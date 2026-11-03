@@ -135,6 +135,40 @@ settles against it and shows what each selection would have returned at the best
 price. Watching a match and simulating 5,000 are therefore graded by identical
 rules.
 
+### Making the match look like football
+
+`GET` nothing here matters if the played match is a basketball score, and for a
+while it was: measured headlessly over a dozen matches the engine averaged **6.1
+goals**, with 62% of shots on target and no 0-0 at all. Three things were wrong,
+and all three were about the defending team rather than the attack:
+
+- **Shots were laser-guided.** The angular spread was far too tight, so almost
+every shot from the edge of the box hit the frame. It now scales harder with
+range, pressure and fatigue, which is what produces the wide and over-hit shots
+that make up most of a real match.
+- **Nobody blocked anything.** A defender goal-side of the shooter and inside
+3.4m now gets in the way with a chance that rises with his defending attribute
+and falls with distance — the packed box behaves like a packed box.
+- **An on-target shot was a goal.** The keeper only stopped shots the ball
+physically ran into; a shot aimed at the far corner beat him by geometry every
+time. He now gets a save chance at the line based on how far he has to travel,
+how hard and how high the ball is hit, his reflexes and his legs.
+
+The same twelve-match bench now reads **2.56 goals a match**, 51% of shots on
+target, with 0-0, 1-0, 2-0, 1-1 and 3-2 all turning up in proportion — close to
+the batch model, so a played match and a simulated one agree. `engine-bench.mjs`
+at the repo root replays N matches headlessly and prints the distribution, which
+is how these numbers were checked.
+
+### Reading the predictions
+The simulation's answer sits above the markets: the result it favours, its most
+likely scoreline and the nine scorelines that came up most. Every market header
+then states the one thing the simulation expects from it — `calls Over 2.5 52%` —
+chosen as the line nearest a coin flip rather than the 98% certain under that
+would flatter the model; the selection it calls is tagged `pick` inside the
+group. The edge against the price stays on the right of the header, so a market
+can be read without expanding it.
+
 One divergence is deliberate: the model's card rate (~3.9 a match) sits above
 what this source's card lines imply (~2.6), so card markets show a systematic
 edge. That is the simulation disagreeing with the price, which is the point — the

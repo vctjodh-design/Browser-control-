@@ -34,6 +34,58 @@ function StatTile({ label, value, detail }: { label: string; value: string; deta
   );
 }
 
+/**
+ * The headline answer: how the replays ended and which scoreline came up most.
+ * This is what the simulation predicts, before any price is considered.
+ */
+function PredictedResult({ result }: { result: OddsSimulationResult }) {
+  const total = Math.max(1, result.rounds);
+  const lines = result.summary.scorelines
+    .slice()
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 9);
+  const top = lines[0];
+  const { homeWin, draw, awayWin } = result.summary;
+  const verdict: [string, number] =
+    homeWin >= draw && homeWin >= awayWin
+      ? ['Home win', homeWin]
+      : awayWin >= draw
+        ? ['Away win', awayWin]
+        : ['Draw', draw];
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border border-[#d8ded3] bg-[#f5f7f0] px-4 py-3"
+      data-testid="odds-prediction"
+    >
+      <div className="min-w-[150px]">
+        <p className="mono text-[8px] uppercase tracking-[.14em] text-[#7f8a76]">Prediction</p>
+        <p className="mt-1 text-[13px] font-extrabold text-[#33413f]">
+          {verdict[0]} <span className="text-[#5c7a6a]">{pct(verdict[1], 0)}</span>
+        </p>
+        <p className="mono mt-0.5 text-[9px] text-[#8b8d84]">
+          most likely {top ? top.score : '–'}
+          {top ? ` · ${pct(top.count / total, 1)}` : ''}
+        </p>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+        {lines.map((line) => (
+          <span
+            key={line.score}
+            className={`mono rounded-lg border px-2 py-1 text-[9px] ${
+              line === top
+                ? 'border-[#a9c0ae] bg-[#e3efe4] text-[#2f6b4f]'
+                : 'border-[#e0e4d8] bg-[#fbfaf6] text-[#6d7a72]'
+            }`}
+          >
+            <span className="font-semibold">{line.score}</span> {pct(line.count / total, 1)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MarketGroup({
   name,
   rows,
@@ -46,6 +98,16 @@ function MarketGroup({
   onToggle: () => void;
 }) {
   const best = rows.reduce((top, row) => (row.edge > top.edge ? row : top), rows[0]);
+  // What the simulation says will happen in this market, independent of the
+  // price. On a line market that is the line it expects the match to land on
+  // (the closest to a coin flip), not the longest odds-on under that would be
+  // 98% "right" and say nothing.
+  const lead = rows.reduce((top, row) => {
+    const distance = Math.abs(row.probability - 0.5) - Math.abs(top.probability - 0.5);
+    if (distance < -1e-9) return row;
+    if (distance > 1e-9) return top;
+    return row.probability > top.probability ? row : top;
+  }, rows[0]);
   return (
     <div className="overflow-hidden rounded-xl border border-[#deddd4] bg-[#fbfaf6]">
       <button
@@ -64,9 +126,15 @@ function MarketGroup({
             {rows.length}
           </span>
         </span>
-        <span className="mono shrink-0 text-[9px] text-[#8b8d84]">
-          best edge{' '}
-          <span className={edgeTone(best.edge)}>{signedPct(best.edge)}</span>
+        <span className="mono flex shrink-0 items-center gap-2 text-[9px]">
+          <span className="max-w-[190px] truncate text-[#43575a]" data-testid={`sim-pick-${name}`}>
+            <span className="text-[#9b9d93]">calls </span>
+            <span className="font-semibold">{lead.selection}</span>{' '}
+            <span className="text-[#5c7a6a]">{pct(lead.probability, 0)}</span>
+          </span>
+          <span className={edgeTone(best.edge)} title="best edge against the price">
+            {signedPct(best.edge)}
+          </span>
         </span>
       </button>
       {open ? (
@@ -79,8 +147,13 @@ function MarketGroup({
                 key={`${row.market}-${row.selection}`}
                 className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 px-4 py-2.5"
               >
-                <span className="min-w-0 truncate text-[10px] font-bold text-[#52615e]">
-                  {row.selection}
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate text-[10px] font-bold text-[#52615e]">{row.selection}</span>
+                  {row === lead ? (
+                    <span className="mono shrink-0 rounded bg-[#e7ede7] px-1 py-0.5 text-[7px] uppercase tracking-[.1em] text-[#5c7a6a]">
+                      pick
+                    </span>
+                  ) : null}
                 </span>
                 <span className="mono text-[10px] text-[#43575a]">{row.bestPrice.toFixed(2)}</span>
                 <span className="col-span-2 flex items-center gap-2 text-[9px] text-[#8b8d84]">
@@ -341,6 +414,8 @@ export function OddsSimulationPanel({ fixtureId }: { fixtureId: number }) {
             <StatTile label="Cards" value={result.summary.averageCards.toFixed(1)} />
             <StatTile label="Shots on target" value={result.summary.averageShotsOnTarget.toFixed(1)} />
           </div>
+
+          <PredictedResult result={result} />
 
           <div className="rounded-xl border border-[#deddd4] bg-[#fbfaf6]">
             <div className="border-b border-[#e8e6de] bg-[#f3f2eb] px-4 py-2.5">
