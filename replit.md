@@ -94,7 +94,15 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- `vite.config.ts` throws without `PORT`, so builds and dev both need it:
+  `PORT=3000 BASE_PATH=/ pnpm --filter @workspace/browser-control run build`.
+- The cloud preview only serves while something is listening on the app port, and
+  a sandbox restore kills every process. `scripts/keepalive.mjs` (`pnpm keepalive`)
+  polls app and API every 20s, restarts whichever stops answering, and reinstalls
+  dependencies from the lockfile when `node_modules` is gone. Start it detached:
+  `setsid nohup node scripts/keepalive.mjs > /tmp/logs/keepalive.log 2>&1 &`.
+- The API refuses to boot without `PORT` as well; it serves `/api` on whatever
+  port it is given (5000 locally, proxied by the app).
 
 ## Pointers
 
