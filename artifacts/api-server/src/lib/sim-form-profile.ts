@@ -13,6 +13,7 @@ import type {
   FootballLastFiveStat,
   FootballLastFiveTeamStatistics,
   FootballRecentMatch,
+  FootballStandingsRow,
 } from "@workspace/api-zod";
 import { getKickoffScoreMatchDetails } from "./kickoffscore-match-details";
 import {
@@ -125,6 +126,19 @@ export type SimLineupPlayer = {
   matchRatings: SimPlayerMatchLine[];
 };
 
+/** Where the club sits in its own league, and how that compares to the field. */
+export type SimLeagueTable = {
+  rank: number;
+  teams: number;
+  points: number;
+  played: number;
+  goalDifference: number;
+  pointsPerGame: number;
+  form: string;
+  /** -1 (bottom of the table) .. 1 (top), relative to the league's own average. */
+  edge: number;
+};
+
 export type SimTeamProfile = {
   side: "home" | "away";
   teamId: number;
@@ -134,7 +148,12 @@ export type SimTeamProfile = {
   recent: SimFormResult[];
   style: SimTeamStyle;
   formation: string;
+  /** "team-sheets" when their archived sheets agree, "roles" when the shape
+   *  was read from what the predicted XI's midfielders actually do. */
+  formationSource: "team-sheets" | "roles";
   formationConfidence: number;
+  /** League table position, or null when the source had no table for them. */
+  table: SimLeagueTable | null;
   lineup: SimLineupPlayer[];
   bench: SimLineupPlayer[];
   /** Engine positioning for each predicted starter, in lineup order. */
@@ -557,6 +576,19 @@ function playerSignals(tally: PlayerTally, role: string): Record<string, number>
     ? clamp(0.5 * signal(tally.normalized.goalkeeping) + 0.5 * (saveRate ?? 0.68), 0.05, 0.95)
     : 0.5;
 
+  // Match intelligence: the players who keep the ball, find team-mates in
+  // dangerous areas and stay out of trouble. It is read from what they have
+  // done on the pitch, not from a rating table.
+  const intelligence = clamp(
+    0.34 * (passAccuracy ?? 0.75) +
+      0.24 * clamp(per90(tally.keyPasses) / 2.2, 0, 1) +
+      0.16 * clamp(per90(tally.passes) / 52, 0, 1) +
+      0.14 * discipline +
+      0.12 * signal(tally.normalized.passing),
+    0.05,
+    0.95,
+  );
+
   return {
     finishing: round(finishing, 3),
     creation: round(creation, 3),
@@ -566,6 +598,7 @@ function playerSignals(tally: PlayerTally, role: string): Record<string, number>
     discipline: round(discipline, 3),
     activity: round(activity, 3),
     goalkeeping: round(goalkeeping, 3),
+    intelligence: round(intelligence, 3),
   };
 }
 
@@ -829,7 +862,12 @@ function averageStyle(
 function styleTactics(
   style: SimTeamStyle,
   record: SimFormRecord,
+  tableEdge = 0,
 ): SimTeamProfile["tactics"] {
+  // How the league has gone so far nudges conviction, not the result: a side
+  // at the top carries itself a little higher up the pitch, one at the bottom
+  // sits a little deeper. Both stay inside narrow bands.
+  const edge = clamp(tableEdge, -1, 1);
   const possession = style.possession ?? 50;
   const control = clamp((possession - 50) / 34, -1, 1);
   const workRate = clamp(
@@ -838,11 +876,11 @@ function styleTactics(
     0.2,
     1,
   );
-  const line = clamp(0.42 + control * 0.26 + (record.goalsForPerGame - 1.2) * 0.05, 0.24, 0.9);
-  const press = clamp(0.26 + workRate * 0.5 + (0.5 - control) * 0.12, 0.3, 0.9);
+  const line = clamp(0.42 + control * 0.26 + (record.goalsForPerGame - 1.2) * 0.05 + edge * 0.03, 0.24, 0.9);
+  const press = clamp(0.26 + workRate * 0.5 + (0.5 - control) * 0.12 + edge * 0.025, 0.3, 0.9);
   const width = clamp(0.5 + ((style.crosses ?? 18) / 30) * 0.22 - ((style.longBallShare ?? 30) / 100) * 0.1, 0.35, 0.8);
   const risk = clamp(
-    0.36 + ((style.boxTouches ?? 28) / 45) * 0.28 + (record.goalsForPerGame - 1.2) * 0.06,
+    0.36 + ((style.boxTouches ?? 28) / 45) * 0.28 + (record.goalsForPerGame - 1.2) * 0.06 + edge * 0.02,
     0.25,
     0.82,
   );
@@ -858,6 +896,35 @@ function styleTactics(
     tempo: round(tempo, 3),
     direct: round(direct, 3),
     label,
+  };
+}
+
+/**
+ * One club's row in its league table, plus how far it sits from the league's
+ * average points per game. That distance is the only number the simulation
+ * uses; the table itself never picks a result.
+ */
+function tableFor(
+  rows: FootballStandingsRow[],
+  teamId: number,
+): SimLeagueTable | null {
+  const row = rows.find((entry) => entry.teamId === teamId);
+  if (!row) return null;
+  const perGame = (entry: FootballStandingsRow) =>
+    entry.played > 0 ? entry.points / entry.played : 0;
+  const averagePoints = rows.length
+    ? rows.reduce((sum, entry) => sum + perGame(entry), 0) / rows.length
+    : 1.4;
+  const pointsPerGame = perGame(row);
+  return {
+    rank: row.rank,
+    teams: rows.length,
+    points: row.points,
+    played: row.played,
+    goalDifference: row.goalDifference,
+    pointsPerGame: round(pointsPerGame, 3),
+    form: row.form ?? "",
+    edge: round(clamp((pointsPerGame - averagePoints) / 1.1, -1, 1), 3),
   };
 }
 
@@ -921,6 +988,7 @@ function aggregateTeam(
   issues: string[],
 ): {
   formation: string;
+  formationSource: SimTeamProfile["formationSource"];
   formationConfidence: number;
   lineup: SimLineupPlayer[];
   bench: SimLineupPlayer[];
@@ -1001,22 +1069,108 @@ function aggregateTeam(
   if (!tallies.size) issues.push(`${teamName} did not return lineups for the sample.`);
 
   const rankedFormations = [...formations.entries()].sort((left, right) => right[1] - left[1]);
-  const formation = rankedFormations[0]?.[0] ?? "4-3-3";
-  const formationConfidence = sample
-    ? round((rankedFormations[0]?.[1] ?? 0) / sample, 2)
-    : 0;
+  const label = rankedFormations[0]?.[0] ?? "4-3-3";
+  const labelShare = sample ? (rankedFormations[0]?.[1] ?? 0) / sample : 0;
+  const formationConfidence = sample ? round(labelShare, 2) : 0;
 
-  const rows = formationRows(formation) ?? [4, 4, 2];
-  const slots = rolesForFormation(rows).map((slot) => {
-    const count = slot.row === 1 ? 1 : rows[slot.row - 2];
-    const { nx, nz } = slotGeometry(slot.role, count, slot.col);
-    return { role: slot.role, nx, nz };
-  });
+  const labelRows = formationRows(label) ?? [4, 4, 2];
+  let formation = label;
+  let formationSource: SimTeamProfile["formationSource"] = "team-sheets";
+  let rows = labelRows;
+
+  // The archive writes almost every club down as 4-2-3-1, so when a club's
+  // sheets all agree the label carries no information about them. Read the
+  // shape off the XI instead: how many midfielders actually hold, and how many
+  // play ahead of the ball. That stays descriptive - it says what the players
+  // do, not who should win.
+  if (tallies.size && labelShare >= 0.75) {
+    const preview = predictLineup(
+      tallies,
+      label,
+      Math.max(1, sample),
+      geometryFor(labelRows),
+    );
+    const shaped = shapeFromRoles(preview.lineup, labelRows);
+    if (shaped && shaped.join("-") !== labelRows.join("-")) {
+      formation = shaped.join("-");
+      formationSource = "roles";
+      rows = shaped;
+    }
+  }
+
+  const slots = geometryFor(rows);
   const { lineup, bench } = tallies.size
     ? predictLineup(tallies, formation, Math.max(1, sample), slots)
     : { lineup: [], bench: [] };
 
-  return { formation, formationConfidence, lineup, bench, slots, sample, style };
+  return {
+    formation,
+    formationSource,
+    formationConfidence,
+    lineup,
+    bench,
+    slots,
+    sample,
+    style,
+  };
+}
+
+/** Slot geometry for a set of outfield rows, in engine coordinates. */
+function geometryFor(rows: number[]): { role: string; nx: number; nz: number }[] {
+  return rolesForFormation(rows).map((slot) => {
+    const count = slot.row === 1 ? 1 : rows[slot.row - 2];
+    const { nx, nz } = slotGeometry(slot.role, count, slot.col);
+    return { role: slot.role, nx, nz };
+  });
+}
+
+const HOLDING_LINE = 0.175;
+
+const DEFENDER_ROLE = /^(CB|LB|RB)$/;
+const MIDFIELD_ROLE = /^(DM|CM|LM|RM)$/;
+const FORWARD_ROLE = /^(ST|LW|RW)$/;
+
+/** How much of a midfielder's game is spent holding, from his own numbers. */
+function holdingScore(player: SimLineupPlayer): number {
+  const s = player.signals;
+  const defending = s.defending ?? 0.5;
+  const duels = s.duels ?? 0.5;
+  const creation = s.creation ?? 0.5;
+  const finishing = s.finishing ?? 0.5;
+  return defending + duels * 0.35 - (creation * 0.7 + finishing * 0.3);
+}
+
+/**
+ * Split the predicted XI into rows by what each player does. Only used when the
+ * archived formation label says the same thing for every match, which it does
+ * for nearly every club.
+ */
+function shapeFromRoles(
+  lineup: SimLineupPlayer[],
+  baseRows: number[],
+): number[] | null {
+  if (lineup.length !== 11 || baseRows.length !== 3) return null;
+  const outfield = lineup.filter((player) => !player.role.startsWith("GK"));
+  const defenders = outfield.filter((player) => DEFENDER_ROLE.test(player.role)).length;
+  const forwards = outfield.filter((player) => FORWARD_ROLE.test(player.role)).length;
+  const midfielders = outfield.filter((player) => MIDFIELD_ROLE.test(player.role));
+  if (!midfielders.length) return null;
+
+  // Teams with a single midfielder in the band (rare) keep the flat shape.
+  if (midfielders.length === 1) {
+    const rows = [defenders, 1, forwards];
+    return rows.reduce((sum, value) => sum + value, 0) === 10 ? rows : null;
+  }
+
+  // A midfielder who does as much defensive work as creative work scores about
+  // 0.175. Anyone above that line is really a holder, and the rest play ahead
+  // of the ball, so the split follows the players rather than a fixed template.
+  const ranked = [...midfielders].sort((left, right) => holdingScore(right) - holdingScore(left));
+  const holders = ranked.filter((player) => holdingScore(player) > HOLDING_LINE).length;
+  const deep = Math.max(1, Math.min(ranked.length - 1, holders));
+  const rows = [defenders, deep, ranked.length - deep, forwards];
+  if (rows.reduce((sum, value) => sum + value, 0) !== 10) return null;
+  return rows;
 }
 
 export type SimFormProfileOptions = {
@@ -1069,7 +1223,12 @@ async function buildProfile(
     );
     const aggregate = aggregateTeam(participant.id, participant.name, detailed, issues);
     const record = buildRecord(recent, participant.id);
-    const tactics = styleTactics(aggregate.style, record);
+    const table = tableFor(details.standings ?? [], participant.id);
+    if (!table) {
+      issues.push(`No league table row was available for ${participant.name}.`);
+    }
+    const edge = table?.edge ?? 0;
+    const tactics = styleTactics(aggregate.style, record, edge);
     const recentResults: SimFormResult[] = recent.map((match) => {
       const home = match.homeTeam.id === participant.id;
       const scored = (home ? match.homeScore : match.awayScore) ?? 0;
@@ -1094,9 +1253,10 @@ async function buildProfile(
         1 +
           (record.pointsPerGame - 1.4) * 0.022 +
           record.goalsForPerGame * 0.004 -
-          record.goalsAgainstPerGame * 0.004,
-        0.95,
-        1.06,
+          record.goalsAgainstPerGame * 0.004 +
+          edge * 0.012,
+        0.94,
+        1.07,
       ),
       3,
     );
@@ -1110,7 +1270,9 @@ async function buildProfile(
       recent: recentResults,
       style: aggregate.style,
       formation: aggregate.formation,
+      formationSource: aggregate.formationSource,
       formationConfidence: aggregate.formationConfidence,
+      table,
       lineup: aggregate.lineup,
       bench: aggregate.bench,
       slots: aggregate.slots,

@@ -51,6 +51,7 @@ export class Match {
     this.onEvent = options.onEvent || (() => {});
     this.onGoal = options.onGoal || (() => {});
     this.onCard = options.onCard || (() => {});
+    this.onReset = options.onReset || (() => {});
     this.makeRig = options.makeRig || ((cfg) => new PlayerRig(cfg));
 
     this.agents = [];
@@ -331,6 +332,59 @@ export class Match {
     this.restartInfo = null;
     this.lastTouch = null;
     this.stateTimer = delay;
+  }
+
+  /**
+   * Kick the same fixture off again from 0-0. The series runner uses this to
+   * play the match out repeatedly and report every scoreline; squads, ratings
+   * and tactics stay exactly as they were, only the match itself restarts.
+   */
+  restartMatch() {
+    for (const team of this.teams) {
+      // the half-time switch flips attackDir, so put the sides back first
+      team.attackDir = team.cfg.attackDir;
+      team.tactics = createTactics(team.idx, team.profile?.tactics ?? null);
+      team.goalFlash = 0;
+      for (const a of team.agents) {
+        a.sentOff = false;
+        a.booked = false;
+        a.warnings = 0;
+        a.celebrate = 0;
+        a.distance = 0;
+        a.gkTimer = 0;
+        a.saveTarget = null;
+        a.dive = null;
+        a.tackleCooldown = 0;
+        a.kickCooldown = 0;
+        a.stamina = 0.92 + Math.random() * 0.08;
+        a.decisionTimer = Math.random() * 0.25;
+        a.runTimer = Math.random() * 3;
+        a.makingRun = false;
+        a.isHuman = false;
+        a.stats = { passes: 0, passesCompleted: 0, shots: 0, goals: 0, tackles: 0, fouls: 0, headers: 0, yellows: 0 };
+        if (a.rig) a.rig.root.visible = true;
+      }
+    }
+    if (this.human && !this.human.sentOff) this.human.isHuman = this.humanEnabled;
+
+    this.score = [0, 0];
+    this.possession = [0, 0];
+    this.shots = [0, 0];
+    this.stats = [this.blankStats(), this.blankStats()];
+    this.excite = 0;
+    this.lastScorer = -1;
+    this.lastPossTeam = null;
+    this.lastPasser = null;
+    this.lastPassTarget = null;
+    this.pendingPass = null;
+    this.assistCandidate = null;
+    this.assistTimer = 0;
+    this.brainTimer = 0;
+    this.penaltyKeeper = null;
+    this.restartInfo = null;
+    this.switchCooldown = 0;
+    this.onReset();
+    this.startMatch();
   }
 
   startMatch() {

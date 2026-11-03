@@ -18,6 +18,9 @@ const SIGNAL_TARGETS = {
   discipline: [['discipline', 0.4]],
   activity: [['stamina', 0.16], ['workRate', 0.18]],
   goalkeeping: [['composure', 0.16]],
+  // Match intelligence: players who keep the ball, find team-mates and stay
+  // out of trouble read the game better, so they see more and panic less.
+  intelligence: [['vision', 0.2], ['composure', 0.14], ['marking', 0.1], ['discipline', 0.08]],
 };
 
 /** Flatten the profile's trait signals into attribute deltas. */
@@ -64,7 +67,9 @@ export function teamSetup(index) {
     lineup,
     tactics,
     formation: team.formation ?? null,
+    formationSource: team.formationSource ?? null,
     squadQuality: typeof team.squadQuality === 'number' ? team.squadQuality : 1,
+    table: team.table ?? null,
     record: team.record ?? null,
     sample: team.lineupSample ?? null,
     name: team.name ?? null,

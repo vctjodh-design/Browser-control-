@@ -97,6 +97,18 @@ export type SimLineupPlayer = {
   matchRatings: SimPlayerMatchLine[];
 };
 
+export type SimLeagueTable = {
+  rank: number;
+  teams: number;
+  points: number;
+  played: number;
+  goalDifference: number;
+  pointsPerGame: number;
+  form: string;
+  /** -1 (bottom) .. 1 (top) relative to the league's own average. */
+  edge: number;
+};
+
 export type SimTeamProfile = {
   side: 'home' | 'away';
   teamId: number;
@@ -106,7 +118,11 @@ export type SimTeamProfile = {
   recent: SimFormResult[];
   style: SimTeamStyle;
   formation: string;
+  /** 'team-sheets' when the archived sheets agree on a shape, 'roles' when it
+   *  was read from what the predicted XI's midfielders actually do. */
+  formationSource: 'team-sheets' | 'roles';
   formationConfidence: number;
+  table: SimLeagueTable | null;
   lineup: SimLineupPlayer[];
   bench: SimLineupPlayer[];
   slots: { role: string; nx: number; nz: number }[];

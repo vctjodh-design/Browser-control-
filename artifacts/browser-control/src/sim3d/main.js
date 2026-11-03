@@ -87,6 +87,7 @@ const match = new Match(scene, ball, {
     } else if (ev.type === 'foul' || ev.type === 'yellow' || ev.type === 'red' || ev.type === 'penalty') {
       audio.whistle(1);
     }
+    if (ev.type === 'fulltime') finishRound();
   },
   onGoal: (data) => {
     hud.showGoal(data);
@@ -96,6 +97,7 @@ const match = new Match(scene, ball, {
     hud.showCard(card);
     audio.whistle(1);
   },
+  onReset: () => hud.reset(),
 });
 
 const hud = new HUD(match);
@@ -103,9 +105,7 @@ const camRig = new CameraRig(camera);
 
 hud.bind({
   onCamera: (mode) => camRig.setMode(mode),
-  onSpeed: (s) => {
-    timeScale = s;
-  },
+  onSpeed: (s) => applySpeed(s),
   onHuman: (on) => {
     humanMode = on;
     match.setHuman(on);
@@ -126,6 +126,100 @@ let started = false;
 let goalFlash = 0;
 let accumulator = 0;
 const FIXED = 1 / 60;
+const MAX_SPEED = 20;
+
+// ------------------------------------------------------------ series runner
+// The match page can ask for the same fixture to be played out N times and
+// every scoreline reported back. Results are emergent: the squads, ratings and
+// form never change between rounds, only the match itself is replayed.
+const hostWindow = window.parent && window.parent !== window ? window.parent : null;
+const series = { active: false, total: 0, done: 0, results: [] };
+
+function postToHost(message) {
+  if (!hostWindow) return;
+  try {
+    hostWindow.postMessage({ source: 'match-sim', ...message }, '*');
+  } catch {
+    // the page around the frame went away mid-run
+  }
+}
+
+// Past this speed the 3D frame rate, not the match, becomes the bottleneck. A
+// batch then stops drawing every frame and the match page shows its progress
+// instead, so 20x really is 20x of football rather than 20x of waiting.
+const WATCHABLE_SPEED = 4;
+let renderEnabled = true;
+let forceRender = true;
+
+function applySpeed(value) {
+  const speed = Math.min(MAX_SPEED, Math.max(0.25, Number(value) || 1));
+  timeScale = speed;
+  hud.setSpeed(speed);
+  renderEnabled = !series.active || speed <= WATCHABLE_SPEED;
+  forceRender = true;
+}
+
+function resumeRendering() {
+  renderEnabled = true;
+  forceRender = true;
+}
+
+function startSeries(count, speed) {
+  series.total = Math.max(1, Math.min(50, Math.round(Number(count) || 1)));
+  series.done = 0;
+  series.results = [];
+  series.active = true;
+  applySpeed(speed);
+  if (!started) startMatch();
+  else match.restartMatch();
+  postToHost({ type: 'sim-series-start', total: series.total, speed: timeScale });
+}
+
+function stopSeries() {
+  if (!series.active) return;
+  series.active = false;
+  resumeRendering();
+  postToHost({ type: 'sim-series-done', results: series.results, stopped: true });
+}
+
+function finishRound() {
+  if (!series.active) return;
+  forceRender = true;
+  series.done += 1;
+  const result = {
+    round: series.done,
+    home: match.teams[0].name,
+    away: match.teams[1].name,
+    homeScore: match.score[0],
+    awayScore: match.score[1],
+    homeShots: match.stats[0].shots,
+    awayShots: match.stats[1].shots,
+    homePossession: match.possessionPct[0],
+    awayPossession: match.possessionPct[1],
+  };
+  series.results.push(result);
+  postToHost({ type: 'sim-series-round', result, done: series.done, total: series.total });
+
+  if (series.done >= series.total) {
+    series.active = false;
+    resumeRendering();
+    postToHost({ type: 'sim-series-done', results: series.results });
+    return;
+  }
+  // straight into the next round, so a long batch never sits idle
+  setTimeout(() => {
+    if (series.active) match.restartMatch();
+  }, 150);
+}
+
+window.addEventListener('message', (event) => {
+  if (event.source !== hostWindow) return;
+  const data = event.data;
+  if (!data || typeof data !== 'object' || data.target !== 'match-sim') return;
+  if (data.type === 'sim-series') startSeries(data.count, data.speed);
+  else if (data.type === 'sim-series-stop') stopSeries();
+  else if (data.type === 'sim-speed') applySpeed(data.speed);
+});
 const keys = new Set();
 const clock = new THREE.Clock();
 
@@ -186,15 +280,20 @@ function animate() {
   requestAnimationFrame(animate);
   const raw = Math.min(clock.getDelta(), 0.05);
 
-  accumulator += raw * timeScale;
+  // The step budget grows with the speed, and a wall-clock cap keeps a fast
+  // batch from blocking the frame. Whatever the frame cannot fit stays in the
+  // accumulator for the next one, so the match still reaches full time.
+  const stepCap = Math.min(240, Math.max(6, Math.ceil((raw * timeScale) / FIXED) + 2));
+  accumulator = Math.min(accumulator + raw * timeScale, FIXED * stepCap);
   let steps = 0;
-  while (accumulator >= FIXED && steps < 6) {
+  const stepStart = performance.now();
+  while (accumulator >= FIXED && steps < stepCap) {
     if (humanMode) readInput();
     match.update(FIXED);
     accumulator -= FIXED;
     steps++;
+    if ((steps & 7) === 0 && performance.now() - stepStart > 16) break;
   }
-  if (accumulator > FIXED * 6) accumulator = 0;
 
   stadium.update(raw);
   stadium.crowd.setExcitement(Math.min(1, match.excite + goalFlash * 0.6));
@@ -204,7 +303,10 @@ function animate() {
   camRig.update(raw, match, match.human);
 
   hud.update();
-  renderer.render(scene, camera);
+  if (renderEnabled || forceRender) {
+    renderer.render(scene, camera);
+    forceRender = false;
+  }
 }
 
 window.addEventListener('resize', () => {
@@ -218,6 +320,13 @@ window.__match = match;
 window.__scene = scene;
 window.__cam = camRig;
 window.__three = THREE;
+window.__series = series;
+window.__setSpeed = applySpeed;
+
+postToHost({
+  type: 'sim-ready',
+  teams: [match.teams[0].name, match.teams[1].name],
+});
 
 console.log('stadium seats filled:', stadium.seats);
 animate();

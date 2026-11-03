@@ -43,9 +43,9 @@ export class HUD {
     });
     document.querySelectorAll('[data-speed]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        document.querySelectorAll('[data-speed]').forEach((b) => b.classList.remove('active'));
-        btn.classList.add('active');
-        onSpeed(parseFloat(btn.dataset.speed));
+        const value = parseFloat(btn.dataset.speed);
+        this.setSpeed(value);
+        onSpeed(value);
       });
     });
     this.$('toggle-facecam').addEventListener('click', (e) => {
@@ -61,6 +61,28 @@ export class HUD {
 
   hideBanner() {
     this.banner.classList.add('hidden');
+  }
+
+  /** Light up the dock button matching a playback speed set from outside. */
+  setSpeed(value) {
+    const buttons = document.querySelectorAll('[data-speed]');
+    let matched = false;
+    buttons.forEach((b) => {
+      const on = Math.abs(parseFloat(b.dataset.speed) - value) < 0.001;
+      b.classList.toggle('active', on);
+      if (on) matched = true;
+    });
+    if (!matched) buttons.forEach((b) => b.classList.remove('active'));
+  }
+
+  /** Wipe everything that belongs to a finished match before the next one. */
+  reset() {
+    this.cardList = [[], []];
+    this.cardsHome.innerHTML = '';
+    this.cardsAway.innerHTML = '';
+    this.ticker.innerHTML = '';
+    this.goalOverlay.classList.remove('show');
+    this.cardFlash.classList.add('hidden');
   }
 
   setHumanMode(on) {
