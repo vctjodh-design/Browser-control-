@@ -304,6 +304,14 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 - `vite.config.ts` throws without `PORT`, so builds and dev both need it:
   `PORT=3000 BASE_PATH=/ pnpm --filter @workspace/browser-control run build`.
+- A sandbox archive keeps `/workspace` but drops `node_modules`, the pnpm install
+  in `$HOME/tools`, every process and `/tmp`. The preview then answers nothing and
+  the editor says "Cloud preview unavailable" — that is the VM, not the app.
+  `scripts/dev-up.sh` is the one-command recovery: it reinstalls from the lockfile,
+  builds the API only if `dist` is missing, starts API `:5000` and app `:3000`,
+  waits for both to answer and starts keepalive. It logs to `/tmp/logs/dev-up.log`
+  and is safe to rerun. The preview hostname also changes on each restore, so the
+  panel needs a retry/reload afterwards.
 - The cloud preview only serves while something is listening on the app port, and
   a sandbox restore kills every process. `scripts/keepalive.mjs` (`pnpm keepalive`)
   polls app and API every 20s, restarts whichever stops answering, and reinstalls
