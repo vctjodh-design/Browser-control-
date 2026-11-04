@@ -126,9 +126,22 @@ that engine for the requested number of rounds (up to 100,000), settles every
 selection on the board against every round, and returns, per selection, the
 simulated probability, the margin-free market probability, the best price and
 book, the expected value at that price and the difference between the two.
-Measured on a 40-selection board: 10,000 rounds in 0.7s, 100,000 in 1.2–6.3s
-depending on the machine's load. The run is synchronous, so a six-figure batch
-holds the event loop for those seconds.
+A full board is about 930 selections across ~50 markets, and settling each one
+used to re-parse its market and selection strings on every round — a dozen
+regexes per selection per match, which dwarfed the match engine. 1,000 rounds
+cost 4.7s and a 100,000-round batch would have taken **7.7 minutes**. Each
+selection is now compiled once (`compileSettlement` in `lib/match-settlement.ts`)
+into an outcome test that reads only finished numbers, and the watched match
+settles through the same compiled code, so the two cannot disagree. Same board,
+measured after: 3,000 rounds in 0.27s, 25,000 in 2.0s, **100,000 in 6.6s**. The
+run is synchronous, so a six-figure batch does hold the event loop for those
+seconds.
+
+The rewrite was checked against the old implementation by capturing 984
+selections (every market on a real board plus the branches it does not carry)
+against 48 synthetic matches — 47,232 settlements — and diffing the JSON: byte
+identical, outcomes and detail strings both. `test/match-settlement.test.mjs`
+keeps the compiled path pinned to `settleSelection`.
 
 `POST /api/football/matches/:id/odds-settle` grades the board against one match
 record. The match page's own frame posts `sim-match-summary` at full time

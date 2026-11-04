@@ -316,6 +316,538 @@ function resultToken(label: string): "home" | "draw" | "away" | null {
 
 // ------------------------------------------------------------------ settle
 
+type CompiledOutcome = (summary: SimMatchSummary) => SettlementOutcome;
+
+/**
+ * One selection, pre-parsed.
+ *
+ * Parsing a market and a selection — lowercasing, a dozen regexes, splitting a
+ * line into its two stakes — is the expensive part, and it only depends on the
+ * strings a bookmaker sent. A batch of a hundred thousand matches settles the
+ * same selection again and again, so the parsing happens once here and the hot
+ * loop only reads the finished match.
+ */
+export type CompiledSettlement = {
+  /** Hot path: the outcome, with no strings built. */
+  outcome: CompiledOutcome;
+  /** Human sentence for the result card; built only when someone shows it. */
+  detail: (summary: SimMatchSummary) => string;
+};
+
+/** Combine the one or two stakes of a line into the settlement outcome. */
+function combineStakes(first: HalfOutcome, second?: HalfOutcome): SettlementOutcome {
+  if (second === undefined) return first;
+  if (first === "win" && second === "win") return "win";
+  if (first === "push" && second === "push") return "push";
+  if (first === "lose" && second === "lose") return "lose";
+  if ((first === "win" && second === "push") || (first === "push" && second === "win")) {
+    return "half-win";
+  }
+  return "half-loss";
+}
+
+/** over / under on a single number, with quarter lines split in two. */
+function compiledOverUnder(
+  selection: string,
+  line: number,
+  label: string,
+  valueOf: (summary: SimMatchSummary) => number,
+): CompiledSettlement | null {
+  const isOver = /^over\b/i.test(selection);
+  const isUnder = /^under\b/i.test(selection);
+  if (!isOver && !isUnder) return null;
+  const [first, second] = lineComponents(line);
+  const stake = (component: number, value: number): HalfOutcome => {
+    if (value === component) return "push";
+    const higher = value > component;
+    return isOver ? (higher ? "win" : "lose") : higher ? "lose" : "win";
+  };
+  return {
+    outcome: (summary) => {
+      const value = valueOf(summary);
+      return combineStakes(
+        stake(first, value),
+        second === undefined ? undefined : stake(second, value),
+      );
+    },
+    detail: (summary) => `${label} ${valueOf(summary)} vs line ${formatLine(line)}`,
+  };
+}
+
+/** A handicap priced on a goal or corner margin. */
+function compiledHandicap(
+  selection: string,
+  handicapValue: number,
+  label: string,
+  marginOf: (summary: SimMatchSummary) => number,
+): CompiledSettlement | null {
+  const side = sideOfLabel(selection.split(/\s*[+-]/)[0]);
+  if (!side) return null;
+  const [first, second] = lineComponents(handicapValue);
+  const stake = (component: number, margin: number): HalfOutcome => {
+    const adjusted = side === "home" ? margin + component : -margin + component;
+    if (Math.abs(adjusted) < 1e-9) return "push";
+    return adjusted > 0 ? "win" : "lose";
+  };
+  return {
+    outcome: (summary) => {
+      const margin = marginOf(summary);
+      return combineStakes(
+        stake(first, margin),
+        second === undefined ? undefined : stake(second, margin),
+      );
+    },
+    detail: (summary) => `${label} margin ${marginOf(summary)} with ${handicapValue}`,
+  };
+}
+
+/**
+ * Resolve a player once and remember where he sits in the team sheet, so a
+ * million lookups over a batch do not re-normalise every name.
+ */
+function playerResolver(name: string, side?: Side): (summary: SimMatchSummary) => SimPlayerLine | null {
+  let resolvedName: string | null = null;
+  let index = -1;
+  let missing = false;
+  return (summary) => {
+    if (missing) return null;
+    if (index >= 0 && resolvedName !== null) {
+      const line = summary.players[index];
+      if (line && line.name === resolvedName) return line;
+    }
+    const line = findPlayer(summary, name, side);
+    if (!line) {
+      missing = true;
+      return null;
+    }
+    resolvedName = line.name;
+    index = summary.players.indexOf(line);
+    return line;
+  };
+}
+
+export function compileSettlement(
+  marketName: string,
+  selection: string,
+  options: { handicapLine?: number | null } = {},
+): CompiledSettlement | null {
+  const market = marketName.toLowerCase().replace(/\s+/g, " ").trim();
+  const period = periodOf(market);
+
+  // Reading a period's goals without building an object per match.
+  const homeOf =
+    period === "h1"
+      ? (summary: SimMatchSummary) => summary.halfTime.home
+      : period === "h2"
+        ? (summary: SimMatchSummary) => summary.secondHalf.home
+        : (summary: SimMatchSummary) => summary.home.goals;
+  const awayOf =
+    period === "h1"
+      ? (summary: SimMatchSummary) => summary.halfTime.away
+      : period === "h2"
+        ? (summary: SimMatchSummary) => summary.secondHalf.away
+        : (summary: SimMatchSummary) => summary.away.goals;
+  const totalOf = (summary: SimMatchSummary) => homeOf(summary) + awayOf(summary);
+  const resultOf = (summary: SimMatchSummary) => goalDiff(homeOf(summary), awayOf(summary));
+
+  // --- player markets ----------------------------------------------------
+  if (/anytime goal scorer/.test(market)) {
+    const player = playerResolver(selection);
+    return {
+      outcome: (summary) => ((player(summary)?.goals ?? 0) > 0 ? "win" : "lose"),
+      detail: (summary) => `${selection} scored ${player(summary)?.goals ?? 0}`,
+    };
+  }
+  if (/player to score or assist/.test(market)) {
+    const player = playerResolver(selection);
+    const involvement = (summary: SimMatchSummary) => {
+      const line = player(summary);
+      return (line?.goals ?? 0) + (line?.assists ?? 0);
+    };
+    return {
+      outcome: (summary) => (involvement(summary) > 0 ? "win" : "lose"),
+      detail: (summary) => `${selection} goals+assists ${involvement(summary)}`,
+    };
+  }
+  if (/player shots on target/.test(market)) {
+    const match = selection.trim().match(/^(.*?)\s*-\s*(\d+)$/);
+    // Some books list the player alone, which means the 1+ line.
+    const playerName = match ? match[1].trim() : selection.trim();
+    const target = match ? Number(match[2]) : 1;
+    const player = playerResolver(playerName, marketSide(market));
+    const shots = (summary: SimMatchSummary) => player(summary)?.shotsOnTarget ?? 0;
+    return {
+      outcome: (summary) => (shots(summary) >= target ? "win" : "lose"),
+      detail: (summary) => `${playerName} ${shots(summary)} shots on target, needs ${target}`,
+    };
+  }
+
+  // --- shots on target ---------------------------------------------------
+  if (/total shotongoal|total shots on target/.test(market)) {
+    const parsed = parseTotalsSelection(selection);
+    if (!parsed) return null;
+    return compiledOverUnder(
+      selection,
+      parsed.line,
+      "shots on target",
+      (summary) => summary.home.shotsOnTarget + summary.away.shotsOnTarget,
+    );
+  }
+
+  // --- corners -----------------------------------------------------------
+  if (/corners/.test(market)) {
+    const parsed = parseHandicapSelection(selection);
+    if (/asian handicap/.test(market) && parsed) {
+      return compiledHandicap(
+        selection,
+        options.handicapLine ?? parsed.line,
+        "corners",
+        (summary) => summary.home.corners - summary.away.corners,
+      );
+    }
+    if (/1x2|winner|result/.test(market)) {
+      const side = resultToken(selection);
+      if (!side) return null;
+      return {
+        outcome: (summary) =>
+          goalDiff(summary.home.corners, summary.away.corners) === side ? "win" : "lose",
+        detail: (summary) => `corners ${summary.home.corners}-${summary.away.corners}`,
+      };
+    }
+    const totals = parseTotalsSelection(selection);
+    if (!totals) return null;
+    const cornersOf = /home/.test(market)
+      ? (summary: SimMatchSummary) => summary.home.corners
+      : /away/.test(market)
+        ? (summary: SimMatchSummary) => summary.away.corners
+        : (summary: SimMatchSummary) => summary.home.corners + summary.away.corners;
+    return compiledOverUnder(selection, totals.line, "corners", cornersOf);
+  }
+
+  // --- cards -------------------------------------------------------------
+  if (/cards/.test(market)) {
+    const totals = parseTotalsSelection(selection);
+    if (!totals) return null;
+    const cardsOf = /home/.test(market)
+      ? (summary: SimMatchSummary) => summary.home.cards
+      : /away/.test(market)
+        ? (summary: SimMatchSummary) => summary.away.cards
+        : (summary: SimMatchSummary) => summary.home.cards + summary.away.cards;
+    return compiledOverUnder(selection, totals.line, "cards", cardsOf);
+  }
+
+  // --- handicaps and goal lines -----------------------------------------
+  if (/handicap|goal line/.test(market)) {
+    const parsed = parseHandicapSelection(selection);
+    if (parsed) {
+      return compiledHandicap(
+        selection,
+        options.handicapLine ?? parsed.line,
+        `handicap (${period})`,
+        (summary) => homeOf(summary) - awayOf(summary),
+      );
+    }
+    const totals = parseTotalsSelection(selection);
+    if (totals) return compiledOverUnder(selection, totals.line, "goals", totalOf);
+    return null;
+  }
+
+  // --- exact scores ------------------------------------------------------
+  if (/exact score|correct score/.test(market)) {
+    const score = parseScore(selection);
+    if (!score) return null;
+    const actualOf =
+      period === "h1"
+        ? (summary: SimMatchSummary) => summary.halfTime
+        : period === "h2"
+          ? (summary: SimMatchSummary) => summary.secondHalf
+          : (summary: SimMatchSummary) => ({ home: summary.home.goals, away: summary.away.goals });
+    return {
+      outcome: (summary) => {
+        const actual = actualOf(summary);
+        return actual.home === score.home && actual.away === score.away ? "win" : "lose";
+      },
+      detail: (summary) => {
+        const actual = actualOf(summary);
+        return `${actual.home}:${actual.away} vs ${score.home}:${score.away}`;
+      },
+    };
+  }
+
+  // --- half-time / full-time --------------------------------------------
+  if (/ht\/ft|half time\/full time|ht-ft/.test(market)) {
+    const parts = selection.split("/");
+    if (parts.length !== 2) return null;
+    const atHalf = resultToken(parts[0]);
+    const atFull = resultToken(parts[1]);
+    if (!atHalf || !atFull) return null;
+    const halfResult = (summary: SimMatchSummary) =>
+      goalDiff(summary.halfTime.home, summary.halfTime.away);
+    const fullResult = (summary: SimMatchSummary) =>
+      goalDiff(summary.home.goals, summary.away.goals);
+    return {
+      outcome: (summary) =>
+        halfResult(summary) === atHalf && fullResult(summary) === atFull ? "win" : "lose",
+      detail: (summary) => `${halfResult(summary)}/${fullResult(summary)}`,
+    };
+  }
+
+  // --- odd / even --------------------------------------------------------
+  if (/odd\/even|odd or even/.test(market)) {
+    const picked = /even/i.test(selection);
+    return {
+      outcome: (summary) => {
+        const even = totalOf(summary) % 2 === 0;
+        return (picked && even) || (!picked && !even) ? "win" : "lose";
+      },
+      detail: (summary) => `${totalOf(summary)} goals`,
+    };
+  }
+
+  // --- result / total combinations --------------------------------------
+  const totalCombo = selection.match(/^(?:o|u)\/(yes|no)\s+([0-9.]+)$/i);
+  if (/total goals\/both teams/.test(market) && totalCombo) {
+    const over = selection.toLowerCase().startsWith("o/");
+    const line = Number(totalCombo[2]);
+    const wantsBtts = totalCombo[1].toLowerCase() === "yes";
+    return {
+      outcome: (summary) => {
+        const total = totalOf(summary);
+        const totalWin = over ? total > line : total < line;
+        const scored = homeOf(summary) > 0 && awayOf(summary) > 0;
+        return totalWin && (wantsBtts ? scored : !scored) ? "win" : "lose";
+      },
+      detail: (summary) => {
+        const scored = homeOf(summary) > 0 && awayOf(summary) > 0;
+        return `${totalOf(summary)} goals, btts ${scored ? "yes" : "no"}`;
+      },
+    };
+  }
+
+  const resultCombo = selection.match(/^(home|draw|away)\/(over|under)\s+([0-9.]+)$/i);
+  if (/result\/total goals/.test(market) && resultCombo) {
+    const result = resultToken(resultCombo[1]);
+    const line = Number(resultCombo[3]);
+    const over = resultCombo[2].toLowerCase() === "over";
+    const totalOutcome = (summary: SimMatchSummary): SettlementOutcome => {
+      const total = totalOf(summary);
+      if (total === line) return "push";
+      return (total > line) === over ? "win" : "lose";
+    };
+    return {
+      outcome: (summary) => (resultOf(summary) === result ? totalOutcome(summary) : "lose"),
+      detail: (summary) =>
+        resultOf(summary) === result
+          ? `${totalOf(summary)} goals vs line ${line}`
+          : "result did not match",
+    };
+  }
+
+  const resultBtts = selection.match(/^(home|draw|away)\/(yes|no)$/i);
+  if (/results\/both teams score/.test(market) && resultBtts) {
+    const result = resultToken(resultBtts[1]);
+    const wantsBtts = resultBtts[2].toLowerCase() === "yes";
+    const scored = (summary: SimMatchSummary) => homeOf(summary) > 0 && awayOf(summary) > 0;
+    return {
+      outcome: (summary) =>
+        resultOf(summary) === result && (wantsBtts ? scored(summary) : !scored(summary))
+          ? "win"
+          : "lose",
+      detail: (summary) => `${resultOf(summary)}, btts ${scored(summary) ? "yes" : "no"}`,
+    };
+  }
+
+  // --- both teams to score ----------------------------------------------
+  if (/both teams score|both teams to score|btts/.test(market)) {
+    const picked = /^yes$/i.test(selection.trim());
+    const scored = (summary: SimMatchSummary) => homeOf(summary) > 0 && awayOf(summary) > 0;
+    return {
+      outcome: (summary) => ((picked ? scored(summary) : !scored(summary)) ? "win" : "lose"),
+      detail: (summary) => `${homeOf(summary)}-${awayOf(summary)}`,
+    };
+  }
+
+  // --- clean sheets, win to nil, scoring --------------------------------
+  if (/clean sheet/.test(market)) {
+    const home = !/away/.test(market);
+    const conceded = (summary: SimMatchSummary) => (home ? summary.away.goals : summary.home.goals);
+    const picked = /^yes$/i.test(selection.trim());
+    return {
+      outcome: (summary) => {
+        const clean = conceded(summary) === 0;
+        return (picked ? clean : !clean) ? "win" : "lose";
+      },
+      detail: (summary) => `conceded ${conceded(summary)}`,
+    };
+  }
+  if (/win to nil/.test(market)) {
+    const home = !/away/.test(market);
+    const won = (summary: SimMatchSummary) =>
+      home ? summary.home.goals > summary.away.goals : summary.away.goals > summary.home.goals;
+    const conceded = (summary: SimMatchSummary) => (home ? summary.away.goals : summary.home.goals);
+    const picked = /^yes$/i.test(selection.trim());
+    return {
+      outcome: (summary) => {
+        const achieved = won(summary) && conceded(summary) === 0;
+        return (picked ? achieved : !achieved) ? "win" : "lose";
+      },
+      detail: (summary) => `won ${won(summary)}, conceded ${conceded(summary)}`,
+    };
+  }
+  if (/home team score a goal/.test(market)) {
+    const scored = (summary: SimMatchSummary) => summary.home.goals > 0;
+    const picked = /^yes$/i.test(selection.trim());
+    return {
+      outcome: (summary) => ((picked ? scored(summary) : !scored(summary)) ? "win" : "lose"),
+      detail: (summary) => `home scored ${summary.home.goals}`,
+    };
+  }
+  if (/win both halves/.test(market)) {
+    const home = !/away/.test(market);
+    const wonFirst = (summary: SimMatchSummary) =>
+      goalDiff(summary.halfTime.home, summary.halfTime.away) === (home ? "home" : "away");
+    const wonSecond = (summary: SimMatchSummary) =>
+      goalDiff(summary.secondHalf.home, summary.secondHalf.away) === (home ? "home" : "away");
+    const picked = /^yes$/i.test(selection.trim());
+    return {
+      outcome: (summary) => {
+        const achieved = wonFirst(summary) && wonSecond(summary);
+        return (picked ? achieved : !achieved) ? "win" : "lose";
+      },
+      detail: (summary) => `halves ${wonFirst(summary)}/${wonSecond(summary)}`,
+    };
+  }
+  if (/to score in both halves/.test(market)) {
+    // This market is priced per team (Home / Away), unlike its yes/no cousins.
+    const side = resultToken(selection);
+    const home = side ? side === "home" : !/away/.test(market);
+    const scoredFirst = (summary: SimMatchSummary) =>
+      (home ? summary.halfTime.home : summary.halfTime.away) > 0;
+    const scoredSecond = (summary: SimMatchSummary) =>
+      (home ? summary.secondHalf.home : summary.secondHalf.away) > 0;
+    const picked = side ? true : /^yes$/i.test(selection.trim());
+    return {
+      outcome: (summary) => {
+        const achieved = scoredFirst(summary) && scoredSecond(summary);
+        return (picked ? achieved : !achieved) ? "win" : "lose";
+      },
+      detail: (summary) => `scored in halves ${scoredFirst(summary)}/${scoredSecond(summary)}`,
+    };
+  }
+  if (/team to score first|first team to score/.test(market)) {
+    const noGoal = /no goal/i.test(selection);
+    const side = resultToken(selection);
+    if (!noGoal && (!side || side === "draw")) return null;
+    return {
+      outcome: (summary) =>
+        summary.firstGoal === (noGoal ? "none" : side) ? "win" : "lose",
+      detail: (summary) =>
+        noGoal
+          ? summary.firstGoal === "none"
+            ? "no goals"
+            : `first ${summary.firstGoal}`
+          : `first goal ${summary.firstGoal}`,
+    };
+  }
+  if (/own goal/.test(market)) {
+    const own = (summary: SimMatchSummary) => summary.goals.some((goal) => goal.ownGoal);
+    const picked = /^yes$/i.test(selection.trim());
+    return {
+      outcome: (summary) => ((picked ? own(summary) : !own(summary)) ? "win" : "lose"),
+      detail: (summary) => `own goal ${own(summary)}`,
+    };
+  }
+
+  // --- exact team goals --------------------------------------------------
+  if (/exact goals number/.test(market)) {
+    const valueOf = /away/.test(market)
+      ? (summary: SimMatchSummary) => summary.away.goals
+      : (summary: SimMatchSummary) => summary.home.goals;
+    // The feed also publishes "more 3" under this heading, which is a 3+ line.
+    const more = selection.trim().match(/^more\s+(\d+)$/i);
+    if (more) {
+      const threshold = Number(more[1]);
+      return {
+        outcome: (summary) => (valueOf(summary) >= threshold ? "win" : "lose"),
+        detail: (summary) => `${valueOf(summary)} goals, needs ${threshold}+`,
+      };
+    }
+    const target = Number(selection.trim());
+    if (!Number.isFinite(target)) return null;
+    return {
+      outcome: (summary) => (valueOf(summary) === target ? "win" : "lose"),
+      detail: (summary) => `${valueOf(summary)} goals`,
+    };
+  }
+
+  // --- team totals -------------------------------------------------------
+  // Check the away markets first: "away team total goals" also contains the
+  // words "team total goals", so the home test would otherwise swallow it.
+  if (/total - away|away team total/.test(market)) {
+    const totals = parseTotalsSelection(selection);
+    if (!totals) return null;
+    return compiledOverUnder(selection, totals.line, "away goals", awayOf);
+  }
+  if (/total - home|home team total|team total goals/.test(market)) {
+    const totals = parseTotalsSelection(selection);
+    if (!totals) return null;
+    return compiledOverUnder(selection, totals.line, "home goals", homeOf);
+  }
+
+  // --- draw no bet -------------------------------------------------------
+  if (/draw no bet/.test(market)) {
+    const side = resultToken(selection);
+    if (!side || side === "draw") return null;
+    return {
+      outcome: (summary) => {
+        const result = resultOf(summary);
+        if (result === "draw") return "push";
+        return result === side ? "win" : "lose";
+      },
+      detail: (summary) => (resultOf(summary) === "draw" ? "draw, stake returned" : resultOf(summary)),
+    };
+  }
+
+  // --- double chance -----------------------------------------------------
+  if (/double chance/.test(market)) {
+    const parts = selection.split("/").map((part) => resultToken(part));
+    if (parts.length !== 2 || parts.some((part) => !part)) return null;
+    return {
+      outcome: (summary) => (parts.includes(resultOf(summary)) ? "win" : "lose"),
+      detail: (summary) => resultOf(summary),
+    };
+  }
+
+  // --- plain two-way winner (Home/Away market) --------------------------
+  if (/^home\/away$/.test(market)) {
+    const side = resultToken(selection);
+    if (!side || side === "draw") return null;
+    return {
+      outcome: (summary) => (resultOf(summary) === side ? "win" : "lose"),
+      detail: (summary) => resultOf(summary),
+    };
+  }
+
+  // --- straight result markets ------------------------------------------
+  if (/winner|match result|match winner|full time result/.test(market)) {
+    const side = resultToken(selection);
+    if (!side) return null;
+    return {
+      outcome: (summary) => (resultOf(summary) === side ? "win" : "lose"),
+      detail: (summary) => `${resultOf(summary)} (${period})`,
+    };
+  }
+
+  // --- plain totals (goals over/under and friends) ----------------------
+  if (/over\/under|goals over|total goals/.test(market)) {
+    const totals = parseTotalsSelection(selection);
+    if (!totals) return null;
+    return compiledOverUnder(selection, totals.line, "goals", totalOf);
+  }
+
+  return null;
+}
+
 /**
  * Settle one selection against one simulated match. Returns null when the
  * market is not one this engine can grade, so callers can report it as
@@ -327,351 +859,7 @@ export function settleSelection(
   summary: SimMatchSummary,
   options: { handicapLine?: number | null } = {},
 ): Settlement | null {
-  const market = marketName.toLowerCase().replace(/\s+/g, " ").trim();
-  const period = periodOf(market);
-  const goals = periodGoals(summary, period);
-
-  // --- player markets ----------------------------------------------------
-  if (/anytime goal scorer/.test(market)) {
-    const line = findPlayer(summary, selection);
-    const scored = line?.goals ?? 0;
-    return { outcome: scored > 0 ? "win" : "lose", detail: `${selection} scored ${scored}` };
-  }
-  if (/player to score or assist/.test(market)) {
-    const line = findPlayer(summary, selection);
-    const involvement = (line?.goals ?? 0) + (line?.assists ?? 0);
-    return {
-      outcome: involvement > 0 ? "win" : "lose",
-      detail: `${selection} goals+assists ${involvement}`,
-    };
-  }
-  if (/player shots on target/.test(market)) {
-    const match = selection.trim().match(/^(.*?)\s*-\s*(\d+)$/);
-    // Some books list the player alone, which means the 1+ line.
-    const player = match ? match[1].trim() : selection.trim();
-    const target = match ? Number(match[2]) : 1;
-    const line = findPlayer(summary, player, marketSide(market));
-    const shots = line?.shotsOnTarget ?? 0;
-    return {
-      outcome: shots >= target ? "win" : "lose",
-      detail: `${player} ${shots} shots on target, needs ${target}`,
-    };
-  }
-
-  // --- shots on target ---------------------------------------------------
-  if (/total shotongoal|total shots on target/.test(market)) {
-    const parsed = parseTotalsSelection(selection);
-    if (!parsed) return null;
-    const total = summary.home.shotsOnTarget + summary.away.shotsOnTarget;
-    return overUnder(selection, parsed.line, total, "shots on target");
-  }
-
-  // --- corners -----------------------------------------------------------
-  if (/corners/.test(market)) {
-    const parsed = parseHandicapSelection(selection);
-    if (/asian handicap/.test(market) && parsed) {
-      return handicap(
-        selection,
-        options.handicapLine ?? parsed.line,
-        summary.home.corners - summary.away.corners,
-        "corners",
-      );
-    }
-    if (/1x2|winner|result/.test(market)) {
-      const side = resultToken(selection);
-      if (!side) return null;
-      return {
-        outcome: goalDiff(summary.home.corners, summary.away.corners) === side ? "win" : "lose",
-        detail: `corners ${summary.home.corners}-${summary.away.corners}`,
-      };
-    }
-    const totals = parseTotalsSelection(selection);
-    if (!totals) return null;
-    const value = /home/.test(market)
-      ? summary.home.corners
-      : /away/.test(market)
-        ? summary.away.corners
-        : summary.home.corners + summary.away.corners;
-    return overUnder(selection, totals.line, value, "corners");
-  }
-
-  // --- cards -------------------------------------------------------------
-  if (/cards/.test(market)) {
-    const totals = parseTotalsSelection(selection);
-    if (!totals) return null;
-    const value = /home/.test(market)
-      ? summary.home.cards
-      : /away/.test(market)
-        ? summary.away.cards
-        : summary.home.cards + summary.away.cards;
-    return overUnder(selection, totals.line, value, "cards");
-  }
-
-  // --- handicaps and goal lines -----------------------------------------
-  if (/handicap|goal line/.test(market)) {
-    const parsed = parseHandicapSelection(selection);
-    if (parsed) {
-      const line = options.handicapLine ?? parsed.line;
-      return handicap(
-        selection,
-        line,
-        goals.home - goals.away,
-        `handicap (${period})`,
-      );
-    }
-    const totals = parseTotalsSelection(selection);
-    if (totals) return overUnder(selection, totals.line, goals.total, "goals");
-    return null;
-  }
-
-  // --- exact scores ------------------------------------------------------
-  if (/exact score|correct score/.test(market)) {
-    const score = parseScore(selection);
-    if (!score) return null;
-    const actual =
-      period === "h1" ? summary.halfTime : period === "h2" ? summary.secondHalf : { home: summary.home.goals, away: summary.away.goals };
-    return {
-      outcome: actual.home === score.home && actual.away === score.away ? "win" : "lose",
-      detail: `${actual.home}:${actual.away} vs ${score.home}:${score.away}`,
-    };
-  }
-
-  // --- half-time / full-time --------------------------------------------
-  if (/ht\/ft|half time\/full time|ht-ft/.test(market)) {
-    const parts = selection.split("/");
-    if (parts.length !== 2) return null;
-    const atHalf = resultToken(parts[0]);
-    const atFull = resultToken(parts[1]);
-    if (!atHalf || !atFull) return null;
-    const half = goalDiff(summary.halfTime.home, summary.halfTime.away);
-    const full = goalDiff(summary.home.goals, summary.away.goals);
-    return {
-      outcome: half === atHalf && full === atFull ? "win" : "lose",
-      detail: `${half}/${full}`,
-    };
-  }
-
-  // --- odd / even --------------------------------------------------------
-  if (/odd\/even|odd or even/.test(market)) {
-    const total = goals.total;
-    const isEven = total % 2 === 0;
-    const picked = /even/i.test(selection);
-    return {
-      outcome: (picked && isEven) || (!picked && !isEven) ? "win" : "lose",
-      detail: `${total} goals`,
-    };
-  }
-
-  // --- result / total combinations --------------------------------------
-  const totalCombo = selection.match(/^(?:o|u)\/(yes|no)\s+([0-9.]+)$/i);
-  if (/total goals\/both teams/.test(market) && totalCombo) {
-    const over = selection.toLowerCase().startsWith("o/");
-    const line = Number(totalCombo[2]);
-    const total = goals.total;
-    const totalWin = over ? total > line : total < line;
-    const btts = summary.home.goals > 0 && summary.away.goals > 0;
-    const bttsWin = totalCombo[1].toLowerCase() === "yes" ? btts : !btts;
-    return {
-      outcome: totalWin && bttsWin ? "win" : "lose",
-      detail: `${total} goals, btts ${btts ? "yes" : "no"}`,
-    };
-  }
-
-  const resultCombo = selection.match(/^(home|draw|away)\/(over|under)\s+([0-9.]+)$/i);
-  if (/result\/total goals/.test(market) && resultCombo) {
-    const result = resultToken(resultCombo[1]);
-    const line = Number(resultCombo[3]);
-    const total = goals.total;
-    const resultWin = goalDiff(goals.home, goals.away) === result;
-    const over = resultCombo[2].toLowerCase() === "over";
-    const totalOutcome =
-      total === line ? "push" : (total > line) === over ? "win" : "lose";
-    if (!resultWin) return { outcome: "lose", detail: `result did not match` };
-    return { outcome: totalOutcome, detail: `${total} goals vs line ${line}` };
-  }
-
-  const resultBtts = selection.match(/^(home|draw|away)\/(yes|no)$/i);
-  if (/results\/both teams score/.test(market) && resultBtts) {
-    const result = resultToken(resultBtts[1]);
-    const btts = summary.home.goals > 0 && summary.away.goals > 0;
-    const bttsWin = resultBtts[2].toLowerCase() === "yes" ? btts : !btts;
-    return {
-      outcome: goalDiff(goals.home, goals.away) === result && bttsWin ? "win" : "lose",
-      detail: `${goalDiff(goals.home, goals.away)}, btts ${btts ? "yes" : "no"}`,
-    };
-  }
-
-  // --- both teams to score ----------------------------------------------
-  if (/both teams score|both teams to score|btts/.test(market)) {
-    const btts = goals.home > 0 && goals.away > 0;
-    const picked = /^yes$/i.test(selection.trim());
-    return {
-      outcome: (picked ? btts : !btts) ? "win" : "lose",
-      detail: `${goals.home}-${goals.away}`,
-    };
-  }
-
-  // --- clean sheets, win to nil, scoring --------------------------------
-  if (/clean sheet/.test(market)) {
-    const home = !/away/.test(market);
-    const conceded = home ? summary.away.goals : summary.home.goals;
-    const clean = conceded === 0;
-    const picked = /^yes$/i.test(selection.trim());
-    return {
-      outcome: (picked ? clean : !clean) ? "win" : "lose",
-      detail: `conceded ${conceded}`,
-    };
-  }
-  if (/win to nil/.test(market)) {
-    const home = !/away/.test(market);
-    const won = home ? summary.home.goals > summary.away.goals : summary.away.goals > summary.home.goals;
-    const conceded = home ? summary.away.goals : summary.home.goals;
-    const achieved = won && conceded === 0;
-    const picked = /^yes$/i.test(selection.trim());
-    return {
-      outcome: (picked ? achieved : !achieved) ? "win" : "lose",
-      detail: `won ${won}, conceded ${conceded}`,
-    };
-  }
-  if (/home team score a goal/.test(market)) {
-    const scored = summary.home.goals > 0;
-    const picked = /^yes$/i.test(selection.trim());
-    return {
-      outcome: (picked ? scored : !scored) ? "win" : "lose",
-      detail: `home scored ${summary.home.goals}`,
-    };
-  }
-  if (/win both halves/.test(market)) {
-    const home = !/away/.test(market);
-    const wonFirst = goalDiff(summary.halfTime.home, summary.halfTime.away) === (home ? "home" : "away");
-    const wonSecond = goalDiff(summary.secondHalf.home, summary.secondHalf.away) === (home ? "home" : "away");
-    const achieved = wonFirst && wonSecond;
-    const picked = /^yes$/i.test(selection.trim());
-    return {
-      outcome: (picked ? achieved : !achieved) ? "win" : "lose",
-      detail: `halves ${wonFirst}/${wonSecond}`,
-    };
-  }
-  if (/to score in both halves/.test(market)) {
-    // This market is priced per team (Home / Away), unlike its yes/no cousins.
-    const side = resultToken(selection);
-    const home = side ? side === "home" : !/away/.test(market);
-    const scoredFirst = (home ? summary.halfTime.home : summary.halfTime.away) > 0;
-    const scoredSecond = (home ? summary.secondHalf.home : summary.secondHalf.away) > 0;
-    const achieved = scoredFirst && scoredSecond;
-    const picked = side ? true : /^yes$/i.test(selection.trim());
-    return {
-      outcome: (picked ? achieved : !achieved) ? "win" : "lose",
-      detail: `scored in halves ${scoredFirst}/${scoredSecond}`,
-    };
-  }
-  if (/team to score first|first team to score/.test(market)) {
-    if (/no goal/i.test(selection)) {
-      return {
-        outcome: summary.firstGoal === "none" ? "win" : "lose",
-        detail: summary.firstGoal === "none" ? "no goals" : `first ${summary.firstGoal}`,
-      };
-    }
-    const side = resultToken(selection);
-    if (!side || side === "draw") return null;
-    return {
-      outcome: summary.firstGoal === side ? "win" : "lose",
-      detail: `first goal ${summary.firstGoal}`,
-    };
-  }
-  if (/own goal/.test(market)) {
-    const own = summary.goals.some((goal) => goal.ownGoal);
-    const picked = /^yes$/i.test(selection.trim());
-    return { outcome: (picked ? own : !own) ? "win" : "lose", detail: `own goal ${own}` };
-  }
-
-  // --- exact team goals --------------------------------------------------
-  if (/exact goals number/.test(market)) {
-    const value = /away/.test(market) ? summary.away.goals : summary.home.goals;
-    // The feed also publishes "more 3" under this heading, which is a 3+ line.
-    const more = selection.trim().match(/^more\s+(\d+)$/i);
-    if (more) {
-      const threshold = Number(more[1]);
-      return {
-        outcome: value >= threshold ? "win" : "lose",
-        detail: `${value} goals, needs ${threshold}+`,
-      };
-    }
-    const target = Number(selection.trim());
-    if (!Number.isFinite(target)) return null;
-    return { outcome: value === target ? "win" : "lose", detail: `${value} goals` };
-  }
-
-  // --- team totals -------------------------------------------------------
-  // Check the away markets first: "away team total goals" also contains the
-  // words "team total goals", so the home test would otherwise swallow it.
-  if (/total - away|away team total/.test(market)) {
-    const totals = parseTotalsSelection(selection);
-    if (!totals) return null;
-    const value =
-      period === "h1"
-        ? summary.halfTime.away
-        : period === "h2"
-          ? summary.secondHalf.away
-          : summary.away.goals;
-    return overUnder(selection, totals.line, value, "away goals");
-  }
-  if (/total - home|home team total|team total goals/.test(market)) {
-    const totals = parseTotalsSelection(selection);
-    if (!totals) return null;
-    const value =
-      period === "h1"
-        ? summary.halfTime.home
-        : period === "h2"
-          ? summary.secondHalf.home
-          : summary.home.goals;
-    return overUnder(selection, totals.line, value, "home goals");
-  }
-
-  // --- draw no bet -------------------------------------------------------
-  if (/draw no bet/.test(market)) {
-    const side = resultToken(selection);
-    if (!side || side === "draw") return null;
-    const result = goalDiff(goals.home, goals.away);
-    if (result === "draw") return { outcome: "push", detail: "draw, stake returned" };
-    return { outcome: result === side ? "win" : "lose", detail: result };
-  }
-
-  // --- double chance -----------------------------------------------------
-  if (/double chance/.test(market)) {
-    const parts = selection.split("/").map((part) => resultToken(part));
-    if (parts.length !== 2 || parts.some((part) => !part)) return null;
-    const result = goalDiff(goals.home, goals.away);
-    return {
-      outcome: parts.includes(result) ? "win" : "lose",
-      detail: result,
-    };
-  }
-
-  // --- plain two-way winner (Home/Away market) --------------------------
-  if (/^home\/away$/.test(market)) {
-    const side = resultToken(selection);
-    if (!side || side === "draw") return null;
-    return {
-      outcome: goalDiff(goals.home, goals.away) === side ? "win" : "lose",
-      detail: goalDiff(goals.home, goals.away),
-    };
-  }
-
-  // --- straight result markets ------------------------------------------
-  if (/winner|match result|match winner|full time result/.test(market)) {
-    const side = resultToken(selection);
-    if (!side) return null;
-    const result = goalDiff(goals.home, goals.away);
-    return { outcome: result === side ? "win" : "lose", detail: `${result} (${period})` };
-  }
-
-  // --- plain totals (goals over/under and friends) ----------------------
-  if (/over\/under|goals over|total goals/.test(market)) {
-    const totals = parseTotalsSelection(selection);
-    if (!totals) return null;
-    return overUnder(selection, totals.line, goals.total, "goals");
-  }
-
-  return null;
+  const compiled = compileSettlement(marketName, selection, options);
+  if (!compiled) return null;
+  return { outcome: compiled.outcome(summary), detail: compiled.detail(summary) };
 }

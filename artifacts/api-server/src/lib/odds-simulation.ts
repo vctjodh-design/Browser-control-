@@ -10,10 +10,10 @@ import { simulateMatch, mulberry32 } from "./fast-match-sim";
 import type { OddsBoard } from "./odds-board";
 import type { SimFormProfile, SimMatchExpectations } from "./sim-form-profile";
 import {
+  compileSettlement,
   emptyAccumulator,
   settlementEv,
   settlementProbability,
-  settleSelection,
   type SettlementAccumulator,
 } from "./match-settlement";
 
@@ -152,11 +152,17 @@ export function simulateOddsBoard(
 
   // Every selection is settled the same way the played-out match is settled, so
   // the numbers here and the numbers after a watched match cannot drift apart.
+  // The selection is parsed once here rather than per match: on a full board
+  // that is the difference between a six-figure batch taking seconds and taking
+  // minutes, because the regex work dwarfs the match engine itself.
   const tickets = board.markets.flatMap((market) =>
     market.selections.map((selection) => ({
       market,
       selection,
       counts: emptyAccumulator(),
+      judge: compileSettlement(market.name, selection.selection, {
+        handicapLine: selection.handicapLine,
+      }),
     })),
   );
 
@@ -210,17 +216,12 @@ export function simulateOddsBoard(
     }
 
     for (const ticket of tickets) {
-      const settlement = settleSelection(
-        ticket.market.name,
-        ticket.selection.selection,
-        match,
-        { handicapLine: ticket.selection.handicapLine },
-      );
-      if (!settlement) {
+      const judge = ticket.judge;
+      if (!judge) {
         untracked.set(ticket.market.name, (untracked.get(ticket.market.name) ?? 0) + 1);
         continue;
       }
-      ticket.counts[settlement.outcome] += 1;
+      ticket.counts[judge.outcome(match)] += 1;
     }
   }
 
