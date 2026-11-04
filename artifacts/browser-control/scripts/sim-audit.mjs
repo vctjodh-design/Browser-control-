@@ -40,6 +40,7 @@ const { Match } = await import('../src/sim3d/sim/match.js');
 const { MatchBall } = await import('../src/sim3d/entities/ball.js');
 const { PITCH } = await import('../src/sim3d/config.js');
 
+let offsides = [0, 0];
 const stubRig = () => ({
   root: { position: new THREE.Vector3(), rotation: { y: 0 } },
   update() {},
@@ -52,7 +53,12 @@ const LABEL = process.argv[3] ?? 'audit';
 const STEP = 1 / 30;
 
 const ball = new MatchBall();
-const match = new Match(null, ball, { makeRig: stubRig });
+const match = new Match(null, ball, {
+  makeRig: stubRig,
+  onEvent: (e) => {
+    if (e.type === 'offside') offsides[e.team === 0 ? 1 : 0] += 1; // the side it was given against
+  },
+});
 match.startMatch();
 
 const audit = {
@@ -75,6 +81,9 @@ const audit = {
   loose: 0,
   spells: [0, 0],
   passDist: [0, 0],
+  lineFrames: 0,
+  lineSum: 0,
+  lineOut: 0,
   outcomes: { intended: 0, teammate: 0, opponent: 0, dead: 0 },
   timeline: [],
 };
@@ -147,6 +156,25 @@ while (match.state !== 'fulltime' && steps * STEP < SIM_SECONDS) {
   if (match.state === 'play' && holder) {
     audit.thirdTime[holder.teamIdx][thirdOf(holder.teamIdx, holder.pos.x)] += STEP;
   }
+  // Back-line discipline: where the four defenders sit while the other side
+  // has the ball, and whether one of them has wandered into the opponent half.
+  if (match.state === 'play' && holder) {
+    const defTeam = match.teams[1 - holder.teamIdx];
+    const defenders = defTeam.agents.filter((a) => ['CB', 'RB', 'LB'].includes(a.role));
+    if (defenders.length) {
+      audit.lineFrames++;
+      let sum = 0;
+      let out = 0;
+      for (const d of defenders) {
+        const p = d.pos.x * defTeam.attackDir;
+        sum += p;
+        if (p > 0) out++;
+      }
+      audit.lineSum += sum / defenders.length;
+      if (out) audit.lineOut++;
+    }
+  }
+
   if (match.state === 'play') {
     if (holder) audit.held[holder.teamIdx] += STEP;
     else audit.loose += STEP;
@@ -196,7 +224,10 @@ const thirdTotal = (t) => audit.thirdTime[t].reduce((a, b) => a + b, 0) || 1;
 const minutes = match.clock / 60;
 
 console.log(`\n=== ${LABEL} — ${minutes.toFixed(1)} minutes, seed ${seedArg}, state ${match.state}`);
-console.log(`score ${match.score[0]}-${match.score[1]}  possession ${match.possessionPct.join('/')}  shots ${match.shots.join('/')}`);
+console.log(
+  `score ${match.score[0]}-${match.score[1]}  possession ${match.possessionPct.join('/')}` +
+    `  shots ${match.shots.join('/')}  offsides ${offsides.join('/')}`,
+);
 for (const t of [0, 1]) {
   const name = match.teams[t].name.padEnd(12).slice(0, 12);
   const touched = audit.passes[t] || 1;
@@ -221,6 +252,11 @@ for (const t of [0, 1]) {
       `, loose ${(audit.loose / 60).toFixed(1)}min`,
   );
 }
+
+console.log(
+  `\nback line out of position: mean height ${(audit.lineSum / (audit.lineFrames || 1)).toFixed(1)}m` +
+    ` (0 = halfway), in the opponent half ${pct(audit.lineOut, audit.lineFrames)}% of frames`,
+);
 
 const out = audit.outcomes;
 const passes = audit.passes[0] + audit.passes[1] || 1;

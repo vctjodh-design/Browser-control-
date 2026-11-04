@@ -86,6 +86,10 @@ export class Match {
     this.lastPassTarget = null;
     this.assistCandidate = null;
     this.assistTimer = 0;
+    // Offside is judged the moment the ball is played, so the men in an offside
+    // position are recorded then and read when one of them first touches it.
+    this.offsideFlags = null;
+    this.restartKick = false;
 
     this.stats = [this.blankStats(), this.blankStats()];
 
@@ -98,7 +102,7 @@ export class Match {
     return {
       shots: 0, onTarget: 0, saves: 0, fouls: 0, corners: 0, throwIns: 0,
       yellows: 0, reds: 0, passes: 0, passesCompleted: 0, tackles: 0, headers: 0,
-      distance: 0, xg: 0,
+      offsides: 0, distance: 0, xg: 0,
     };
   }
 
@@ -333,6 +337,7 @@ export class Match {
     }
     this.ball.reset(0, 0);
     this.possessor = null;
+    this.offsideFlags = null;
     this.restartInfo = null;
     this.lastTouch = null;
     this.stateTimer = delay;
@@ -556,6 +561,9 @@ export class Match {
         if (a.runTimer <= 0) {
           a.makingRun = !a.makingRun && ownRunnerRole(a);
           a.runTimer = 1.6 + Math.random() * 3.6;
+          // Run timing is not perfect: he mostly holds onside, sometimes a
+          // stride beyond it, which is what a real offside flag comes from.
+          a.runJitter = a.makingRun ? (Math.random() - 0.5) * 2.4 : 0;
         }
       }
 
@@ -706,6 +714,62 @@ export class Match {
     a.exhausted = a.stamina < 0.22;
   }
 
+  // ---------------------------------------------------------------- offside
+  /**
+   * Progress coordinate of the second-last opponent: the offside line. Measured
+   * including the keeper, because he is an opponent like any other.
+   */
+  offsideLine(team) {
+    const dir = team.attackDir;
+    const marks = this.active(this.teams[1 - team.idx])
+      .map((o) => o.pos.x * dir)
+      .sort((x, y) => y - x);
+    return marks.length > 1 ? marks[1] : marks[0] ?? GOAL_X;
+  }
+
+  /** Is this player in an offside position right now? */
+  offsidePosition(a, team) {
+    if (a.role === 'GK') return false;
+    const dir = team.attackDir;
+    const p = a.pos.x * dir;
+    if (p <= 0) return false; // his own half is always onside
+    if (p <= this.ball.pos.x * dir) return false; // never offside behind the ball
+    return p > this.offsideLine(team) + 0.25;
+  }
+
+  /** Every attacker currently beyond the line, for the moment the ball is played. */
+  offsideMen(team) {
+    const men = new Set();
+    for (const a of this.active(team)) {
+      if (this.offsidePosition(a, team)) men.add(a);
+    }
+    return men;
+  }
+
+  /** Keep an attacking target onside: never beyond both the ball and the line. */
+  keepOnside(team, x) {
+    const dir = team.attackDir;
+    const p = x * dir;
+    const limit = Math.max(this.offsideLine(team), this.ball.pos.x * dir) - 0.5;
+    return p > limit ? limit * dir : x;
+  }
+
+  callOffside(a, flags) {
+    void flags;
+    const def = this.teams[1 - a.teamIdx];
+    this.offsideFlags = null;
+    this.stats[a.teamIdx].offsides++;
+    this.onEvent({
+      type: 'offside',
+      text: `Offside — ${a.name} went too early`,
+      team: def.idx,
+      player: a.name,
+    });
+    const x = clamp(a.pos.x, -GOAL_X + 3, GOAL_X - 3);
+    const z = clamp(a.pos.z, -HALF_W + 2, HALF_W - 2);
+    this.setRestart('freekick', def.idx, x, z);
+  }
+
   // ---------------------------------------------------------------- targeting
   computeTarget(a) {
     if (a.sentOff) return { x: a.pos.x, z: a.pos.z, urgency: 0 };
@@ -724,7 +788,10 @@ export class Match {
       // look-ahead point. Chasing that point meant the ball kept rolling past
       // everybody, which is why possession never lasted more than one pass.
       const meant = this.pendingPass && this.pendingPass.to === a;
-      if (meant || a.roleRank === 0) {
+      // Only the nearest man goes to the ball, and only if it is actually near
+      // him. Everyone else holds the shape instead of chasing into midfield.
+      const near = a.roleRank === 0 && dist2D(a.pos, this.ball.pos) < 18;
+      if (meant || near) {
         if (this.time > (a.meetAt || 0)) {
           a.meetAt = this.time + 0.12;
           a.meet = this.meetPoint(a);
@@ -739,11 +806,6 @@ export class Match {
     return hasBall ? this.attackMove(a) : this.defendMove(a);
   }
 
-  /**
-   * The first point on the ball's predicted path this player can actually reach
-   * in the time the ball takes to get there. Solving that — instead of chasing
-   * a fixed look-ahead — is what lets a receiver collect a pass.
-   */
   /** Space beside a player, on the side away from his nearest marker. */
   openSide(mate, team, amount = 2) {
     let threat = null;
@@ -763,6 +825,11 @@ export class Match {
     return { x: (dx / len) * push, z: (dz / len) * push };
   }
 
+  /**
+   * The first point on the ball's predicted path this player can actually reach
+   * in the time the ball takes to get there. Solving that — instead of chasing
+   * a fixed look-ahead — is what lets a receiver collect a pass.
+   */
   meetPoint(a) {
     const speed = Math.max(4.5, a.maxSpeed * 0.92);
     for (let t = 0.12; t <= 3; t += 0.14) {
@@ -906,7 +973,9 @@ export class Match {
         t.z = clamp(ball.z * 0.5 + Math.sin(this.time * 0.4 + a.number) * 5, -15, 15);
         t.urgency = 0.9;
       } else {
-        t.x = runner ? clamp(lineX + dir * 7, -GOAL_X + 6, GOAL_X - 5) : onside;
+        // He pulls off the shoulder onside and times the run onto the pass
+        // instead of standing beyond the line waiting to be flagged.
+        t.x = runner ? onside + dir * (0.5 + (a.runJitter ?? 0)) : onside;
         t.z = clamp(ball.z * 0.45 + Math.sin(this.time * 0.5 + a.number) * 6, -17, 17);
         t.urgency = runner ? 1.2 : 1.04;
       }
@@ -916,7 +985,7 @@ export class Match {
       // Wide men stay high and hold the touchline even while the side builds:
       // they are the forward outlet that gets the ball out of its own half.
       const advance = clamp((this.ballNormX(team) - 0.22) * 34, -1, 18);
-      t.x = clamp(base.x + dir * advance, -GOAL_X + 6, GOAL_X - 5);
+      t.x = this.keepOnside(team, clamp(base.x + dir * advance, -GOAL_X + 6, GOAL_X - 5));
       // hold width, but tuck in when the ball is on the far side and deep
       const width = HALF_W - 4.5 - (this.ballNormX(team) > 0.75 ? 5 : 0);
       t.z = side * width;
@@ -1001,8 +1070,13 @@ export class Match {
       return { x: target.pos.x + (vx / len) * gap, z: target.pos.z + (vz / len) * gap };
     };
 
+    const isDefender = ['CB', 'RB', 'LB'].includes(a.role);
+    // A centre-half does not leave the back line to chase a ball in midfield:
+    // that is the midfield's job, and leaving the line opens the space behind.
+    const pulledOut = carrier ? (carrier.pos.x - lineX) * dir > 18 : false;
+
     // ---- the man on the ball ----
-    if (rank === 0 && carrier && press > 0.18) {
+    if (rank === 0 && carrier && press > 0.18 && !(isDefender && pulledOut)) {
       // approach from the goal side so he cannot turn and run
       const spot = goalSide(carrier, 1.15);
       t.x = spot.x;
@@ -1012,7 +1086,7 @@ export class Match {
     }
 
     // ---- cover / cut a lane ----
-    if (rank === 1 && carrier && press > 0.3) {
+    if (rank === 1 && carrier && press > 0.3 && !(isDefender && pulledOut)) {
       const spot = goalSide(carrier, 4.2);
       t.x = spot.x;
       t.z = spot.z;
@@ -1030,7 +1104,6 @@ export class Match {
       }
     }
 
-    const isDefender = ['CB', 'RB', 'LB'].includes(a.role);
     if (isDefender) {
       const mark = this.markingAssignment(a, opp, lineX);
       if (mark) {
@@ -1048,6 +1121,8 @@ export class Match {
       // never let the line drift beyond the ball
       if (dir > 0) t.x = Math.min(t.x, Math.max(ball.x + 2, -GOAL_X + 6));
       else t.x = Math.max(t.x, Math.min(ball.x - 2, GOAL_X - 6));
+      // stay on the line: marking a man does not mean following him upfield
+      t.x = clamp(t.x, lineX - dir * 7, lineX + dir * 7);
       return this.clampTarget(t);
     }
 
@@ -1090,7 +1165,7 @@ export class Match {
       const dz = Math.abs(at.pos.z - a.pos.z);
       if (dz > 13) continue;
       const ahead = (at.pos.x - lineX) * dir;
-      if (ahead < -14 || ahead > 26) continue;
+      if (ahead < -14 || ahead > 15) continue;
       const d = dist2D(at.pos, a.pos) + dz * 0.6;
       if (d < bestScore) {
         bestScore = d;
@@ -1436,6 +1511,10 @@ export class Match {
       const dist = Math.hypot(dx, dz);
       if (dist < 3.2 || dist > 58) continue;
       if (dist > visionRange) continue; // he simply does not see it
+      // A man standing beyond the line is not a pass anyone plays — but a
+      // forward timing a run can be a stride offside, and his side can still
+      // find him. That is where the occasional flag comes from.
+      if (this.offsidePosition(m, team) && !(m.makingRun && dx * dir > 0.25)) continue;
       // The keeper is a genuine option when a side is building or pressed in
       // its own third. What is not football is a hopeful 30m ball back to him
       // from midfield, so that stays out of the list.
@@ -1605,6 +1684,12 @@ export class Match {
     this.lastPassTarget = mate;
     this.pendingPass = { from: a, to: mate, team: team.idx };
     this.pendingPassTimer = 4;
+    // Offside is judged at this instant, from the positions when the ball
+    // leaves his foot — not from wherever the receiver ends up. Kicks that
+    // restart play (throw, corner, goal kick) are outside the law.
+    this.offsideFlags = this.restartKick
+      ? null
+      : { team: team.idx, men: this.offsideMen(team) };
     void extra;
   }
 
@@ -2084,6 +2169,12 @@ export class Match {
 
   takePossession(a, ballSpeed, ball) {
     const prev = this.pendingPass;
+    // The man the ball was played to was beyond the line when it was played.
+    if (this.offsideFlags && this.offsideFlags.team === a.teamIdx && this.offsideFlags.men.has(a)) {
+      this.callOffside(a, this.offsideFlags);
+      return;
+    }
+    this.offsideFlags = null; // any other touch ends that phase of play
     this.possessor = a;
     ball.held = true;
     ball.spin.set(0, 0, 0);
@@ -2215,6 +2306,7 @@ export class Match {
     this.restartInfo = { type, teamIdx, x, z };
     this.possessor = null;
     this.pendingPass = null;
+    this.offsideFlags = null;
     for (const a of this.agents) a.spTarget = null;
     this.ball.reset(clamp(x, -GOAL_X + 0.6, GOAL_X - 0.6), clamp(z, -HALF_W + 0.4, HALF_W - 0.4));
     this.ball.lastTouch = null;
@@ -2411,11 +2503,20 @@ export class Match {
     const info = this.restartInfo;
     this.state = 'play';
     this.restartInfo = null;
-    if (!info) return;
+    // Throw-ins, corners and goal kicks cannot put a man offside; the ball
+    // still comes off the taker's foot, so flag the kick as a restart.
+    this.restartKick = true;
+    if (!info) {
+      this.restartKick = false;
+      return;
+    }
     const team = this.teams[info.teamIdx];
     const taker = info.taker && !info.taker.sentOff ? info.taker : null;
     for (const a of this.agents) a.spTarget = null;
-    if (!taker) return;
+    if (!taker) {
+      this.restartKick = false;
+      return;
+    }
 
     // put the taker on the ball
     const bp = this.ball.pos;
@@ -2509,6 +2610,7 @@ export class Match {
       const opts = this.evaluatePasses(taker, this.perceive(taker));
       if (opts.length) this.executePass(taker, opts[0]);
     }
+    this.restartKick = false;
   }
 
   scoreGoal(team) {

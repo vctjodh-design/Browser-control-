@@ -312,6 +312,25 @@ the last defender.
   corridor is a metre and a half rather than four, and a player gets one touch
   attempt per ball instead of one per frame.
 
+**Offside is enforced.** There was no law at all: a forward could stand in the
+box all game. The line is the second-last opponent *including the keeper*, judged
+the instant the ball is played (`executePass` snapshots `offsideMen`) and read
+when one of those men first touches it — any other touch ends the phase. The
+free kick goes the other way from where he was standing. Throw-ins, corners and
+goal kicks cannot flag anyone: `executeRestart` marks the kick so `executePass`
+skips the snapshot. Attackers now hold the shoulder and time the run
+(`keepOnside`, plus a per-run timing error) instead of parking beyond the line,
+and pass selection ignores a man who is plainly offside — only a genuine runner
+can be found a stride early.
+
+**Players stay in their zones.** A centre-half no longer leaves the back line to
+chase a ball in midfield (only the midfield presses when the carrier is more
+than 18m ahead of the line), marking assignment is capped to 15m ahead instead
+of 26m, a defender's target is clamped to ±7m around the line, and only the
+nearest man goes to a loose ball, and only within 18m. `test/sim-offside.test.mjs`
+covers the law, the onside case, the throw-in exemption and the defender
+holding his line.
+
 Two engine bugs mattered more than any tuning constant: the receiver chased a
 fixed look-ahead point while the ball rolled past him (`meetPoint` now solves
 for where he can actually arrive), and any player the ball rolled near could
