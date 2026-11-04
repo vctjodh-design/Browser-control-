@@ -193,6 +193,9 @@ export function MatchSimPanel({
   // Which engine plays the match: our own simulation, or the Open Football
   // engine (github.com/ZOXEXIVO/open-football) playing this fixture's elevens.
   const [engine, setEngine] = useState<'house' | 'open-football'>('house');
+  // The engine plays one match per seed, and the same seed replays the same
+  // recording, so a new seed is what "play it again" means in engine mode.
+  const [engineSeed, setEngineSeed] = useState(7);
   const [profile, setProfile] = useState<SimFormProfile | null>(null);
   const [profileState, setProfileState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const shellRef = useRef<HTMLDivElement>(null);
@@ -242,10 +245,10 @@ export function MatchSimPanel({
     if (venue) params.set('venue', venue);
     if (engine === 'open-football') {
       params.set('engine', 'open-football');
-      params.set('seed', '7');
+      params.set('seed', String(engineSeed));
     }
     return `${import.meta.env.BASE_URL}sim.html?${params.toString()}`;
-  }, [home, away, venue, fixtureId, engine]);
+  }, [home, away, venue, fixtureId, engine, engineSeed]);
 
   const switchEngine = () => {
     const next = engine === 'house' ? 'open-football' : 'house';
@@ -318,6 +321,7 @@ export function MatchSimPanel({
   };
 
   const restart = () => {
+    if (engine === 'open-football') setEngineSeed((value) => value + 1);
     setRun(null);
     setEngineReady(false);
     setGeneration((value) => value + 1);
