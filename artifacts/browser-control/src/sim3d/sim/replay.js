@@ -42,6 +42,9 @@ const BUILD = [0.94, 1.02, 0.99, 1.05, 0.97, 0.96, 1.0, 0.98, 0.93, 1.02, 0.95];
 export class MatchReplay {
   constructor(scene, ball, options = {}) {
     this.scene = scene;
+    // `ball` — not `ballEntity` — is the name the camera, HUD and audio read off
+    // a match; this class answers to both so nothing outside has to care.
+    this.ball = ball;
     this.ballEntity = ball;
     this.replay = options.replay;
     this.onEvent = options.onEvent || (() => {});
