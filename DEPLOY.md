@@ -31,18 +31,18 @@ through its own Chromium. Nothing here is a secret.
 
 ```bash
 # once
-curl -L https://fly.io/install.sh | sh          # installs flyctl
-fly auth login                                  # or: export FLY_API_TOKEN=...
+curl -L https://fly.io/install.sh | sh          # installs flyctl into ~/.fly
+fly auth login                                  # or export FLY_API_TOKEN for CI
 
-# create the app and its disk, then ship it
-fly launch --no-deploy --name <your-app-name> --region fra
-fly volumes create data --size 3 --region fra
-fly deploy
+# name the app in fly.toml first (app = "..."), then:
+fly apps create <your-app-name>
+fly volumes create data --size 3 --region fra -a <your-app-name>
+fly deploy -a <your-app-name>
 ```
 
-`fly launch --no-deploy` rewrites `app` and `primary_region` in `fly.toml` to
-match. If the volume already exists, skip that line — creating a second one
-leaves the app mounted on the first.
+The name in `fly.toml` and the one you pass to `fly` must match. Create the
+volume once — a second one is left unattached, and the app keeps using the
+first.
 
 After the deploy:
 
