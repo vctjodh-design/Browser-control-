@@ -8,7 +8,7 @@
 
 import { simulateMatch, mulberry32 } from "./fast-match-sim";
 import type { OddsBoard } from "./odds-board";
-import type { SimFormProfile } from "./sim-form-profile";
+import type { SimFormProfile, SimMatchExpectations } from "./sim-form-profile";
 import {
   emptyAccumulator,
   settlementEv,
@@ -40,12 +40,32 @@ export type MarketSimulationRow = {
   edge: number;
 };
 
+/**
+ * One line of the "did it happen as expected" read: what the market and the
+ * clubs' own numbers asked for, what the played-out matches actually produced,
+ * and which side of it that landed on.
+ */
+export type SimExpectationRow = {
+  metric: string;
+  /** 'goals' and 'corners' are per match, 'share' is a probability 0..1. */
+  unit: "goals" | "corners" | "share";
+  expected: number;
+  simulated: number;
+  /** simulated - expected, in the metric's own units. */
+  delta: number;
+  verdict: "over" | "under" | "as-expected";
+};
+
 export type OddsSimulationResult = {
   fixtureId: number;
   rounds: number;
   seed: number;
   elapsedMs: number;
   teams: [string, string];
+  /** The market/form targets the played matches are being measured against. */
+  expectations: SimMatchExpectations | null;
+  /** Over / under / as expected, metric by metric. Empty without targets. */
+  comparison: SimExpectationRow[];
   summary: {
     homeWin: number;
     draw: number;
@@ -69,7 +89,56 @@ export type OddsSimulationResult = {
   untrackedMarkets: { market: string; selections: number }[];
 };
 
-const MAX_ROUNDS = 20_000;
+// 100,000 rounds of the fast engine plus settlement of every selection costs a
+// couple of seconds, which is what makes a six-figure batch practical.
+const MAX_ROUNDS = 100_000;
+
+/** How far from the target still counts as "as expected". */
+const TOLERANCE = { goals: 0.15, corners: 0.4, share: 0.03 } as const;
+
+function expectationRow(
+  metric: string,
+  unit: SimExpectationRow["unit"],
+  expected: number | null | undefined,
+  simulated: number,
+): SimExpectationRow | null {
+  if (expected === null || expected === undefined || !Number.isFinite(expected)) return null;
+  const delta = simulated - expected;
+  const verdict: SimExpectationRow["verdict"] =
+    Math.abs(delta) <= TOLERANCE[unit] ? "as-expected" : delta > 0 ? "over" : "under";
+  return { metric, unit, expected, simulated, delta, verdict };
+}
+
+function compareWithExpectations(
+  expectations: SimMatchExpectations,
+  played: {
+    averageGoals: number;
+    averageHomeGoals: number;
+    averageAwayGoals: number;
+    over25: number;
+    btts: number;
+    cleanSheetHome: number;
+    cleanSheetAway: number;
+    averageCorners: number;
+  },
+): SimExpectationRow[] {
+  const rows = [
+    expectationRow("Total goals", "goals", expectations.totalGoals, played.averageGoals),
+    expectationRow("Home goals", "goals", expectations.homeGoals, played.averageHomeGoals),
+    expectationRow("Away goals", "goals", expectations.awayGoals, played.averageAwayGoals),
+    expectationRow("Over 2.5 goals", "share", expectations.over25, played.over25),
+    expectationRow("Both teams score", "share", expectations.bothTeamsScore, played.btts),
+    expectationRow("Home clean sheet", "share", expectations.homeCleanSheet, played.cleanSheetHome),
+    expectationRow("Away clean sheet", "share", expectations.awayCleanSheet, played.cleanSheetAway),
+    expectationRow(
+      "Corners",
+      "corners",
+      expectations.homeCorners + expectations.awayCorners,
+      played.averageCorners,
+    ),
+  ];
+  return rows.filter((row): row is SimExpectationRow => row !== null);
+}
 
 export function simulateOddsBoard(
   board: OddsBoard,
@@ -202,6 +271,19 @@ export function simulateOddsBoard(
     seed,
     elapsedMs: Date.now() - started,
     teams: [profile.teams[0].name, profile.teams[1].name],
+    expectations: profile.expectations ?? null,
+    comparison: profile.expectations
+      ? compareWithExpectations(profile.expectations, {
+          averageGoals: goals / rounds,
+          averageHomeGoals: homeGoals / rounds,
+          averageAwayGoals: awayGoals / rounds,
+          over25: over25 / rounds,
+          btts: btts / rounds,
+          cleanSheetHome: cleanSheetHome / rounds,
+          cleanSheetAway: cleanSheetAway / rounds,
+          averageCorners: corners / rounds,
+        })
+      : [],
     summary: {
       homeWin: homeWins / rounds,
       draw: draws / rounds,

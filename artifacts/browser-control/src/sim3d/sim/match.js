@@ -1308,16 +1308,32 @@ export class Match {
    * rather than a certain goal — there is no such thing as a shot that cannot
    * be stopped just because the striker aimed away from him.
    */
+  /**
+   * Is this ball on a path into the goal the keeper is defending? Used only to
+   * decide whether a keeper's contact is a line save or an ordinary touch.
+   */
+  ballOnGoal(keeper) {
+    const goal = this.ownGoal(this.teams[keeper.teamIdx]);
+    const b = this.ball.pos;
+    const v = this.ball.vel;
+    if ((goal.x - b.x) * v.x <= 0) return false;
+    const t = Math.abs(goal.x - b.x) / Math.max(0.5, Math.abs(v.x));
+    if (t > 1.2) return false;
+    const z = b.z + v.z * t;
+    const y = b.y + v.y * t - 4.9 * t * t;
+    return Math.abs(z) < HALF_G + 0.6 && y < GOAL_H + 0.3;
+  }
+
   keeperStops(keeper) {
     const b = this.ball.pos;
     const v = this.ball.vel;
     const speed = Math.hypot(v.x, v.y, v.z);
     const lateral = Math.abs(keeper.pos.z - b.z);
-    const reach = 0.5 + keeper.attrs.composure * 0.7;
+    const reach = 0.7 + keeper.attrs.composure * 0.85;
     let p =
       lateral <= reach
-        ? 0.84
-        : clamp(1.15 - lateral / 5.6, 0, 0.84);
+        ? 0.9
+        : clamp(1.34 - lateral / 6.2, 0, 0.9);
     // Height and power beat him: the top corner is the hardest ball to stop.
     if (b.y > 1.85) p *= 0.74;
     if (b.y > 2.18) p *= 0.5;
@@ -1348,8 +1364,12 @@ export class Match {
       return true;
     }
 
-    // He gets across and smothers it on the line.
+    // He gets across and smothers it on the line. The ball is in his hands, so
+    // it also has to stop travelling: leaving the shot's 30 m/s on it sent the
+    // ball back through the line next frame and gave the keeper another roll at
+    // a shot he had already saved, over and over in the same passage of play.
     b.x = Math.sign(b.x) * (GOAL_X - 0.45);
+    this.ball.vel.set(0, 0, 0);
     this.takePossession(keeper, speed, this.ball);
     return true;
   }
@@ -1741,8 +1761,8 @@ export class Match {
     // pressure. Accuracy here scales the angular spread, so a crowded box and
     // tired legs push shots wide and over rather than into the net.
     const spreadRad =
-      (0.128 + (1 - acc) * 0.32) *
-      (1 + dist / 42) *
+      (0.2 + (1 - acc) * 0.5) *
+      (1 + dist / 30) *
       (1 + pressure * 0.75) *
       (1 + (1 - a.stamina) * 0.65);
     const spreadM = Math.tan(spreadRad) * dist;
@@ -1753,6 +1773,7 @@ export class Match {
     const v = target.clone().sub(new THREE.Vector3(a.pos.x, this.ball.pos.y, a.pos.z)).normalize();
     const power = clamp(23 + at.shooting * 9 + Math.random() * 3, 20, 34);
     this.ball.kick(v, power, 0, (Math.random() - 0.5) * 1.1);
+    this.ball.attemptLive = true;
     this.ball.lastTouch = a;
     this.ball.lastTouchTeam = team.idx;
     this.possessor = null;
@@ -1791,11 +1812,10 @@ export class Match {
       return;
     }
 
-    const onTarget = Math.abs(z0) < HALF_G - 0.05 && y0 < GOAL_H;
-    if (onTarget) {
-      this.stats[team.idx].onTarget++;
-      a.stats.onTarget++;
-    }
+    // On target is a fact about the ball, not an intention: it is counted at
+    // the line in checkBounds, where the keeper and the frame actually meet it.
+    // Keeping a predicted version here produced boards reading five goals from
+    // three shots on target.
     // crude expected goals, useful for the stats panel
     this.stats[team.idx].xg += clamp(Math.exp(-dist / 11) * (1 - Math.abs(a.pos.z) / 60) * 0.9, 0.02, 0.85);
     this.excite = Math.max(this.excite, 0.3 + (1 - Math.min(1, dist / 34)) * 0.3);
@@ -1875,10 +1895,9 @@ export class Match {
       const power = clamp(11 + a.attrs.aerial * 9, 10, 21);
       const lift = clamp(0.06 - dist * 0.002, -0.02, 0.12);
       this.ball.kick(v, power, lift, 0);
+      this.ball.attemptLive = true;
       a.stats.shots++;
       this.stats[team.idx].shots++;
-      this.stats[team.idx].onTarget++;
-      a.stats.onTarget++;
       this.stats[team.idx].xg += 0.12;
       this.onEvent({ type: 'shot', text: `${a.name} gets his head to it!`, team: team.idx });
     } else {
@@ -2140,6 +2159,13 @@ export class Match {
       const speed = Math.hypot(ball.vel.x, ball.vel.z);
       // keepers use their hands: if they get there, they usually keep it out
       const keeper = best.role === 'GK' && b.y < 2.4;
+      // A keeper does not get two bites at the same shot. A ball flying at goal
+      // at shooting pace is his line save to make (`keeperStops`, which reads
+      // lateral distance and power), so he must not simply gather it in flight
+      // as well — that is what turned 31 shots in a match into 19 catches and
+      // two goals. Slow balls — a back pass, a cross dropping into his zone —
+      // he still handles normally.
+      if (keeper && speed > 13 && this.ballOnGoal(best)) return;
       // Is the ball actually coming at him? A ball travelling across or past a
       // player is not his to control. Without this every pass that rolled
       // within 1.4m of anybody was an interception, and half of all passes in
@@ -2245,10 +2271,24 @@ export class Match {
     const b = this.ball.pos;
 
     if (Math.abs(b.x) > GOAL_X + 0.12 && Math.abs(b.z) < HALF_G && b.y < GOAL_H) {
-      const scoringTeam = b.x > 0
-        ? this.teams.find((t) => t.attackDir > 0)
-        : this.teams.find((t) => t.attackDir < 0);
+      // Attribute by the goal the ball crossed, not by "who attacks +x": at
+      // the half-time switch both sides briefly share a direction, which sent
+      // every goal at one end to the same team's column.
+      const scoringTeam = this.teams.find(
+        (t) => Math.sign(this.oppGoal(t).x) === Math.sign(b.x),
+      );
+      if (!scoringTeam) return;
       const keeper = this.active(this.teams[1 - scoringTeam.idx]).find((k) => k.role === 'GK');
+      // The ball has arrived in the frame: that is a shot on target whether the
+      // keeper stops it, turns it round the post or it goes in. One shot gets
+      // one count and one save attempt, however the ball then behaves at the
+      // line.
+      if (this.ball.attemptLive) {
+        this.ball.attemptLive = false;
+        this.stats[scoringTeam.idx].onTarget++;
+        const taker = this.ball.lastTouch;
+        if (taker && taker.teamIdx === scoringTeam.idx) taker.stats.onTarget++;
+      }
       if (keeper && this.keeperStops(keeper)) return;
       // Ahead of what the market and their own record expect, a side runs into a
       // keeper having the game of his life rather than a ten-goal afternoon.
@@ -2545,6 +2585,7 @@ export class Match {
       const goal = this.oppGoal(team);
       const v = new THREE.Vector3(goal.x + dir * 0.4 - bp.x, aimY - 0.11, aimZ - bp.z).normalize();
       this.ball.kick(v, 26, 0, 0);
+      this.ball.attemptLive = true;
       taker.stats.shots++;
       taker.stats.onTarget++;
       this.stats[team.idx].shots++;
@@ -2566,6 +2607,7 @@ export class Match {
       const vy = (aimY - 0.11 + 0.5 * 9.81 * Math.pow(dist / shootPower, 2)) / (dist / shootPower);
       const v = new THREE.Vector3(goal.x - bp.x, 0, aimZ - bp.z).normalize();
       this.ball.kick(v, shootPower, clamp(vy / shootPower, 0, 0.9), (Math.random() - 0.5) * 2.4);
+      this.ball.attemptLive = true;
       taker.stats.shots++;
       this.stats[team.idx].shots++;
       this.shots[team.idx]++;

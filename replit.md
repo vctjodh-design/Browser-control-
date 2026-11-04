@@ -122,11 +122,13 @@ and scorers, halves, corners, cards and shots on target per player. No price eve
 enters it.
 
 `POST /api/football/matches/:id/odds-simulation` (`lib/odds-simulation.ts`) runs
-that engine for the requested number of rounds (up to 20,000), settles every
+that engine for the requested number of rounds (up to 100,000), settles every
 selection on the board against every round, and returns, per selection, the
 simulated probability, the margin-free market probability, the best price and
-book, the expected value at that price and the difference between the two. 2,000
-rounds take about 10 seconds; 10,000 about a minute.
+book, the expected value at that price and the difference between the two.
+Measured on a 40-selection board: 10,000 rounds in 0.7s, 100,000 in 1.2–6.3s
+depending on the machine's load. The run is synchronous, so a six-figure batch
+holds the event loop for those seconds.
 
 `POST /api/football/matches/:id/odds-settle` grades the board against one match
 record. The match page's own frame posts `sim-match-summary` at full time
@@ -259,6 +261,25 @@ has to be won is won physically: `tryTackle` is a contest weighted by strength,
 defending and a tired opponent's drop in balance, blocked shots need a defender
 goal-side inside 3.4m, and the rest of the shots simply miss.
 
+### Played against the targets
+
+The engine plays from the squads and their numbers; the fixture's targets (the
+market's or the clubs' own) are carried alongside. Each odds-simulation result
+now also reports `expectations` and a `comparison` row per metric — total, home
+and away goals, over 2.5, both teams score, each clean sheet and corners — with
+the played value, the target, the gap and a verdict of `over`, `under` or
+`as-expected` (within 0.15 goals, 0.03 of a probability, 0.4 corners). The panel
+renders it as **Played against the targets**, so an under is a real disagreement
+between the football the squads produce and the price the board is offering, not
+a restatement of the odds. A sample 100,000-round run on a 3.14-goal fixture read
+2.73 goals played — under — with both clean sheets over, which is the fast
+engine's known shape.
+
+The 3D panel gained the same read for the matches it plays: under the series
+summary, a `vs targets` strip (home, away and total) with the played average, the
+target and the verdict. Tolerance is 0.2 goals per match, because a batch of up
+to fifty matches is a small sample.
+
 ### Reading the predictions
 The simulation's answer sits above the markets: the result it favours, its most
 likely scoreline and the nine scorelines that came up most. Every market header
@@ -337,10 +358,38 @@ for where he can actually arrive), and any player the ball rolled near could
 "control" it, so half of all passes ended with the wrong team. Control now
 requires the ball to be coming at the player, and one attempt per ball.
 
+### Why scoring was lower than it looked
+
+Six audited matches produced 31 shots and two goals. The audit gained a shot
+funnel (`shot outcomes`, `crossings`, `shots reaching the line`) and the answer
+was the goalkeeper, three times over:
+
+- **He caught everything in flight.** `resolvePossession` gave the keeper a 3m
+  reach and a ~100% control chance, so a 30 m/s shot passing within three metres
+  of him was gathered on the way — 19 of 31 shots in one match died in his hands
+  before reaching the line, on top of the line save he would have had anyway.
+  A goal-bound ball at pace is now left to `keeperStops`; only slow balls (back
+  passes, crosses dropping into his zone) are handled in flight.
+- **One shot, many save rolls.** A smothered shot kept its 30 m/s velocity, which
+  sent it back through the goal line on the next frame, so `keeperStops` rolled
+  again — and again. The same passage of play could give him five attempts at
+  the same shot, and 24 "stops" for 19 crossings. A saved ball now stops
+  travelling, and one shot carries one attempt (`ball.attemptLive`).
+- **The on-target board was predicted, not measured.** Shots were counted on
+target from the aim before physics, so a board could read 22 on target from 18
+  shots. It is now counted where the ball actually meets the frame, once per
+  shot, which is also what `keeperStops` is graded on.
+
+With those fixed and the shooting spread widened, eight full audited matches gave
+21 goals — 2.6 a match against a real-football 2.7 — from ~20 shots each, with
+13% of shots scored. `test/sim-scoring.test.mjs` locks the three behaviours: the
+keeper's claim geometry, one shot = one attempt, and no in-flight gathering of a
+goal-bound ball.
+
 `scripts/sim-audit.mjs` plays ninety minutes headless (stub canvas, stub rigs)
-and reports passes, completion, backward share, keeper involvement, thirds and
-box occupancy with a seeded RNG, so a change can be measured instead of judged
-by eye. `node scripts/sim-audit.mjs 420 label 1`.
+and reports passes, completion, backward share, keeper involvement, thirds, box
+occupancy, shot zones, the shot funnel and offsides with a seeded RNG, so a
+change can be measured instead of judged by eye. `node scripts/sim-audit.mjs 420 label 1`.
 
 ## One container serves both halves
 

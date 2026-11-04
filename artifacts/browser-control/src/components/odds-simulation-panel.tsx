@@ -11,8 +11,8 @@ import {
 } from '@/lib/odds-simulation';
 
 const MIN_ROUNDS = 100;
-const MAX_ROUNDS = 10_000;
-const DEFAULTS = [1000, 5000, 10_000];
+const MAX_ROUNDS = 100_000;
+const DEFAULTS = [1000, 25_000, 100_000];
 
 const pct = (value: number, digits = 1) => `${(value * 100).toFixed(digits)}%`;
 const signedPct = (value: number) => `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}`;
@@ -80,6 +80,77 @@ function PredictedResult({ result }: { result: OddsSimulationResult }) {
           >
             <span className="font-semibold">{line.score}</span> {pct(line.count / total, 1)}
           </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Did the fixture play out the way the market and the clubs' own numbers said
+ * it would? The simulation never reads the prices, so a run that lands under on
+ * total goals is a real disagreement, not a restatement of the odds.
+ */
+function ExpectationCard({ result }: { result: OddsSimulationResult }) {
+  const rows = result.comparison;
+  const expectations = result.expectations;
+  if (!expectations || !rows.length) return null;
+
+  const count = (verdict: 'over' | 'under' | 'as-expected') =>
+    rows.filter((row) => row.verdict === verdict).length;
+  const over = count('over');
+  const under = count('under');
+  const level = count('as-expected');
+  const tone = (verdict: string) => {
+    if (verdict === 'over') return 'border-[#bcd4c2] bg-[#e9f2e9] text-[#2f6b4f]';
+    if (verdict === 'under') return 'border-[#e0cfc4] bg-[#f7efe7] text-[#8a5a3b]';
+    return 'border-[#deddd4] bg-[#f3f2eb] text-[#6d7a72]';
+  };
+  const label = (verdict: string) =>
+    verdict === 'over' ? 'over' : verdict === 'under' ? 'under' : 'as expected';
+  const value = (row: (typeof rows)[number]) =>
+    row.unit === 'share' ? pct(row.simulated, 0) : row.simulated.toFixed(row.unit === 'goals' ? 2 : 1);
+  const target = (row: (typeof rows)[number]) =>
+    row.unit === 'share' ? pct(row.expected, 0) : row.expected.toFixed(row.unit === 'goals' ? 2 : 1);
+  const gap = (row: (typeof rows)[number]) => {
+    if (row.unit === 'share') return `${row.delta >= 0 ? '+' : ''}${(row.delta * 100).toFixed(1)} pp`;
+    return `${row.delta >= 0 ? '+' : '−'}${Math.abs(row.delta).toFixed(2)}`;
+  };
+
+  return (
+    <div
+      className="overflow-hidden rounded-xl border border-[#deddd4] bg-[#fbfaf6]"
+      data-testid="odds-expectations"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e8e6de] bg-[#f3f2eb] px-4 py-2.5">
+        <div>
+          <h3 className="text-[11px] font-extrabold text-[#43575a]">Played against the targets</h3>
+          <p className="mt-0.5 text-[9px] text-[#8b8d84]">
+            {expectations.source === 'odds' ? 'Market' : 'Form'} targets · {result.rounds.toLocaleString()} rounds
+            · {over} over, {under} under, {level} as expected
+          </p>
+        </div>
+        <span className="mono text-[9px] text-[#8b8d84]">
+          {over > under
+            ? 'the fixture ran hot'
+            : under > over
+              ? 'the fixture ran cold'
+              : 'the fixture matched its targets'}
+        </span>
+      </div>
+      <div className="divide-y divide-[#eeece4]">
+        {rows.map((row) => (
+          <div key={row.metric} className="flex items-center justify-between gap-3 px-4 py-2">
+            <span className="min-w-0 truncate text-[10px] font-bold text-[#52615e]">{row.metric}</span>
+            <span className="mono flex shrink-0 items-center gap-2 text-[9px]">
+              <span className="text-[#8b8d84]">target {target(row)}</span>
+              <span className="text-[#43575a]">played {value(row)}</span>
+              <span className="text-[#9b9d93]">{gap(row)}</span>
+              <span className={`rounded border px-1.5 py-0.5 text-[8px] uppercase tracking-[.08em] ${tone(row.verdict)}`}>
+                {label(row.verdict)}
+              </span>
+            </span>
+          </div>
         ))}
       </div>
     </div>
@@ -335,9 +406,10 @@ export function OddsSimulationPanel({ fixtureId }: { fixtureId: number }) {
             Every price, graded by the match
           </h2>
           <p className="mt-1 max-w-[62ch] text-[11px] leading-relaxed text-[#7f837b]">
-            The fixture is played out from the squads and form — never from the prices — and every
-            selection on the board is graded against what happened. Thousands of rounds give the
-            distribution behind each market.
+            The fixture is played out from the squads, their numbers and the match targets — never
+            from the prices — and every selection on the board is graded against what happened. Up
+            to 100,000 rounds give the distribution behind each market, and show whether the fixture
+            ran over, under or as expected.
           </p>
         </div>
         <div className="flex items-end gap-2">
@@ -416,6 +488,8 @@ export function OddsSimulationPanel({ fixtureId }: { fixtureId: number }) {
           </div>
 
           <PredictedResult result={result} />
+
+          <ExpectationCard result={result} />
 
           <div className="rounded-xl border border-[#deddd4] bg-[#fbfaf6]">
             <div className="border-b border-[#e8e6de] bg-[#f3f2eb] px-4 py-2.5">

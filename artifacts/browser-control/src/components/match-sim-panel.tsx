@@ -315,8 +315,26 @@ export function MatchSimPanel({
     const draws = results.filter((result) => result.homeScore === result.awayScore).length;
     const awayWins = results.length - homeWins - draws;
     const goals = results.reduce((total, result) => total + result.homeScore + result.awayScore, 0);
-    return { homeWins, draws, awayWins, averageGoals: goals / results.length };
-  }, [run]);
+    const homeGoals = results.reduce((total, result) => total + result.homeScore, 0) / results.length;
+    const awayGoals = results.reduce((total, result) => total + result.awayScore, 0) / results.length;
+    const averageGoals = goals / results.length;
+
+    // The match was played from the squads and their numbers, not from these
+    // targets — so this is the answer to "did it come out over, under or as
+    // expected", not a restatement of the expectation.
+    const expectations = profile?.expectations ?? null;
+    const verdict = (delta: number): 'over' | 'under' | 'as expected' =>
+      Math.abs(delta) <= 0.2 ? 'as expected' : delta > 0 ? 'over' : 'under';
+    const comparison = expectations
+      ? [
+          { label: 'total', played: averageGoals, target: expectations.totalGoals },
+          { label: 'home', played: homeGoals, target: expectations.homeGoals },
+          { label: 'away', played: awayGoals, target: expectations.awayGoals },
+        ].map((row) => ({ ...row, delta: row.played - row.target, verdict: verdict(row.played - row.target) }))
+      : [];
+
+    return { homeWins, draws, awayWins, averageGoals, comparison };
+  }, [run, profile]);
 
   const running = run?.running ?? false;
 
@@ -540,6 +558,28 @@ export function MatchSimPanel({
               {teams?.[0]?.name ?? home} {seriesSummary.homeWins} wins · {seriesSummary.draws} drawn ·{' '}
               {teams?.[1]?.name ?? away} {seriesSummary.awayWins} wins · {seriesSummary.averageGoals.toFixed(2)} goals a match
             </p>
+          ) : null}
+          {seriesSummary?.comparison.length ? (
+            <div
+              className="mono mt-1.5 flex flex-wrap items-center gap-1.5 text-[7px] uppercase tracking-[.09em]"
+              data-testid="sim-vs-expectation"
+            >
+              <span className="text-[#7f978f]">vs targets</span>
+              {seriesSummary.comparison.map((row) => (
+                <span
+                  key={row.label}
+                  className={`rounded border px-1.5 py-0.5 ${
+                    row.verdict === 'over'
+                      ? 'border-[#3d6156] bg-[#223c33] text-[#8fd0a8]'
+                      : row.verdict === 'under'
+                        ? 'border-[#6b4a3a] bg-[#3a2a24] text-[#e0b49c]'
+                        : 'border-[#334b5d] bg-[#22384a] text-[#9fb4ae]'
+                  }`}
+                >
+                  {row.label} {row.played.toFixed(2)} / {row.target.toFixed(2)} · {row.verdict}
+                </span>
+              ))}
+            </div>
           ) : null}
         </div>
       ) : null}

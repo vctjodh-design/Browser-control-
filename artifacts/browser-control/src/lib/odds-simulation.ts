@@ -66,12 +66,38 @@ export type MarketSimulationRow = {
   edge: number;
 };
 
+/** The market/form targets a fixture carries, from the simulation profile. */
+export type SimExpectations = {
+  source: 'odds' | 'form';
+  totalGoals: number;
+  homeGoals: number;
+  awayGoals: number;
+  over25: number | null;
+  bothTeamsScore: number | null;
+  homeCleanSheet: number | null;
+  awayCleanSheet: number | null;
+  homeCorners: number;
+  awayCorners: number;
+};
+
+/** Did the played matches land over, under or on the expectation, and by how much. */
+export type SimExpectationRow = {
+  metric: string;
+  unit: 'goals' | 'corners' | 'share';
+  expected: number;
+  simulated: number;
+  delta: number;
+  verdict: 'over' | 'under' | 'as-expected';
+};
+
 export type OddsSimulationResult = {
   fixtureId: number;
   rounds: number;
   seed: number;
   elapsedMs: number;
   teams: [string, string];
+  expectations: SimExpectations | null;
+  comparison: SimExpectationRow[];
   summary: {
     homeWin: number;
     draw: number;

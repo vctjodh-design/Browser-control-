@@ -77,6 +77,18 @@ const audit = {
   ownBoxPasses: [0, 0],
   longBalls: [0, 0],
   boxEntries: [0, 0],
+  // Where the shots come from and where they end up: the audit has to be able
+  // to say whether a quiet scoreline is too few shots or too few goals from
+  // the shots there were.
+  shotZones: [[0, 0, 0], [0, 0, 0]],
+  shotGoals: [0, 0],
+  stops: 0,
+  stopsFailed: 0,
+  funnel: { goal: 0, keeperClaim: 0, intercepted: 0, dead: 0, lingering: 0 },
+  crossings: [0, 0],
+  goals: [0, 0],
+  emptyNet: [0, 0],
+  gateBlocked: 0,
   held: [0, 0],
   loose: 0,
   spells: [0, 0],
@@ -131,6 +143,54 @@ match.executePass = (a, choice, extra = {}) => {
   openPass = { from: a, to: choice.mate, team: t };
 };
 
+const realShot = match.executeShot.bind(match);
+match.executeShot = (a, ctx) => {
+  const team = match.teams[a.teamIdx];
+  const goal = match.oppGoal(team);
+  const from = Math.hypot(goal.x - a.pos.x, goal.z - a.pos.z);
+  const zone = from < 9 ? 0 : from < 18 ? 1 : 2;
+  const before = match.score[a.teamIdx];
+  realShot(a, ctx);
+  audit.shotZones[a.teamIdx][zone]++;
+  if (match.score[a.teamIdx] > before) audit.shotGoals[a.teamIdx]++;
+  // Follow this shot until something owns the outcome: a goal, a keeper
+  // claim in flight, an outfield interception, or the ball going dead.
+  if (a.stats.shots > 0) {
+    inflight = { team: a.teamIdx, t: 0, before, state: match.state };
+  }
+};
+
+let inflight = null;
+const endShot = (kind) => {
+  if (!inflight) return;
+  audit.funnel[kind]++;
+  inflight = null;
+};
+
+const realStops = match.keeperStops.bind(match);
+match.keeperStops = (keeper) => {
+  const saved = realStops(keeper);
+  audit.crossings[1 - keeper.teamIdx]++;
+  if (saved) audit.stops++;
+  else audit.stopsFailed++;
+  return saved;
+};
+
+const realScore = match.scoreGoal.bind(match);
+match.scoreGoal = (team) => {
+  audit.goals[team.idx]++;
+  const keeper = match.active(match.teams[1 - team.idx]).find((k) => k.role === 'GK');
+  if (!keeper) audit.emptyNet[team.idx]++;
+  return realScore(team);
+};
+
+const realGate = match.scoringGate.bind(match);
+match.scoringGate = (teamIdx) => {
+  const gate = realGate(teamIdx);
+  if (gate < 1) audit.gateBlocked++;
+  return gate;
+};
+
 const realRestart = match.setRestart.bind(match);
 match.setRestart = (...args) => {
   closePass('dead');
@@ -152,6 +212,15 @@ let steps = 0;
 while (match.state !== 'fulltime' && steps * STEP < SIM_SECONDS) {
   match.update(STEP);
   steps++;
+  if (inflight) {
+    inflight.t += STEP;
+    const holder = match.possessor;
+    if (match.score[inflight.team] > inflight.before) endShot('goal');
+    else if (holder && holder.role === 'GK' && holder.teamIdx !== inflight.team) endShot('keeperClaim');
+    else if (holder && holder.teamIdx !== inflight.team) endShot('intercepted');
+    else if (match.state !== 'play' && match.state !== 'goal' && inflight.t > 0.35) endShot('dead');
+    else if (inflight.t > 6) endShot('lingering');
+  }
   const holder = match.possessor;
   if (match.state === 'play' && holder) {
     audit.thirdTime[holder.teamIdx][thirdOf(holder.teamIdx, holder.pos.x)] += STEP;
@@ -252,6 +321,36 @@ for (const t of [0, 1]) {
       `, loose ${(audit.loose / 60).toFixed(1)}min`,
   );
 }
+
+const zoneNames = ['inside 9m', '9-18m', 'from 18m+'];
+for (const t of [0, 1]) {
+  const shots = match.stats[t].shots || 0;
+  const onTarget = match.stats[t].onTarget || 0;
+  const goals = match.score[t];
+  const zones = audit.shotZones[t];
+  const zoneTotal = zones[0] + zones[1] + zones[2] || 1;
+  console.log(
+    `${match.teams[t].name.padEnd(12).slice(0, 12)} shots ${shots}  on target ${onTarget}` +
+      `  goals ${goals}  conver/ shot ${pct(goals, shots)}%  per on-target ${pct(goals, onTarget)}%` +
+      `  zones ${zoneNames.map((n, i) => `${n} ${pct(zones[i], zoneTotal)}%`).join(', ')}`,
+  );
+}
+console.log(
+  `shots reaching the line: ${audit.stops + audit.stopsFailed} (${audit.stops} stopped, ${audit.stopsFailed} past him)` +
+    `  expectation gate damped ${audit.gateBlocked} shots`,
+);
+console.log(
+  `shot outcomes: ${Object.entries(audit.funnel).map(([k, v]) => `${k} ${v}`).join('  ')}`,
+);
+console.log(
+  `crossings by attacking side: ${audit.crossings.join('/')}  goals scored: ${audit.goals.join('/')}` +
+    `  of them into an empty net: ${audit.emptyNet.join('/')}`,
+);
+console.log(
+  `reds ${match.stats[0].reds}/${match.stats[1].reds}  keeper sent off ${match.teams
+    .map((t) => t.agents.some((a) => a.role === 'GK' && a.sentOff))
+    .join('/')}`,
+);
 
 console.log(
   `\nback line out of position: mean height ${(audit.lineSum / (audit.lineFrames || 1)).toFixed(1)}m` +
