@@ -100,6 +100,36 @@ labels.ledText = `${venue ? `${venue}  ·  ` : ''}${TEAMS[0].name}  ·  ${TEAMS[
 
 document.title = `${TEAMS[0].name} v ${TEAMS[1].name} — live simulation`;
 
+// The optional replay: this fixture, played by the Open Football engine rather
+// than invented here. It arrives already recorded, so all that is left is for
+// the pitch to walk through it.
+if ((params.get('engine') ?? '').trim() === 'open-football') {
+  const fixture = (params.get('fixture') ?? '').trim();
+  const seed = (params.get('seed') ?? '7').trim();
+  if (/^\d+$/.test(fixture)) {
+    const banner = document.getElementById('banner');
+    const note = banner?.querySelector('.banner-hint');
+    if (note) note.textContent = 'Playing this fixture with the Open Football engine…';
+    try {
+      const response = await fetch(
+        `/api/football/matches/${fixture}/open-football-replay?seed=${encodeURIComponent(seed)}`,
+      );
+      if (response.ok) {
+        window.__openFootballReplay = await response.json();
+      } else {
+        const body = await response.json().catch(() => ({}));
+        window.__openFootballError = body.error || `the engine returned ${response.status}`;
+      }
+    } catch (error) {
+      window.__openFootballError = 'the engine could not be reached';
+    }
+    if (window.__openFootballError) {
+      console.warn('Open Football replay unavailable:', window.__openFootballError);
+      if (note) note.textContent = 'Engine unavailable — playing the house simulation instead.';
+    }
+  }
+}
+
 // Imported after the config is patched: match.js reads TEAMS while it builds
 // the squads.
 await import('./main.js');

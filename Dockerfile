@@ -1,3 +1,12 @@
+# The match engine. Open Football (github.com/ZOXEXIVO/open-football) plays a
+# fixture in Rust; `engine/of-replay` is the small bridge that reads a team
+# sheet on stdin and writes the recording on stdout. Its crate pins the upstream
+# tag, so this stage is the only place the engine is compiled.
+FROM rust:1.99-bookworm AS engine
+WORKDIR /engine
+COPY engine/of-replay ./of-replay
+RUN cd of-replay && cargo build --release
+
 # One image runs both halves of the app: the Express API and the built React app.
 # The API is not a thin proxy — Forensics and the odds board drive a real headless
 # Chromium — so the image carries the browser and the shared libraries it needs.
@@ -34,6 +43,9 @@ RUN PORT=3000 BASE_PATH=/ pnpm --filter @workspace/browser-control run build \
 # The SQLite archive lives on a mounted volume, never in the image layer.
 RUN mkdir -p /data
 VOLUME ["/data"]
+
+# The API spawns this to play a fixture (`OF_REPLAY_BIN`, defaulted below).
+COPY --from=engine /engine/of-replay/target/release/of_replay /app/engine/of-replay/target/release/of_replay
 
 EXPOSE 5000
 

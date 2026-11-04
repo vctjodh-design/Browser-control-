@@ -1,4 +1,5 @@
 import { Router, type IRouter, type Response } from "express";
+import { gzipSync } from "node:zlib";
 import {
   GetFootballMatchDetailsParams,
   GetFootballMatchDetailsResponse,
@@ -26,6 +27,10 @@ import {
 } from "../lib/kickoffscore-last-five";
 import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
 import { getSimFormProfile } from "../lib/sim-form-profile";
+import {
+  OpenFootballUnavailableError,
+  playOpenFootballMatch,
+} from "../lib/open-football-replay";
 import { getOddsBoard } from "../lib/odds-board";
 import { simulateOddsBoard } from "../lib/odds-simulation";
 import { settleBoard } from "../lib/odds-settlement";
@@ -352,6 +357,59 @@ router.get(
         "Could not build the odds board",
       );
       res.status(502).json({ error: "Odds could not be read right now. Please try again." });
+    }
+  },
+);
+
+// One match, played by the Open Football engine instead of the app's own
+// simulation. The recording is what the pitch replays; the scores are the
+// engine's, not a restatement of the odds.
+router.get(
+  "/football/matches/:fixtureId/open-football-replay",
+  async (req, res): Promise<void> => {
+    const fixtureId = Number(req.params.fixtureId);
+    if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    const seedValue = Number(req.query.seed);
+    const seed = Number.isFinite(seedValue) && seedValue > 0 ? Math.round(seedValue) : 7;
+
+    try {
+      const profile = await getSimFormProfile(fixtureId);
+      const replay = await playOpenFootballMatch(profile, seed);
+      // A played match never changes for the same seed, so the browser and any
+      // proxy can hold it: a replay is megabytes of samples. Gzipped by hand
+      // rather than by a middleware — it is one document, sent once, and the
+      // browser decompresses it for free.
+      res.set("Cache-Control", "private, max-age=3600");
+      const acceptsGzip = /\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""));
+      if (acceptsGzip) {
+        res.set("Content-Encoding", "gzip");
+        res.type("application/json").send(gzipSync(Buffer.from(JSON.stringify(replay))));
+      } else {
+        res.json(replay);
+      }
+    } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      if (error instanceof OpenFootballUnavailableError) {
+        req.log.error({ reason: error.message }, "Open Football replay unavailable");
+        res.status(503).json({ error: error.message });
+        return;
+      }
+
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not play the fixture with the Open Football engine",
+      );
+      res.status(502).json({
+        error: "The Open Football engine could not play this match right now.",
+      });
     }
   },
 );

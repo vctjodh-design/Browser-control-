@@ -1,0 +1,26 @@
+[package]
+name = "of_replay"
+version = "0.1.0"
+edition = "2024"
+
+# A headless bridge between the Open Football match engine
+# (https://github.com/ZOXEXIVO/open-football) and the app's 3D live match.
+#
+# It reads one fixture — two elevens with a level and a role each — plays the
+# match with position recording on, and writes a single JSON document of
+# where every player and the ball were. The app's viewer plays that back
+# instead of inventing its own movement.
+#
+# Depends on the engine's `core` crate straight from the pinned upstream tag,
+# so there is no vendored copy to drift.
+
+[dependencies]
+core = { git = "https://github.com/ZOXEXIVO/open-football", tag = "v1.8.183" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+# The engine's own release profile. A single match is seconds of CPU either
+# way, but a slow build here would be paid on every deploy.
+lto = "thin"
+codegen-units = 16

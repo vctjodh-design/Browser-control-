@@ -12,6 +12,8 @@ primary_region = "fra"
   NODE_ENV = "production"
   WEB_DIST = "/app/artifacts/browser-control/dist/public"
   PROCESSED_MATCH_DB_PATH = "/data/processed-matches.sqlite"
+  # Where the Open Football bridge binary is copied in the image.
+  OF_REPLAY_BIN = "/app/engine/of-replay/target/release/of_replay"
 
 [[mounts]]
   source = "data"

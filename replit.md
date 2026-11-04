@@ -293,6 +293,44 @@ summary, a `vs targets` strip (home, away and total) with the played average, th
 target and the verdict. Tolerance is 0.2 goals per match, because a batch of up
 to fifty matches is a small sample.
 
+### The Open Football engine
+
+The pitch can also be filled by a real match engine instead of by this app's own
+simulation. [Open Football](https://github.com/ZOXEXIVO/open-football) is a
+Football-Manager-scale simulator written in Rust: squads of twenty-two players
+with ~49 individual attributes, a state machine per player, ball physics, a
+referee, substitutions, and a recording of where everyone was.
+
+`engine/of-replay` is the bridge — a ~500-line crate whose only dependency is
+the engine's own `core` crate, pinned to upstream tag `v1.8.183`. It reads one
+fixture on stdin (two elevens, a role and a 1–20 level each, a formation, a
+seed), plays the match with position recording on, and writes one JSON document:
+score, goals with minutes, substitutions, per-side shots/possession, the ball's
+flight, and every player's position every 400 ms of match time.
+
+`GET /api/football/matches/:id/open-football-replay?seed=`
+(`lib/open-football-replay.ts`) builds that fixture from the same predicted XI
+the rest of the app reads — the league-table edge sets the squad's level, each
+player's impact moves him within it — spawns the binary, and returns the
+recording, gzipped, cached per (fixture, seed). A real board (AEK v Real Madrid,
+28 players) is 6.7 MB of JSON, 2.2 MB on the wire, about 6 s of engine time on
+8 cores and 16 s including the form profile.
+
+The Live tab's engine button switches the frame to `?engine=open-football`.
+`src/sim3d/sim/replay.js` then walks the recording instead of simulating:
+it interpolates every track into pitch metres, keeps the walk cycle running off
+measured speed, and raises the same goal / substitution / half-time / full-time
+events into the existing HUD, camera and audio. The stadium does not know which
+engine it is showing.
+
+Honest limits: the engine's decision RNG draws from OS entropy, so the same seed
+does *not* reproduce the same scoreline — `seed` pins the shape of the play, not
+the result. A 100k-round study of this engine is therefore not a thing yet; one
+match is. And the recording carries no corners, so the corner counter reads zero
+in engine mode. The Docker image compiles the crate in a `rust:1.99` stage and
+copies the binary to `/app/engine/of-replay/target/release/of_replay`; that
+stage has not been built here (no Docker in this sandbox), only the native build.
+
 ### Reading the predictions
 The simulation's answer sits above the markets: the result it favours, its most
 likely scoreline and the nine scorelines that came up most. Every market header

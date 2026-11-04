@@ -190,6 +190,9 @@ export function MatchSimPanel({
 }) {
   const theatre = variant === 'theatre';
   const [generation, setGeneration] = useState(0);
+  // Which engine plays the match: our own simulation, or the Open Football
+  // engine (github.com/ZOXEXIVO/open-football) playing this fixture's elevens.
+  const [engine, setEngine] = useState<'house' | 'open-football'>('house');
   const [profile, setProfile] = useState<SimFormProfile | null>(null);
   const [profileState, setProfileState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const shellRef = useRef<HTMLDivElement>(null);
@@ -237,8 +240,20 @@ export function MatchSimPanel({
       fixture: String(fixtureId),
     });
     if (venue) params.set('venue', venue);
+    if (engine === 'open-football') {
+      params.set('engine', 'open-football');
+      params.set('seed', '7');
+    }
     return `${import.meta.env.BASE_URL}sim.html?${params.toString()}`;
-  }, [home, away, venue, fixtureId]);
+  }, [home, away, venue, fixtureId, engine]);
+
+  const switchEngine = () => {
+    const next = engine === 'house' ? 'open-football' : 'house';
+    setEngine(next);
+    setRun(null);
+    setEngineReady(false);
+    setGeneration((value) => value + 1);
+  };
 
   // The game inside the frame runs the batch and reports each scoreline back.
   useEffect(() => {
@@ -375,6 +390,19 @@ export function MatchSimPanel({
         <div className="flex items-center gap-1.5">
           <button
             type="button"
+            onClick={switchEngine}
+            className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[9px] font-extrabold transition ${
+              engine === 'open-football'
+                ? 'border-[#3d6156] bg-[#25463c] text-[#d8f0e3] hover:bg-[#2d564a]'
+                : 'border-[#334b5d] bg-[#22384a] text-[#c9dcd4] hover:bg-[#2a4457]'
+            }`}
+            title="Play this fixture with the Open Football match engine"
+            data-testid="button-sim-engine"
+          >
+            {engine === 'open-football' ? 'Open Football' : 'House sim'}
+          </button>
+          <button
+            type="button"
             onClick={restart}
             className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#334b5d] bg-[#22384a] px-2.5 text-[9px] font-extrabold text-[#c9dcd4] transition hover:bg-[#2a4457]"
             data-testid="button-sim-restart"
@@ -392,6 +420,14 @@ export function MatchSimPanel({
         </div>
       </div>
 
+      {engine === 'open-football' ? (
+        <div className="border-b border-[#2c4152] bg-[#182836] px-3 py-2.5 sm:px-5" data-testid="sim-engine-note">
+          <p className="mono text-[8px] uppercase leading-4 tracking-[.11em] text-[#8ba39c]">
+            One match, played by the Open Football engine from these elevens — its own goals, its own
+            movement. Run it again for another match.
+          </p>
+        </div>
+      ) : (
       <div className="border-b border-[#2c4152] bg-[#182836] px-3 py-2.5 sm:px-5" data-testid="sim-run-bar">
         <div className="flex flex-wrap items-end gap-2.5">
           <label className="flex flex-col gap-1">
@@ -466,6 +502,7 @@ export function MatchSimPanel({
           </div>
         ) : null}
       </div>
+      )}
 
       <div
         className={

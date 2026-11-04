@@ -13,3 +13,5 @@ DEPLOY.md
 Dockerfile
 .dockerignore
 fly.toml
+# Cargo build output — the engine stage compiles it inside the image.
+**/target

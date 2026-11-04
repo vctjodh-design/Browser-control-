@@ -7,6 +7,7 @@ import { TEAMS } from './config.js';
 import { labels } from './labels.js';
 import { MatchBall } from './entities/ball.js';
 import { Match } from './sim/match.js';
+import { MatchReplay } from './sim/replay.js';
 import { CameraRig } from './camera.js';
 import { HUD } from './ui/hud.js';
 import { StadiumAudio } from './audio.js';
@@ -76,7 +77,7 @@ scene.add(ball.mesh);
 
 const audio = new StadiumAudio();
 
-const match = new Match(scene, ball, {
+const handlers = {
   onEvent: (ev) => {
     hud.addEvent(ev);
     if (ev.type === 'goal') {
@@ -118,7 +119,17 @@ const match = new Match(scene, ball, {
     hud.reset();
     goalLog = [];
   },
-});
+};
+
+// Two ways to fill this pitch. By default the house simulation invents the
+// match from the squads. With a recording (`?engine=open-football`) the Open
+// Football engine has already played it and the pitch only walks through it.
+// Everything below — stadium, camera, HUD, audio, the series runner — is the
+// same code either way.
+const openFootballReplay = window.__openFootballReplay ?? null;
+const match = openFootballReplay
+  ? new MatchReplay(scene, ball, { replay: openFootballReplay, ...handlers })
+  : new Match(scene, ball, handlers);
 
 const hud = new HUD(match);
 const camRig = new CameraRig(camera);

@@ -49,3 +49,7 @@ Thumbs.db
 .cache/
 .local/
 /.pythonlibs/
+
+# The Open Football engine bridge is built with cargo; never commit its build
+# directory or the resolved git checkout cargo keeps for the upstream crate.
+engine/of-replay/target/
