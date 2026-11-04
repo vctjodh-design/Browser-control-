@@ -288,6 +288,41 @@ what this source's card lines imply (~2.6), so card markets show a systematic
 edge. That is the simulation disagreeing with the price, which is the point — the
 prices are never used to nudge the football.
 
+## The match thinks in phases, not in rushes
+
+The 3D engine used to attack the same way from kick-off to full time: whoever
+had the ball drove at the goal, the nearest four defenders swarmed him, and the
+only pass on offer was forward. Every match therefore looked like a charge at
+the box with no build-up, no back pass, and a keeper who never touched the ball.
+
+`tactics.js` now publishes a phase — `build` (< 36% of the way up the pitch),
+`progress`, `final` — and both the shape and the pass choice read it:
+
+- **Passing.** The keeper is a real option in his own third and the safe outlet
+  under pressure; going backwards is normal in build-up instead of a last
+  resort; switches of play beat forcing it through the crowded side; long balls
+  are penalised past 22m (the mean pass was 23m). Passes are played into the
+  space beside the receiver, and through the line when there is grass behind
+the last defender.
+- **Shape.** The striker holds the halfway line while the side builds, the DM
+  drops behind the ball as a pivot with his partner ahead of it, wide men stay
+  high as outlets, the back line holds around the halfway instead of retreating
+  into its own box, and no more than three bodies occupy the box at once.
+- **Duels.** Only the two nearest defenders jump to press, the interception
+  corridor is a metre and a half rather than four, and a player gets one touch
+  attempt per ball instead of one per frame.
+
+Two engine bugs mattered more than any tuning constant: the receiver chased a
+fixed look-ahead point while the ball rolled past him (`meetPoint` now solves
+for where he can actually arrive), and any player the ball rolled near could
+"control" it, so half of all passes ended with the wrong team. Control now
+requires the ball to be coming at the player, and one attempt per ball.
+
+`scripts/sim-audit.mjs` plays ninety minutes headless (stub canvas, stub rigs)
+and reports passes, completion, backward share, keeper involvement, thirds and
+box occupancy with a seeded RNG, so a change can be measured instead of judged
+by eye. `node scripts/sim-audit.mjs 420 label 1`.
+
 ## One container serves both halves
 
 Hosting this elsewhere means one process, not two: `app.ts` mounts the API on

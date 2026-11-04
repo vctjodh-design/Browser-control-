@@ -540,10 +540,8 @@ export class Match {
 
     for (const team of this.teams) {
       updateTactics(this, team, 0.25);
-      const opp = this.teams[1 - team.idx];
-      const ours = this.possessor && this.possessor.teamIdx === team.idx;
-      const theirs = this.possessor && this.possessor.teamIdx === opp.idx;
-      team.tactics.phase = ours ? 'possession' : theirs ? 'out' : 'loose';
+      // tactics.phase (build / progress / final / press / defend) is set inside
+      // updateTactics from where the ball is in this side's own progression.
 
       // rank every player by distance to the ball, for pressing duties
       const order = this.active(team)
@@ -721,18 +719,57 @@ export class Match {
     const team = this.teams[a.teamIdx];
     const hasBall = this.possessor && this.possessor.teamIdx === team.idx;
     if (!this.possessor) {
-      // the man the pass is meant for attacks the ball instead of holding shape
+      // The man the pass is meant for attacks the ball instead of holding
+      // shape — and he runs to where he can actually meet it, not at a fixed
+      // look-ahead point. Chasing that point meant the ball kept rolling past
+      // everybody, which is why possession never lasted more than one pass.
       const meant = this.pendingPass && this.pendingPass.to === a;
       if (meant || a.roleRank === 0) {
-        const lead = meant ? 0.32 : 0.28;
-        const fp = this.ballFuture(lead);
-        if (dist2D(a.pos, fp) < 22) {
-          return { x: fp.x, z: fp.z, urgency: meant ? 1.16 : 1.1 };
+        if (this.time > (a.meetAt || 0)) {
+          a.meetAt = this.time + 0.12;
+          a.meet = this.meetPoint(a);
+        }
+        const fp = a.meet || this.ballFuture(0.35);
+        if (dist2D(a.pos, fp) < 30) {
+          return { x: fp.x, z: fp.z, urgency: meant ? 1.2 : 1.14 };
         }
       }
       return this.looseTarget(a);
     }
     return hasBall ? this.attackMove(a) : this.defendMove(a);
+  }
+
+  /**
+   * The first point on the ball's predicted path this player can actually reach
+   * in the time the ball takes to get there. Solving that — instead of chasing
+   * a fixed look-ahead — is what lets a receiver collect a pass.
+   */
+  /** Space beside a player, on the side away from his nearest marker. */
+  openSide(mate, team, amount = 2) {
+    let threat = null;
+    let nearest = 9;
+    for (const o of this.opponentsOf(team)) {
+      const d = dist2D(o.pos, mate.pos);
+      if (d < nearest) {
+        nearest = d;
+        threat = o;
+      }
+    }
+    if (!threat) return { x: 0, z: 0 };
+    const dx = mate.pos.x - threat.pos.x;
+    const dz = mate.pos.z - threat.pos.z;
+    const len = Math.hypot(dx, dz) || 1;
+    const push = clamp((9 - nearest) * 0.22, 0, 1) * amount;
+    return { x: (dx / len) * push, z: (dz / len) * push };
+  }
+
+  meetPoint(a) {
+    const speed = Math.max(4.5, a.maxSpeed * 0.92);
+    for (let t = 0.12; t <= 3; t += 0.14) {
+      const p = this.ballFuture(t);
+      if (dist2D(a.pos, p) <= speed * t) return { x: p.x, z: p.z, t };
+    }
+    return null;
   }
 
   /** Cheap forward prediction of the ball, used to go and meet a pass. */
@@ -802,14 +839,30 @@ export class Match {
 
     const toGoalX = (goal.x - a.pos.x) / Math.max(1, dGoal);
     const toGoalZ = -a.pos.z / Math.max(1, dGoal);
-    t.x = a.pos.x + toGoalX * 11 + dir * 1.5;
-    t.z = a.pos.z + toGoalZ * 6 + lateral;
+    const phase = team.tactics.phase ?? 'progress';
+    // In your own third you do not dribble into the press: step across and
+    // back, buy the support a second, and let the pivot arrive behind you.
+    // Everything that looked like a headless charge started here.
+    const escaping = phase === 'build' && !!nearest && nearestD < 6.5;
+    if (escaping) {
+      const sideZ = Math.sign(a.pos.z - nearest.pos.z) || (a.baseNz > 0.5 ? 1 : -1);
+      t.x = a.pos.x - toGoalX * 5 - dir * 1.1;
+      t.z = a.pos.z + sideZ * 6;
+      t.urgency = 0.62;
+    } else {
+      t.x = a.pos.x + toGoalX * 11 + dir * 1.5;
+      t.z = a.pos.z + toGoalZ * 6 + lateral;
+    }
 
     // wide players drift toward the box, central players stay central
     if (Math.abs(a.pos.z) > 20 && dGoal < 34) t.z *= 0.92;
     t.x = clamp(t.x, -GOAL_X + 4, GOAL_X - 3);
     t.z = clamp(t.z, -HALF_W + 4, HALF_W - 4);
-    t.urgency = dGoal < 45 ? 1.1 : 1;
+    if (!escaping) {
+      t.urgency = dGoal < 45 ? 1.1 : 1;
+      // a side building out walks the ball up; it does not sprint at the box
+      if (phase === 'build') t.urgency = Math.min(t.urgency, 0.96);
+    }
     if (a.stamina < 0.25) t.urgency *= 0.9;
     if (nearestD < 2.2 && dGoal > 36) {
       // shield it: slow down and keep the body between ball and defender
@@ -839,16 +892,30 @@ export class Match {
     const t = { x: base.x, z: base.z, urgency: 1 };
     const countering = team.tactics.counter > 0;
 
+    const phase = team.tactics.phase ?? 'progress';
+
     if (a.role === 'ST') {
       const onside = dir > 0 ? Math.min(lineX - 0.8, GOAL_X - 4) : Math.max(lineX + 0.8, -GOAL_X + 4);
-      const runner = a.makingRun || countering;
-      t.x = runner ? clamp(lineX + dir * 7, -GOAL_X + 6, GOAL_X - 5) : onside;
-      t.z = clamp(ball.z * 0.45 + Math.sin(this.time * 0.5 + a.number) * 6, -17, 17);
-      t.urgency = runner ? 1.2 : 1.04;
+      const building = phase === 'build';
+      const runner = (a.makingRun || countering) && !building;
+      if (building) {
+        // While the side is building he holds around the halfway line and
+        // shows for the ball. Standing on the last shoulder from kick-off is
+        // what made every attack look like a charge at the box.
+        t.x = clamp(dir * 2, -GOAL_X + 8, GOAL_X - 8);
+        t.z = clamp(ball.z * 0.5 + Math.sin(this.time * 0.4 + a.number) * 5, -15, 15);
+        t.urgency = 0.9;
+      } else {
+        t.x = runner ? clamp(lineX + dir * 7, -GOAL_X + 6, GOAL_X - 5) : onside;
+        t.z = clamp(ball.z * 0.45 + Math.sin(this.time * 0.5 + a.number) * 6, -17, 17);
+        t.urgency = runner ? 1.2 : 1.04;
+      }
       if (a.stamina < 0.25) t.urgency = Math.min(t.urgency, 1.02);
     } else if (['RW', 'LW', 'RM', 'LM'].includes(a.role)) {
       const side = a.baseNz < 0.5 ? -1 : 1;
-      const advance = clamp((this.ballNormX(team) - 0.3) * 30, -8, 16);
+      // Wide men stay high and hold the touchline even while the side builds:
+      // they are the forward outlet that gets the ball out of its own half.
+      const advance = clamp((this.ballNormX(team) - 0.22) * 34, -1, 18);
       t.x = clamp(base.x + dir * advance, -GOAL_X + 6, GOAL_X - 5);
       // hold width, but tuck in when the ball is on the far side and deep
       const width = HALF_W - 4.5 - (this.ballNormX(team) > 0.75 ? 5 : 0);
@@ -856,17 +923,35 @@ export class Match {
       t.urgency = countering ? 1.18 : 1.02;
       if (Math.abs(ball.z - t.z) < 6 && Math.abs(ball.x - t.x) < 10) t.urgency = 1.12;
     } else if (['CM', 'DM'].includes(a.role)) {
-      const aheadOfBall = carrier ? carrier.pos.x + dir * 6 : ball.x + dir * 6;
-      const behind = (carrier ? carrier.pos.x : ball.x) - dir * (a.role === 'DM' ? 11 : 7);
-      t.x = dir > 0 ? clamp(Math.min(aheadOfBall, Math.max(behind, base.x - 6)), -GOAL_X + 14, GOAL_X - 12)
-        : clamp(Math.max(aheadOfBall, Math.min(behind, base.x + 6)), -GOAL_X + 12, GOAL_X - 14);
-      t.z = clamp((a.baseNz - 0.5) * 30 + ball.z * 0.2 + Math.sin(this.time * 0.35 + a.number * 2) * 3, -26, 26);
-      t.urgency = 1.0;
+      if (phase === 'build') {
+        // Be the pivot: drop behind the man on the ball and offer the backward
+        // pass. The shape had nobody there, so a pressed carrier had no way out
+        // except to run or hit it long.
+        const anchor = carrier ? carrier.pos.x : ball.x;
+        // The deepest midfielder drops behind the ball as the pivot; his
+        // partner stays ahead of it between the lines, so there is a forward
+        // option as well as a backward one.
+        const shift = a.role === 'DM' ? -10 : 5;
+        t.x = clamp(anchor + dir * shift, -GOAL_X + 10, GOAL_X - 16);
+        t.z = clamp((a.baseNz - 0.5) * 26 + (carrier ? carrier.pos.z : ball.z) * 0.35, -24, 24);
+        t.urgency = 0.92;
+      } else {
+        const aheadOfBall = carrier ? carrier.pos.x + dir * 6 : ball.x + dir * 6;
+        const behind = (carrier ? carrier.pos.x : ball.x) - dir * (a.role === 'DM' ? 11 : 7);
+        t.x = dir > 0 ? clamp(Math.min(aheadOfBall, Math.max(behind, base.x - 6)), -GOAL_X + 14, GOAL_X - 12)
+          : clamp(Math.max(aheadOfBall, Math.min(behind, base.x + 6)), -GOAL_X + 12, GOAL_X - 14);
+        t.z = clamp((a.baseNz - 0.5) * 30 + ball.z * 0.2 + Math.sin(this.time * 0.35 + a.number * 2) * 3, -26, 26);
+        t.urgency = 1.0;
+      }
       if (dist2D(a.pos, ball) < 14) t.urgency = 1.05;
     } else {
-      // defenders push up as a unit behind the ball
-      const line = clamp(ball.x - dir * 20, -GOAL_X + 14, dir > 0 ? 8 : -8);
-      t.x = dir > 0 ? Math.min(base.x + 5, line) : Math.max(base.x - 5, line);
+      // The back line pushes up as a unit and holds around the halfway line
+      // while the side has the ball. It used to follow the ball back into its
+      // own box, which left the whole team camped in its own third with nobody
+      // ahead of the ball to pass to.
+      const progress = clamp(ball.x * dir - 18, 0, 14);
+      const line = progress * dir;
+      t.x = dir > 0 ? Math.max(base.x, line) : Math.min(base.x, line);
       t.z = base.z;
       t.urgency = 0.9;
     }
@@ -875,6 +960,20 @@ export class Match {
     if (carrier && dist2D(a.pos, carrier.pos) < 4.2) {
       t.x += (a.pos.x - carrier.pos.x) * 0.5;
       t.z += (a.pos.z - carrier.pos.z) * 0.5;
+    }
+
+    // Three bodies in the box is a crowd, not an attack: everyone else holds
+    // the edge for the cut-back. Without this the whole side arrives at once.
+    if (a !== carrier && this.inOppBox(t.x, t.z, team)) {
+      const already = this.active(team).filter(
+        (m) => m !== a && m !== carrier && this.inOppBox(m.pos.x, m.pos.z, team),
+      ).length;
+      if (already >= 2) {
+        const edgeZ = Math.sign(t.z) || 1;
+        t.x = dir * (BOX_X - 2.5);
+        t.z = edgeZ * clamp(Math.abs(t.z), 6, BOX_Z - 2);
+        t.urgency = 0.96;
+      }
     }
     t.x = clamp(t.x, -GOAL_X + 3, GOAL_X - 3);
     t.z = clamp(t.z, -HALF_W + 2, HALF_W - 2);
@@ -920,7 +1019,7 @@ export class Match {
       t.urgency = 1.08;
       return this.clampTarget(t);
     }
-    if (rank === 2 && carrier && press > 0.5) {
+    if (rank === 2 && carrier && press > 0.7) {
       // screen the most dangerous forward option
       const target = this.mostDangerousOption(carrier, opp);
       if (target) {
@@ -957,8 +1056,9 @@ export class Match {
       t.x = dir > 0 ? Math.min(row, ball.x + dir * 3) : Math.max(row, ball.x + dir * 3);
       t.z = clamp((a.baseNz - 0.5) * 30 + ball.z * 0.32, -28, 28);
       t.urgency = 0.96;
-      // nearest midfielders jump out to press if the ball is close
-      if (dist2D(a.pos, ball) < 9 + press * 9 && rank < 4) {
+      // Only the two nearest jump out. Pressing with four was a swarm: the man
+      // on the ball never got a second, so no side could play out.
+      if (dist2D(a.pos, ball) < 7 + press * 7 && rank < 2) {
         const spot = goalSide(carrier || { pos: ball }, 1.6);
         t.x = spot.x;
         t.z = spot.z;
@@ -1106,8 +1206,13 @@ export class Match {
     const team = this.teams[a.teamIdx];
     const dir = team.attackDir;
     const opts = this.evaluatePasses(a, this.perceive(a));
-    const pressed = this.opponentsOf(team).some((o) => dist2D(o.pos, a.pos) < 12);
-    if (opts.length && (!pressed || opts[0].dist < 30) && opts[0].risk < 0.5) {
+    const pressed = this.opponentsOf(team).some((o) => dist2D(o.pos, a.pos) < 10);
+    // Build from the back: the first ball is a centre-half or a full-back and
+    // the long kick is the fallback when the press is actually on him.
+    const short = opts.filter((o) => o.dist < 36 && o.risk < (pressed ? 0.34 : 0.62));
+    if (short.length) {
+      this.executePass(a, short[0], { throw: false });
+    } else if (opts.length && opts[0].risk < 0.5) {
       this.executePass(a, opts[0], { throw: false });
     } else {
       // launch it long downfield
@@ -1321,6 +1426,8 @@ export class Match {
     const opps = ctx.opps;
     const opts = [];
     const visionRange = 15 + at.vision * 46;
+    const phase = team.tactics.phase ?? 'progress';
+    const ownThird = this.inOwnThird(a, team);
 
     for (const m of this.active(team)) {
       if (m === a) continue;
@@ -1329,7 +1436,13 @@ export class Match {
       const dist = Math.hypot(dx, dz);
       if (dist < 3.2 || dist > 58) continue;
       if (dist > visionRange) continue; // he simply does not see it
-      if (m.role === 'GK' && ctx.pressure < 0.5 && !this.inOwnThird(a, team)) continue;
+      // The keeper is a genuine option when a side is building or pressed in
+      // its own third. What is not football is a hopeful 30m ball back to him
+      // from midfield, so that stays out of the list.
+      if (m.role === 'GK') {
+        if (dist > 34) continue;
+        if (!ownThird && ctx.pressure < 0.55) continue;
+      }
       const nx = dx / dist;
       const nz = dz / dist;
 
@@ -1342,9 +1455,12 @@ export class Match {
         const proj = px * nx + pz * nz;
         if (proj < 0.4 || proj > dist - 0.3) continue;
         const perp = Math.abs(px * nz - pz * nx);
-        const reach = 1.0 + o.attrs.pace * 1.5 + o.attrs.tackling * 0.6;
-        if (perp < reach + 1.4) {
-          risk += (1 - perp / (reach + 1.4)) * (0.5 + 0.5 * Math.min(1, (proj / dist) * 1.6));
+        // How far off the line a defender has to be to cut it out. The old 3.8m
+        // corridor made every short ball into a press risky, so nobody ever
+        // played one; a defender actually covers about a metre and a half.
+        const reach = (1.0 + o.attrs.pace * 1.5 + o.attrs.tackling * 0.6) * 0.8 + 0.5;
+        if (perp < reach) {
+          risk += (1 - perp / reach) * (0.5 + 0.5 * Math.min(1, (proj / dist) * 1.6));
         }
       }
       risk = clamp(risk, 0, 1.6);
@@ -1359,16 +1475,33 @@ export class Match {
       const forward = (nx * dir); // -1 .. 1 along the attack direction
       const goalDist = Math.hypot(dir * GOAL_X - m.pos.x, m.pos.z);
       const runner = m.makingRun && forward > 0.2 && space > 3.5;
+      const lateral = Math.abs(dz);
 
       let score = 0.33;
-      score += Math.max(0, forward) * (0.5 + team.tactics.risk * 0.55);
-      score += (1 - Math.min(1, risk)) * 0.62;
+      // Building out, forward is not automatically better: the job is to keep
+      // the ball and move the block, so the safe ball scores like a good one.
+      score += Math.max(0, forward) * (phase === 'build' ? 0.3 : 0.5 + team.tactics.risk * 0.55);
+      score += (1 - Math.min(1, risk)) * (phase === 'build' ? 0.8 : 0.62);
       score += Math.min(space, 10) * 0.028;
-      score += goalDist < 30 ? 0.12 : 0;
-      score -= Math.max(0, dist - 32) * 0.011;
-      if (forward < -0.45) score -= 0.16;
-      if (m.role === 'GK') score -= 0.45;
-      if (runner) score += 0.3 + at.vision * 0.55;
+      score += goalDist < 30 && phase !== 'build' ? 0.12 : 0;
+      // Long balls are a tool, not the default. Without this the mean pass sat
+      // at 23m, the ball was in flight or loose three quarters of the time and
+      // no side ever put three passes together.
+      score -= Math.max(0, dist - 22) * 0.035;
+      if (dist < 18) score += 0.1;
+      if (forward < -0.2) {
+        // going back is ordinary football: reset the shape, keep the ball,
+        // come again — only in the final third is it a wasted pass
+        score += phase === 'build' ? 0.1 : phase === 'progress' ? 0.02 : -0.32;
+      }
+      // switching play beats forcing it through the side the ball is on
+      if (lateral > 22 && dist < 34 && risk < 0.32) score += 0.14 + at.vision * 0.2;
+      if (m.role === 'GK') {
+        score += ctx.pressure > 0.55 ? 0.5 : ownThird ? 0.26 : -0.3;
+      } else if (ctx.pressure > 0.75 && risk < 0.3 && dist < 20) {
+        score += 0.2; // the easy outlet out of a press
+      }
+      if (runner && dist < 36) score += 0.22 + at.vision * 0.4;
       if (dist < 14 && risk < 0.35) score += 0.14;
       // in the box you shoot, you do not pass sideways
       if (this.inOppBox(a.pos.x, a.pos.z, team)) score -= 0.3;
@@ -1404,12 +1537,43 @@ export class Match {
     const at = a.attrs;
     const mate = choice.mate;
     const dist = choice.dist;
-    const speed = clamp(12 + dist * 0.62, 14, 30);
+    // Weight follows distance, but a ten-metre ball is rolled, not fired: the
+    // old curve put a 15m pass in at 21 m/s, which nobody controls and which
+    // never stopped near the man it was aimed at.
+    const speed = clamp(8 + dist * 0.55, 10, 27);
     // solve for where the receiver can actually meet a ball that is losing
     // speed the whole way, instead of a straight-line lead
     const meet = this.solveMeet(a, mate, speed);
-    let tx = meet.x;
-    let tz = meet.z;
+    // Aim into the space beside him rather than at his marker: a pass played
+    // straight at a marked man is the one defenders cut out.
+    const space = this.openSide(mate, team, 2.2);
+    let tx = meet.x + space.x;
+    let tz = meet.z + space.z;
+
+    // Through the line rather than into his feet. A marker stands goal-side of
+    // his man, which is exactly where a pass to the feet goes — so when there
+    // is grass behind the last defender, play the ball into it instead.
+    if (team.attackDir * (meet.x - a.pos.x) > 5 && choice.risk < 0.5 && mate.vel.x * team.attackDir > 0.5) {
+      const line = this.lastDefenderX(this.teams[1 - a.teamIdx], team.attackDir);
+      const room = (line - meet.x) * team.attackDir;
+      const run = clamp(room - 1.5, 0, 4.5);
+      if (run > 0.5) {
+        tx += team.attackDir * run * 0.75;
+        tz += clamp(mate.pos.z * 0.1, -1.5, 1.5);
+      }
+    }
+
+    // The ball has to be playable by the man it is aimed at. Without this the
+    // offsets above sent passes where nobody could arrive, and the defence did.
+    const flight = Math.max(0.25, dist / Math.max(6, speed));
+    const reachable = Math.max(2, mate.maxSpeed * flight * 0.95);
+    const mx = tx - mate.pos.x;
+    const mz = tz - mate.pos.z;
+    const md = Math.hypot(mx, mz);
+    if (md > reachable) {
+      tx = mate.pos.x + (mx / md) * reachable;
+      tz = mate.pos.z + (mz / md) * reachable;
+    }
 
     // ---- execution error -------------------------------------------------
     const pressure = clamp(choice.risk, 0, 1) * 0.6 + clamp(1 - (this.perceive(a).nearestD - 1) / 3, 0, 1) * 0.5;
@@ -1658,7 +1822,7 @@ export class Match {
   tryTackle(o, a, human = false) {
     if (o.tackleCooldown > 0 || o.actionTimer > 0) return false;
     if (dist2D(o.pos, a.pos) > 2.4) return false;
-    o.tackleCooldown = human ? 0.9 : 1.7;
+    o.tackleCooldown = human ? 0.9 : 2.2;
     o.actionTimer = 0.3;
     o.kickCooldown = 0;
     if (o.rig) o.rig.startAction('tackle', 0.55);
@@ -1884,12 +2048,31 @@ export class Match {
     }
 
     if (best) {
+      // One touch attempt per ball, not one per frame: a defender standing next
+      // to the passer used to get three rolls at the same pass as it left his
+      // foot, which is how the ball kept changing hands at the source.
+      best.kickCooldown = Math.max(best.kickCooldown, 0.18);
       const speed = Math.hypot(ball.vel.x, ball.vel.z);
       // keepers use their hands: if they get there, they usually keep it out
       const keeper = best.role === 'GK' && b.y < 2.4;
-      const control = keeper
+      // Is the ball actually coming at him? A ball travelling across or past a
+      // player is not his to control. Without this every pass that rolled
+      // within 1.4m of anybody was an interception, and half of all passes in
+      // the match ended with the wrong team.
+      const ax = best.pos.x - b.x;
+      const az = best.pos.z - b.z;
+      const span = Math.hypot(ax, az) || 1;
+      const closing = speed > 0.5 ? (ball.vel.x * ax + ball.vel.z * az) / (span * speed) : 0;
+      const approach = keeper || speed < 4 ? 1 : clamp(0.22 + closing * 1.5, 0.22, 1);
+      const expected = this.pendingPass && this.pendingPass.to === best ? 1.12 : 1;
+      // A professional's first touch is not a coin flip on a firm 20 m/s pass.
+      // The old curve made even a routine ball a 60% take, which is why the
+      // match never strung three passes together.
+      const control = (keeper
         ? clamp(1.75 - speed / 55, 0.62, 1) * (0.8 + best.attrs.composure * 0.35)
-        : clamp(1.45 - speed / 30, 0.42, 1) * (0.78 + best.attrs.composure * 0.3);
+        : clamp(1.92 - speed / 26, 0.34, 1) * (0.86 + best.attrs.composure * 0.18)) *
+        approach *
+        expected;
       if (chance(control)) {
         this.takePossession(best, speed, ball);
       } else {
@@ -1906,7 +2089,9 @@ export class Match {
     ball.spin.set(0, 0, 0);
     ball.lastTouch = a;
     ball.lastTouchTeam = a.teamIdx;
-    a.decisionTimer = 0.08;
+    // Take a touch before deciding: an instant release on every reception is
+    // what turned every spell into one long ball and nothing else.
+    a.decisionTimer = 0.16 + Math.random() * 0.16;
     a.gkTimer = 0;
     if (a.role === 'GK' && ballSpeed > 9) {
       this.stats[1 - a.teamIdx].saves++;
@@ -1918,6 +2103,12 @@ export class Match {
       this.stats[prev.team].passesCompleted++;
       this.assistCandidate = prev.from;
       this.assistTimer = 10;
+      a.lastPassFrom = prev.from;
+    } else if (prev && prev.team === a.teamIdx) {
+      // The ball reached a teammate, just not the one it was aimed at: still a
+      // completed pass, and it is what a recycled ball usually looks like.
+      prev.from.stats.passesCompleted++;
+      this.stats[prev.team].passesCompleted++;
       a.lastPassFrom = prev.from;
     } else if (prev && prev.team !== a.teamIdx) {
       this.onEvent({ type: 'interception', text: `${a.name} cuts it out`, team: a.teamIdx });

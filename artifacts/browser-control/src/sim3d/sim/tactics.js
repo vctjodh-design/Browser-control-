@@ -61,7 +61,8 @@ export function createTactics(idx, override = null, name = '') {
     tempo: style.tempo,
     direct: style.direct,
     // live state
-    phase: 'possession',
+    phase: 'progress',
+    settled: 0,
     transition: 0,
     counter: 0,
     label: style.label,
@@ -133,6 +134,16 @@ export function updateTactics(match, team, dt) {
   t.direct = clamp(st.direct + (riskShift > 0 ? 0.16 : riskShift < 0 ? -0.1 : 0), 0.2, 0.95);
   t.mood = mood;
   t.stamina = stamina;
+
+  // --- where the ball is in our own progression -------------------------
+  // The shape and the pass choice both read this. Without it every player
+  // treated possession the same way and the side attacked from its own box.
+  const ours = match.possessor && match.possessor.teamIdx === team.idx;
+  const bn = match.ballNormX(team); // 0 = our goal line, 1 = theirs
+  t.settled = ours ? t.settled + dt : 0;
+  t.phase = !ours
+    ? bn > 0.62 ? 'press' : 'defend'
+    : bn < 0.36 ? 'build' : bn < 0.68 ? 'progress' : 'final';
   t.label = `${st.label}${mood !== 'BALANCED' ? ` · ${mood}` : ''}`;
 }
 
