@@ -288,6 +288,21 @@ what this source's card lines imply (~2.6), so card markets show a systematic
 edge. That is the simulation disagreeing with the price, which is the point — the
 prices are never used to nudge the football.
 
+## One container serves both halves
+
+Hosting this elsewhere means one process, not two: `app.ts` mounts the API on
+`/api` and then serves the built React app from `WEB_DIST`, falling back to
+`index.html` for anything that is not an `/api/` path (so `/matches/1635669`
+reloads instead of 404ing, and `/sim.html`, the iframe page, is served as a real
+file). The browser already calls `/api/...` relative to its own origin, so the
+same image works in dev behind Vite's proxy and in production behind nothing.
+Hashed assets are cached for a year; `index.html` is `no-store`.
+
+`Dockerfile` builds both and `fly.toml` describes the machine: 2 GB, always on,
+a volume at `/data`. The SQLite archive is gitignored, so a container starts
+empty and fills from KickoffScore — no seed data to ship. `DEPLOY.md` has the
+steps and the reasons (2 GB is not padding: Chromium alone peaks near 500 MB).
+
 ## Architecture decisions
 
 _Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._

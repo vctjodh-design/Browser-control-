@@ -1,0 +1,15 @@
+.git
+.gitignore
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+artifacts/api-server/data
+artifacts/browser-control/artifacts
+attached_assets
+.env
+.dev.vars
+replit.md
+DEPLOY.md
+Dockerfile
+.dockerignore
+fly.toml

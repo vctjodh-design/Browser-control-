@@ -1,0 +1,40 @@
+# Fly.io deployment for the single-image app.
+# Set the app name once (fly launch writes it here) and keep the volume name in
+# step with the one you create: fly volumes create data --size 3 --region fra
+app = "realistic-football-model"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "5000"
+  NODE_ENV = "production"
+  WEB_DIST = "/app/artifacts/browser-control/dist/public"
+  PROCESSED_MATCH_DB_PATH = "/data/processed-matches.sqlite"
+
+[[mounts]]
+  source = "data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 5000
+  force_https = true
+  # Chromium sessions and the SQLite archive should not be frozen underneath a
+  # request, so the machine stays up instead of scaling to zero.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "30s"
+  method = "GET"
+  path = "/api/healthz"
+
+[[vm]]
+  # Chromium peaks around 500 MB while a scrape runs, on top of Node and tfjs.
+  memory = "2gb"
+  cpu_kind = "shared"
+  cpus = 1
