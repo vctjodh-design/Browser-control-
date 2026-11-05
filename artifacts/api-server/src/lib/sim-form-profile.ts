@@ -125,6 +125,15 @@ export type SimLineupPlayer = {
   /** 0..1 trait signals, 0.5 = neutral. */
   signals: Record<string, number>;
   matchRatings: SimPlayerMatchLine[];
+  /**
+   * What his own matches add to his abilities, once the player feed has been
+   * read (player-form.ts). Absent when the feed had nothing on him.
+   */
+  form?: import("./player-form").PlayerFormWeights;
+  /** The rating the feed gave him in the most recent match it has. */
+  formRating?: number | null;
+  formMinutes?: number;
+  formGames?: number;
 };
 
 /** Where the club sits in its own league, and how that compares to the field. */
@@ -162,6 +171,8 @@ export type SimTeamProfile = {
   /** How many team sheets the predicted XI was read from. */
   lineupSample: number;
   squadQuality: number;
+  /** Players the feed lists as injured, doubtful or suspended for this fixture. */
+  unavailable?: import("./player-form-apply").AvailabilityNote[];
   tactics: {
     press: number;
     line: number;

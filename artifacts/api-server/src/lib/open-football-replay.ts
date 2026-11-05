@@ -10,6 +10,7 @@
 // upstream tag. It reads a JSON fixture on stdin and writes the recording on
 // stdout, so the only contract between the two languages is that document.
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { SimFormProfile, SimLineupPlayer, SimTeamProfile } from "./sim-form-profile";
@@ -59,7 +60,9 @@ function tacticFor(formation: string): string {
  */
 function levelFor(team: SimTeamProfile, player: SimLineupPlayer): number {
   const edge = team.table?.edge ?? 0;
-  const level = 11.2 + edge * 4 + (player.impact - 0.5) * 5;
+  // His own recent matches move the level too: a run of 8s is worth a level
+  // over a run of 6s (player-form.ts caps that at ±1.6).
+  const level = 11.2 + edge * 4 + (player.impact - 0.5) * 5 + (player.form?.level ?? 0);
   return Math.max(5, Math.min(19, Math.round(level)));
 }
 
@@ -68,6 +71,8 @@ type EnginePlayer = {
   position: string;
   level: number;
   shirt: number;
+  /** Additive points per skill, from the player's own match history. */
+  weights?: Record<string, number>;
 };
 
 function sideSpec(team: SimTeamProfile) {
@@ -77,6 +82,7 @@ function sideSpec(team: SimTeamProfile) {
     position: engineRole(team.slots[index]?.role ?? player.role, taken),
     level: levelFor(team, player),
     shirt: player.number ?? index + 1,
+    weights: player.form?.skills,
   }));
 
   // Three changes named, which is what a real bench brings on: a keeper and
@@ -86,6 +92,7 @@ function sideSpec(team: SimTeamProfile) {
     position: engineRole(player.role, taken),
     level: levelFor(team, player),
     shirt: player.number ?? 12 + index,
+    weights: player.form?.skills,
   }));
 
   return {
@@ -144,6 +151,25 @@ export type OpenFootballReplay = {
   engineMs: number;
 };
 
+/**
+ * A fingerprint of who is playing and what their own matches added to them.
+ *
+ * The recording cache is keyed by it as well as by seed: when a player is
+ * ruled out and his replacement comes in, or a new match of his changes his
+ * weights, the old recording is no longer the same fixture and must be
+ * played again rather than served from the cache.
+ */
+export function profileSignature(profile: SimFormProfile): string {
+  const text = profile.teams
+    .map((team) =>
+      team.lineup
+        .map((player) => `${player.name}|${player.form?.level ?? 0}|${JSON.stringify(player.form?.skills ?? {})}`)
+        .join(","),
+    )
+    .join("|");
+  return createHash("sha1").update(text).digest("hex").slice(0, 12);
+}
+
 const cache = new Map<string, OpenFootballReplay>();
 const MAX_CACHED = 8;
 
@@ -151,7 +177,7 @@ export async function playOpenFootballMatch(
   profile: SimFormProfile,
   seed: number,
 ): Promise<OpenFootballReplay> {
-  const key = `${profile.fixtureId}:${seed}`;
+  const key = `${profile.fixtureId}:${seed}:${profileSignature(profile)}`;
   const cached = cache.get(key);
   if (cached) return cached;
 

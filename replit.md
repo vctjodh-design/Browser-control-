@@ -358,6 +358,65 @@ binary to `/app/engine/of-replay/target/release/of_replay`, and carries the
 viewer's two gzipped files in `artifacts/api-server/assets/viewer`; that image
 has not been built here (no Docker in this sandbox), only the native build.
 
+### What the players actually did
+
+The engine is only as good as the eleven and the numbers behind them, so each
+player now carries his own record. `player-form.ts` reads a match feed that
+publishes per-player detail — the rating, the whole Opta-style stat block, the
+coordinates of every shot with its xG, the heat map, and the list of who is out
+injured or suspended — resolves each fixture to its match in that feed by club
+name, and stores one row per player per match in SQLite
+(`player_match_form`, `player_availability`, `fixture_form_source` in the same
+database as the processed matches). A player's last few matches are read once
+and kept, so his history grows as fixtures are opened rather than being thrown
+away with the response.
+
+The source is FotMob's public match feed, not 365Scores, and that is a
+deliberate substitution rather than a preference: the 365Scores web API this app
+already uses exposes team totals only. Its per-player page — the one with the
+rating, the heat map and the shot map — is served from an authenticated app API
+that a server cannot read. The numbers are the same family (Opta), which is why
+the same match shows the same 8.6 next to the same name on both sites.
+
+Those matches are turned into **weights on the engine's own skills, added and
+not averaged.** For every match, each statistic is compared with what an
+ordinary 90 minutes produces and the difference is added to the ability it
+speaks to: finishing from goals and shots on target, composure from goals
+against xG, passing from completion rate and chances created, tackling from
+tackles and duels, marking from interceptions and being dribbled past, reflexes
+and handling from a keeper's saves and goals prevented. Each match's
+contribution is decayed by its age (a half-life of 45 days) and summed, so four
+scoring matches read as four separate pushes rather than one average, and the
+total is capped at ±2.2 points per skill and ±1.6 levels overall so a purple
+patch sharpens a player without inventing a different one. A cameo under 20
+minutes carries no weight, and keepers never get marking points for tackles
+they never make. The bridge (`engine/of-replay`) gained a per-player
+`weights` map on top of `level`; it shifts exactly those fields on the
+generated player, inside the engine's own 1..20 bounds.
+
+Availability comes before all of it. Anyone the feed lists as injured,
+doubtful or suspended is taken out of the predicted eleven before the engine
+sees it and replaced by the best available substitute in the same band of the
+pitch — like for like first, and the best man left when the bench has no one in
+that band. The ruled-out player is listed with his expected return instead.
+This is why the recording cache is keyed on the eleven as well as the seed: a
+ruled-out player changes the match, so yesterday's recording cannot stand in
+for today's.
+
+`GET /api/football/matches/:id/player-form` returns both sides for the panel:
+every man's rating, minutes, stat block, shot map, heat map and weights, plus
+the unavailable list. `GET /api/football/players/:id/matches` returns every
+match the feed has for one player, with the rating it gave him. In the Live
+panel, the *Player performances* block lists both elevens by rating, marks who
+is out, and draws the selected player's heat map or shot map on a pitch beside
+his weights and his match log; the *Full screen* button is a fixed overlay
+rather than the Fullscreen API, because phones only grant that to video.
+
+Honest limits: the feed's shot coordinates and heat maps are its own, not a
+frame-by-frame truth; a player whose club the feed does not cover carries no
+weights at all rather than invented ones; and the history is only as deep as
+the matches this app has opened or the feed still lists.
+
 ### Reading the predictions
 The simulation's answer sits above the markets: the result it favours, its most
 likely scoreline and the nine scorelines that came up most. Every market header

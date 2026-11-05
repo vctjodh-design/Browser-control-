@@ -29,6 +29,13 @@ import {
 } from "../lib/kickoffscore-last-five";
 import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
 import { getSimFormProfile } from "../lib/sim-form-profile";
+import { applyPlayerForm } from "../lib/player-form-apply";
+import {
+  loadFixturePlayerForm,
+  PlayerFormUnavailableError,
+  readPlayerMatchLog,
+  storedWeights,
+} from "../lib/player-form";
 import {
   OpenFootballUnavailableError,
   playOpenFootballMatch,
@@ -373,6 +380,106 @@ router.get(
 // One match, played by the Open Football engine instead of the app's own
 // simulation. The recording is what the pitch replays; the scores are the
 // engine's, not a restatement of the odds.
+/**
+ * The profile the engine plays: the predicted elevens with the unavailable
+ * players replaced and every player carrying the weights his own matches
+ * argue for. The page keeps reading the plain profile, so ratings data being
+ * down never blanks the match.
+ */
+async function engineProfile(fixtureId: number) {
+  const profile = await getSimFormProfile(fixtureId);
+  const applied = await applyPlayerForm(profile);
+  return applied.profile;
+}
+
+// Everything the performance feed has on this fixture's players: the rating
+// and full stat block of each man, his shot map, his heat map, the weights his
+// stored history puts on his skills, and who is out injured or suspended.
+router.get(
+  "/football/matches/:fixtureId/player-form",
+  async (req, res): Promise<void> => {
+    const fixtureId = Number(req.params.fixtureId);
+    if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    try {
+      const profile = await getSimFormProfile(fixtureId);
+      const form = await loadFixturePlayerForm(
+        fixtureId,
+        profile.teams[0].name,
+        profile.teams[1].name,
+      );
+      res.set("Cache-Control", "private, max-age=600");
+      res.json({
+        fixtureId,
+        source: form.source,
+        matchId: form.matchId,
+        date: form.date,
+        teams: form.teams.map((team) => ({
+          name: team.name,
+          formation: team.formation,
+          unavailable: team.unavailable,
+          players: team.players
+            .filter((player) => player.starter || player.minutes > 0)
+            .map((player) => ({
+              playerId: player.playerId,
+              name: player.name,
+              shirt: player.shirt,
+              starter: player.starter,
+              rating: player.rating,
+              minutes: player.minutes,
+              stats: player.stats,
+              shots: player.shots,
+              heat: player.heat,
+              weights: player.weights,
+            })),
+        })),
+      });
+    } catch (error) {
+      if (error instanceof PlayerFormUnavailableError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not read player performances",
+      );
+      res.status(502).json({ error: "Player performances could not be read right now." });
+    }
+  },
+);
+
+// Every match the feed has for one player, newest first, with the rating it
+// gave him and the weights his history currently puts on his skills.
+router.get(
+  "/football/players/:playerId/matches",
+  async (req, res): Promise<void> => {
+    const playerId = Number(req.params.playerId);
+    if (!Number.isSafeInteger(playerId) || playerId <= 0) {
+      res.status(400).json({ error: "Choose a valid player ID." });
+      return;
+    }
+
+    try {
+      const matches = await readPlayerMatchLog(playerId, 40);
+      res.set("Cache-Control", "private, max-age=600");
+      res.json({ playerId, matches, weights: storedWeights(playerId) });
+    } catch (error) {
+      if (error instanceof PlayerFormUnavailableError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not read a player's matches",
+      );
+      res.status(502).json({ error: "This player's matches could not be read right now." });
+    }
+  },
+);
+
 router.get(
   "/football/matches/:fixtureId/open-football-replay",
   async (req, res): Promise<void> => {
@@ -386,7 +493,7 @@ router.get(
     const seed = Number.isFinite(seedValue) && seedValue > 0 ? Math.round(seedValue) : 7;
 
     try {
-      const profile = await getSimFormProfile(fixtureId);
+      const profile = await engineProfile(fixtureId);
       const replay = await playOpenFootballMatch(profile, seed);
       // A played match never changes for the same seed, so the browser and any
       // proxy can hold it: a replay is megabytes of samples. Gzipped by hand
@@ -447,7 +554,7 @@ router.get(
     const seed = Number.isFinite(seedValue) && seedValue > 0 ? Math.round(seedValue) : 7;
 
     try {
-      const profile = await getSimFormProfile(fixtureId);
+      const profile = await engineProfile(fixtureId);
       const recording = await openFootballViewerRecording(profile, seed);
       res.set("Cache-Control", "no-store");
       res.type("html").send(renderViewerPage(recording, viewerBase(fixtureId)));
@@ -509,7 +616,7 @@ router.get(
     const seed = Number.isFinite(seedValue) && seedValue > 0 ? Math.round(seedValue) : 7;
 
     try {
-      const profile = await getSimFormProfile(fixtureId);
+      const profile = await engineProfile(fixtureId);
       const recording = await openFootballViewerRecording(profile, seed);
       const body = await readFile(path.join(recording.dir, "metadata.json"));
       res.set("Cache-Control", "private, max-age=3600");
@@ -538,7 +645,7 @@ router.get(
     const seed = Number.isFinite(seedValue) && seedValue > 0 ? Math.round(seedValue) : 7;
 
     try {
-      const profile = await getSimFormProfile(fixtureId);
+      const profile = await engineProfile(fixtureId);
       const recording = await openFootballViewerRecording(profile, seed);
       const body = await readFile(path.join(recording.dir, `chunk_${index}.json.gz`));
       // Written gzipped by the engine, handed over as-is.

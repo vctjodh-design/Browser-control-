@@ -15,6 +15,7 @@ import {
   OpenFootballUnavailableError,
   buildOpenFootballSpec,
   openFootballBinaryPath,
+  profileSignature,
 } from "./open-football-replay";
 import type { SimFormProfile } from "./sim-form-profile";
 
@@ -61,7 +62,9 @@ export async function openFootballViewerRecording(
   profile: SimFormProfile,
   seed: number,
 ): Promise<ViewerRecording> {
-  const key = `${profile.fixtureId}:${seed}`;
+  // Keyed on the elevens as well as the seed: a ruled-out player changes the
+  // match, so the recording made before him cannot stand in for this one.
+  const key = `${profile.fixtureId}:${seed}:${profileSignature(profile)}`;
   const cached = cache.get(key);
   if (cached) return cached;
 

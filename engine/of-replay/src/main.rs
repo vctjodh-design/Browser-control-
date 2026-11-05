@@ -12,6 +12,7 @@ use core::r#match::{FootballEngine, MatchSquad};
 use core::{AcademyGenerationContext, MatchRuntime, PeopleNameGeneratorData, PlayerGenerator};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::io::{Read, Write};
 
 /// The engine's pitch: an 840 x 545 grid of 0.125 m units, origin in a corner.
@@ -55,6 +56,10 @@ struct PlayerSpec {
     level: u8,
     #[serde(default)]
     shirt: Option<u8>,
+    /// Points added to named skills, on the same 1..20 scale, from what the
+    /// player actually did in his matches: `{"finishing": 0.8, "passing": -0.3}`.
+    #[serde(default)]
+    weights: HashMap<String, f32>,
 }
 
 fn default_level() -> u8 {
@@ -100,7 +105,61 @@ fn tactic_of(name: Option<&str>) -> Tactics {
 /// The harness's invented footballer: the engine's own generator at the given
 /// level, renamed to the real player, so a squad reads like the fixture it is
 /// standing in for.
-fn generate_player(id: u32, position: PlayerPositionType, level: u8, name: &str) -> core::Player {
+/// Add each named performance weight to the skill it belongs to.
+///
+/// The generator gives a player of this level a plausible spread of abilities;
+/// these are the adjustments his own matches argue for — finishing from his
+/// shots and their xG, tackling from his duels, reflexes from his saves. Each
+/// is capped at the skill's own bounds by the clamp, so a weight can sharpen a
+/// player without inventing a different one.
+fn apply_weights(skills: &mut core::PlayerSkills, weights: &HashMap<String, f32>) {
+    let add = |current: &mut f32, delta: f32| {
+        *current = (*current + delta).clamp(1.0, 20.0);
+    };
+    for (name, delta) in weights {
+        let t = &mut skills.technical;
+        let m = &mut skills.mental;
+        let p = &mut skills.physical;
+        let g = &mut skills.goalkeeping;
+        match name.as_str() {
+            "finishing" => add(&mut t.finishing, *delta),
+            "long_shots" => add(&mut t.long_shots, *delta),
+            "heading" => add(&mut t.heading, *delta),
+            "passing" => add(&mut t.passing, *delta),
+            "crossing" => add(&mut t.crossing, *delta),
+            "dribbling" => add(&mut t.dribbling, *delta),
+            "technique" => add(&mut t.technique, *delta),
+            "first_touch" => add(&mut t.first_touch, *delta),
+            "tackling" => add(&mut t.tackling, *delta),
+            "marking" => add(&mut t.marking, *delta),
+            "anticipation" => add(&mut m.anticipation, *delta),
+            "positioning" => add(&mut m.positioning, *delta),
+            "composure" => add(&mut m.composure, *delta),
+            "decisions" => add(&mut m.decisions, *delta),
+            "off_the_ball" => add(&mut m.off_the_ball, *delta),
+            "work_rate" => add(&mut m.work_rate, *delta),
+            "stamina" => add(&mut p.stamina, *delta),
+            "strength" => add(&mut p.strength, *delta),
+            "jumping" => add(&mut p.jumping, *delta),
+            "pace" => add(&mut p.pace, *delta),
+            "reflexes" => add(&mut g.reflexes, *delta),
+            "handling" => add(&mut g.handling, *delta),
+            "one_on_ones" => add(&mut g.one_on_ones, *delta),
+            "aerial_reach" => add(&mut g.aerial_reach, *delta),
+            "command_of_area" => add(&mut g.command_of_area, *delta),
+            "kicking" => add(&mut g.kicking, *delta),
+            _ => {}
+        }
+    }
+}
+
+fn generate_player(
+    id: u32,
+    position: PlayerPositionType,
+    level: u8,
+    name: &str,
+    weights: &HashMap<String, f32>,
+) -> core::Player {
     let empty_names = PeopleNameGeneratorData {
         first_names: Vec::new(),
         last_names: Vec::new(),
@@ -125,6 +184,7 @@ fn generate_player(id: u32, position: PlayerPositionType, level: u8, name: &str)
     let current = mean_skills(&player.skills);
     let delta = target - current;
     player.skills.shift(delta, delta);
+    apply_weights(&mut player.skills, weights);
 
     player.id = id;
     let (first, last) = split_name(name);
@@ -213,7 +273,7 @@ fn build_team(spec: &TeamSpec, team_id: u32, fallback_roles: &[PlayerPositionTyp
             .unwrap_or(PlayerPositionType::MidfielderCenter);
         let role = position_of(spec, fallback);
         let id = base_id + index as u32;
-        let player = generate_player(id, role, spec.level, &spec.name);
+        let player = generate_player(id, role, spec.level, &spec.name, &spec.weights);
         let match_player = MatchPlayer::from_player(team_id, &player, role, false, None);
         roster.push(json!({
             "id": match_player.id,

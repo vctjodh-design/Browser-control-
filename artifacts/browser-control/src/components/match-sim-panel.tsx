@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Maximize2, MonitorPlay, Play, RotateCcw, Square } from 'lucide-react';
+import { ChevronDown, Maximize2, Minimize2, MonitorPlay, Play, RotateCcw, Square } from 'lucide-react';
+import { PlayerFormPanel } from './player-form-panel';
 import {
   loadSimFormProfile,
   stashFormProfile,
@@ -201,6 +202,7 @@ export function MatchSimPanel({
   const shellRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [engineReady, setEngineReady] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [rounds, setRounds] = useState(5);
   const [speed, setSpeed] = useState(10);
   const [run, setRun] = useState<SeriesRun | null>(null);
@@ -360,12 +362,34 @@ export function MatchSimPanel({
 
   const running = run?.running ?? false;
 
+  // Full screen fills the viewport with the pitch, not with the panel's
+  // chrome. It is a fixed overlay rather than the Fullscreen API because
+  // phones only grant that to video elements — on the device most people watch
+  // this on, requestFullscreen on a section silently does nothing.
   const goFullscreen = () => {
+    const next = !expanded;
+    setExpanded(next);
     const shell = shellRef.current;
-    if (!shell) return;
-    if (document.fullscreenElement) void document.exitFullscreen();
-    else void shell.requestFullscreen?.().catch(() => undefined);
+    if (!next) {
+      if (document.fullscreenElement) void document.exitFullscreen();
+      return;
+    }
+    void shell?.requestFullscreen?.().catch(() => undefined);
   };
+
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setExpanded(false);
+    };
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [expanded]);
 
   const teams = profile?.teams ?? null;
   const lineupSample = teams ? Math.max(teams[0].lineupSample, teams[1].lineupSample) : 0;
@@ -373,7 +397,13 @@ export function MatchSimPanel({
   return (
     <section
       ref={shellRef}
-      className={`overflow-hidden border border-[#253746] bg-[#111c28] shadow-[0_18px_50px_rgba(23,35,45,.18)] ${theatre ? 'rounded-none border-x-0' : 'mt-5 rounded-[16px]'}`}
+      className={`overflow-hidden border border-[#253746] bg-[#111c28] shadow-[0_18px_50px_rgba(23,35,45,.18)] ${
+        expanded
+          ? 'fixed inset-0 z-[90] flex h-[100dvh] w-screen flex-col overflow-hidden rounded-none border-0'
+          : theatre
+            ? 'rounded-none border-x-0'
+            : 'mt-5 rounded-[16px]'
+      }`}
       aria-label="Live match simulation"
       data-testid="panel-match-simulation"
     >
@@ -422,20 +452,20 @@ export function MatchSimPanel({
             className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#334b5d] bg-[#22384a] px-2.5 text-[9px] font-extrabold text-[#c9dcd4] transition hover:bg-[#2a4457]"
             data-testid="button-sim-fullscreen"
           >
-            <Maximize2 size={11} /> Full screen
+            {expanded ? <Minimize2 size={11} /> : <Maximize2 size={11} />} {expanded ? 'Exit' : 'Full screen'}
           </button>
         </div>
       </div>
 
       {engine === 'open-football' ? (
-        <div className="border-b border-[#2c4152] bg-[#182836] px-3 py-2.5 sm:px-5" data-testid="sim-engine-note">
+        <div className={`border-b border-[#2c4152] bg-[#182836] px-3 py-2.5 sm:px-5 ${expanded ? 'hidden' : ''}`} data-testid="sim-engine-note">
           <p className="mono text-[8px] uppercase leading-4 tracking-[.11em] text-[#8ba39c]">
             The Open Football engine plays these elevens and its own broadcast viewer draws the match:
             its pitch, its stands, its kits. Run it again for another match.
           </p>
         </div>
       ) : (
-      <div className="border-b border-[#2c4152] bg-[#182836] px-3 py-2.5 sm:px-5" data-testid="sim-run-bar">
+      <div className={`border-b border-[#2c4152] bg-[#182836] px-3 py-2.5 sm:px-5 ${expanded ? 'hidden' : ''}`} data-testid="sim-run-bar">
         <div className="flex flex-wrap items-end gap-2.5">
           <label className="flex flex-col gap-1">
             <span className="mono text-[7px] uppercase tracking-[.14em] text-[#7f978f]">Matches</span>
@@ -512,10 +542,11 @@ export function MatchSimPanel({
       )}
 
       <div
-        className={
-          theatre
-            ? 'relative h-[62dvh] min-h-[320px] w-full bg-black sm:h-auto sm:aspect-video sm:max-h-[78vh] sm:min-h-0'
-            : 'relative aspect-video max-h-[70vh] w-full bg-black'
+        className={            expanded
+              ? 'relative min-h-0 w-full flex-1 bg-black'
+              : theatre
+                ? 'relative h-[62dvh] min-h-[320px] w-full bg-black sm:h-auto sm:aspect-video sm:max-h-[78vh] sm:min-h-0'
+                : 'relative aspect-video max-h-[70vh] w-full bg-black'
         }
       >
         {profileState === 'loading' ? (
@@ -562,7 +593,7 @@ export function MatchSimPanel({
       </div>
 
       {run && run.results.length ? (
-        <div className="border-t border-[#2c4152] bg-[#16242f] px-3 py-2.5 sm:px-5" data-testid="panel-sim-results">
+        <div className={`border-t border-[#2c4152] bg-[#16242f] px-3 py-2.5 sm:px-5 ${expanded ? 'hidden' : ''}`} data-testid="panel-sim-results">
           <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
             <p className="mono text-[7.5px] uppercase tracking-[.14em] text-[#7f978f]">
               Results · {run.results.length} of {run.total} matches
@@ -629,7 +660,13 @@ export function MatchSimPanel({
       ) : null}
 
       {teams ? (
-        <div className="border-t border-[#2c4152] bg-[#16242f] px-3 py-2.5 sm:px-5" data-testid="panel-sim-form">
+        <div className={expanded ? 'hidden' : ''}>
+          <PlayerFormPanel fixtureId={fixtureId} />
+        </div>
+      ) : null}
+
+      {teams ? (
+        <div className={`border-t border-[#2c4152] bg-[#16242f] px-3 py-2.5 sm:px-5 ${expanded ? 'hidden' : ''}`} data-testid="panel-sim-form">
           <p className="mono mb-2 text-[7.5px] uppercase tracking-[.14em] text-[#7f978f]">
             Form &amp; lineups · {teams[0].record.games} results and {lineupSample} team sheets per club
           </p>
@@ -659,7 +696,7 @@ export function MatchSimPanel({
         </div>
       ) : null}
 
-      <p className={`border-t border-[#2c4152] bg-[#16242f] px-4 py-2 text-[9px] leading-4 text-[#8ba39c] sm:px-5 ${theatre ? 'hidden sm:block' : ''}`}>
+      <p className={`border-t border-[#2c4152] bg-[#16242f] px-4 py-2 text-[9px] leading-4 text-[#8ba39c] sm:px-5 ${theatre && !expanded ? 'hidden sm:block' : expanded ? 'hidden' : ''}`}>
         {profileState === 'unavailable'
           ? 'Form data was unavailable, so this match uses the simulation’s default squads. KICK OFF starts it.'
           : 'KICK OFF starts the match. Cameras, playback speed and BE A PLAYER sit in the dock; move with WASD, pass with space, shoot with F, slide in with X.'}
