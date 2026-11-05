@@ -13,15 +13,17 @@
 // Every contest is a logit on the two men's own numbers. Those numbers are the
 // skills their level gave them plus the additive weights their own match
 // history argues for (player-form.ts), so a winger who has been beating his man
-// for a month really is likelier to beat this one. Nothing is compared to a
-// price, a league table or an expected scoreline: the score is what the duels
-// produced, and a 3-0 falls out of a winger winning five of six carries rather
-// than out of a random draw around an average.
+// for a month really is likelier to beat this one. A 3-0 falls out of a winger
+// winning five of six carries rather than out of a random draw around an
+// average.
 //
 // The rates that are fixed are the ones football itself fixes — how often a
 // possession survives a carry, a progression and a final-third contest, and how
-// often a shot on target is a goal — and they are the same for both sides. All
-// the difference between the teams comes from the players.
+// often a shot on target is a goal — and they are the same for both sides. One
+// number is not fixed: how often each side turns a good position into a shot.
+// That is the number the odds translation sets, because it is the only thing in
+// the fixture that is a statement about the fixture rather than about the two
+// elevens (see `runDuelSimulation`).
 
 import { levelFor } from "./open-football-replay.ts";
 import type { SimFormProfile, SimLineupPlayer, SimTeamProfile } from "./sim-form-profile";
@@ -113,8 +115,11 @@ type Rated = {
   keeper: number;
 };
 
-function rated(player: SimLineupPlayer, lane: number): Rated {
-  const level = levelFor(player);
+function rated(player: SimLineupPlayer, lane: number, shift = 0): Rated {
+  // `shift` is how far above or below his own form this eleven is playing
+  // tonight. It is 0 for the fixture as expected, and the spread of a side's
+  // own match-to-match ratings for the "one of those nights" runs.
+  const level = levelFor(player) + shift;
   return {
     player,
     name: player.name,
@@ -150,15 +155,15 @@ function laneOf(team: SimTeamProfile, index: number): number {
   return clamp(Math.floor(nz * LANES.length), 0, LANES.length - 1);
 }
 
-function ratedXI(team: SimTeamProfile): Rated[] {
+function ratedXI(team: SimTeamProfile, shift = 0): Rated[] {
   return team.lineup.map((player, index) => {
     // A substitute brought in for an injured starter has no position of his
     // own in the sheet he came from, so the slot he fills says what he is here.
     const slotRole = team.slots[index]?.role;
     if (slotRole && player.role.toUpperCase() === "SUB") {
-      return rated({ ...player, role: slotRole }, laneOf(team, index));
+      return rated({ ...player, role: slotRole }, laneOf(team, index), shift);
     }
-    return rated(player, laneOf(team, index));
+    return rated(player, laneOf(team, index), shift);
   });
 }
 
@@ -181,6 +186,32 @@ function pick(list: Rated[], lane: number, bands: Band[]): Rated | null {
   return best?.player ?? null;
 }
 
+/** A man who could play the part in a channel, and how far out of place he is. */
+type Candidate = { player: Rated; cost: number };
+
+/**
+ * The men who could take a given part in a given channel.
+ *
+ * Computed once per side and channel rather than per possession: the roster and
+ * the slots do not change during a match, so the same five candidates come back
+ * 190 times a match and there is no reason to sort for them each time.
+ */
+function candidates(list: Rated[], lane: number, bands: Band[], count = 5): Candidate[] {
+  const best: Candidate[] = [];
+  for (const player of list) {
+    const bandRank = bands.indexOf(player.band);
+    const cost = Math.abs(player.lane - lane) * 1.1 + (bandRank < 0 ? 8 : bandRank);
+    // Insertion into a short list keeps the ordering stable, so the same player
+    // wins the same ties as a sorted list would.
+    let at = best.length;
+    while (at > 0 && best[at - 1].cost > cost) at -= 1;
+    if (at >= count) continue;
+    best.splice(at, 0, { player, cost });
+    if (best.length > count) best.pop();
+  }
+  return best;
+}
+
 /**
  * The same pick, but the ball goes to whoever is in the channel rather than
  * always to the best of them.
@@ -191,34 +222,32 @@ function pick(list: Rated[], lane: number, bands: Band[]): Rated | null {
  * one man from carrying every ball down his flank and turning the table into a
  * list of one player's 100 contests.
  */
-function pickRotating(
-  list: Rated[],
-  lane: number,
-  bands: Band[],
+function choose(
+  list: Candidate[],
   random: () => number,
-  bias?: (player: Rated) => number,
+  bias: (player: Rated) => number,
+  exclude?: Rated | null,
 ): Rated | null {
-  const scored = list
-    .map((player) => {
-      const bandRank = bands.indexOf(player.band);
-      return { player, cost: Math.abs(player.lane - lane) * 1.1 + (bandRank < 0 ? 8 : bandRank) };
-    })
-    .sort((left, right) => left.cost - right.cost)
-    .slice(0, 3);
-  if (!scored.length) return null;
+  let total = 0;
+  let pool = list;
+  const usable = exclude ? list.filter((entry) => entry.player !== exclude) : list;
+  if (usable !== list) pool = usable;
+  if (!pool.length) return null;
   // Being in the channel makes a man likely; being good at the job makes him
   // likelier. That is why a striker takes more of his side's shots than a
   // centre-back does without anybody scripting it.
-  const weights = scored.map(
-    (entry) => Math.exp(-entry.cost * 0.9 + (bias ? bias(entry.player) : 0)),
-  );
-  const total = weights.reduce((sum, weight) => sum + weight, 0);
-  let target = random() * total;
-  for (const [index, weight] of weights.entries()) {
-    target -= weight;
-    if (target <= 0) return scored[index]?.player ?? scored[0].player;
+  const weights: number[] = [];
+  for (const entry of pool) {
+    const weight = Math.exp(-entry.cost * 0.9 + bias(entry.player));
+    weights.push(weight);
+    total += weight;
   }
-  return scored[0].player;
+  let target = random() * total;
+  for (let index = 0; index < pool.length; index += 1) {
+    target -= weights[index];
+    if (target <= 0) return pool[index].player;
+  }
+  return pool[0].player;
 }
 
 export type DuelPairing = {
@@ -293,6 +322,62 @@ export type DuelSimulation = {
   players: DuelPlayerLine[];
   sample: { minute: number; side: Side; text: string; goal: boolean }[];
   note: string;
+  /** What the odds translation said this fixture produces, when it had a view. */
+  baseline: {
+    source: "odds" | "form";
+    homeGoals: number;
+    awayGoals: number;
+    totalGoals: number;
+    btts: number | null;
+    over25: number | null;
+  } | null;
+  /** What the played matches actually produced against that baseline. */
+  anchored: {
+    homeGoals: number;
+    awayGoals: number;
+    driftPct: number;
+    chanceScale: DuelShift;
+  } | null;
+  /** The same fixture with one side above or below its own form. */
+  scenarios: DuelScenario[];
+  /** How far each side's own recent matches say its night can swing, in levels. */
+  spread: DuelShift;
+  /** Whether that band came from the side's own ratings or is a stated default. */
+  spreadSource: { home: "history" | "assumed"; away: "history" | "assumed" };
+};
+
+/** How far a side is playing above or below its projected level, in levels. */
+type DuelShift = { home: number; away: number };
+
+export type DuelScenario = {
+  id: string;
+  side: Side;
+  direction: "under" | "expected" | "over";
+  label: string;
+  /** Levels this side was moved by; 0 for the fixture as expected. */
+  shift: number;
+  outcome: {
+    home: number;
+    draw: number;
+    away: number;
+    mostLikely: DuelScoreline | null;
+    homeGoals: number;
+    awayGoals: number;
+    btts: number;
+    over25: number;
+  };
+  /** Percentage points this scenario moves the result share, versus form. */
+  swing: { home: number; draw: number; away: number };
+  /** The contest that moves furthest when this side plays this way. */
+  pivot: {
+    side: Side;
+    lane: string;
+    kind: DuelPairing["kind"];
+    attacker: string;
+    defender: string;
+    from: number;
+    to: number;
+  } | null;
 };
 
 function pairing(
@@ -327,10 +412,14 @@ function mean(values: number[]): number {
  * does the simulation think that": the winger who wins six carries in ten is
  * the reason his side's goals land where they do.
  */
-export function buildDuelBoard(profile: SimFormProfile): DuelBoard {
+export function buildDuelBoard(
+  profile: SimFormProfile,
+  options: { shift?: DuelShift } = {},
+): DuelBoard {
   const [home, away] = profile.teams;
-  const homeXI = ratedXI(home);
-  const awayXI = ratedXI(away);
+  const shift = options.shift ?? { home: 0, away: 0 };
+  const homeXI = ratedXI(home, shift.home);
+  const awayXI = ratedXI(away, shift.away);
   const lanes: DuelPairing[] = [];
   const midfield: DuelPairing[] = [];
 
@@ -440,6 +529,36 @@ function mulberry32(seed: number) {
   };
 }
 
+type RawLine = {
+  side: Side;
+  duels: number;
+  won: number;
+  shots: number;
+  goals: number;
+  saves: number;
+  conceded: number;
+};
+
+/** Counts from one batch of matches, before anything is rounded or worded. */
+type RawRun = {
+  trials: number;
+  homeWins: number;
+  draws: number;
+  awayWins: number;
+  homeGoals: number;
+  awayGoals: number;
+  btts: number;
+  over25: number;
+  cleanSheetHome: number;
+  cleanSheetAway: number;
+  scorelines: Map<string, number>;
+  biggestHome: { home: number; away: number; count: number };
+  biggestAway: { home: number; away: number; count: number };
+  highest: { home: number; away: number; count: number };
+  lines: Map<Rated, RawLine>;
+  sample: DuelSimulation["sample"];
+};
+
 /**
  * Play the fixture `trials` times, duel by duel.
  *
@@ -449,23 +568,26 @@ function mulberry32(seed: number) {
  * knows or looks at what the others produced, so the spread of scorelines across
  * the trials is the spread the elevens produce, and a rout is a rout because one
  * side kept winning its duels rather than because the draw went wide.
+ *
+ * `chance` scales how often each side turns a good position into a shot. It is
+ * the one number the market sets (see `runDuelSimulation`); everything else is
+ * the players.
  */
-export function runDuelSimulation(
+function playMatches(
   profile: SimFormProfile,
-  options: { trials?: number; seed?: number } = {},
-): DuelSimulation {
-  const trials = clamp(Math.round(options.trials ?? 2000), 1, 20_000);
-  const seed = Math.abs(Math.round(options.seed ?? 1)) || 1;
-  const board = buildDuelBoard(profile);
+  options: { trials: number; seed: number; shift: DuelShift; chance: DuelShift },
+): RawRun {
+  const { trials, seed, shift, chance } = options;
+  const chanceOf = (side: Side) => (side === "home" ? chance.home : chance.away);
   const [home, away] = profile.teams;
 
   const homeShare = possessionShare(home, away);
   const homePossessions = Math.round(POSSESSIONS * homeShare);
   const awayPossessions = POSSESSIONS - homePossessions;
 
-  const homeXI = ratedXI(home);
-  const awayXI = ratedXI(away);
-  const lines = new Map<Rated, { side: Side; duels: number; won: number; shots: number; goals: number; saves: number; conceded: number }>();
+  const homeXI = ratedXI(home, shift.home);
+  const awayXI = ratedXI(away, shift.away);
+  const lines = new Map<Rated, RawLine>();
   const line = (player: Rated, side: Side) => {
     let row = lines.get(player);
     if (!row) {
@@ -505,6 +627,12 @@ export function runDuelSimulation(
   const homeLanes = laneWeights(home);
   const awayLanes = laneWeights(away);
 
+  // Who can take each part in each channel, worked out once for the match.
+  const homeCarry = LANES.map((_, lane) => candidates(homeXI, lane, ["FWD", "MID", "DEF"]));
+  const awayCarry = LANES.map((_, lane) => candidates(awayXI, lane, ["FWD", "MID", "DEF"]));
+  const homeStop = LANES.map((_, lane) => candidates(homeXI, lane, ["DEF", "MID", "FWD"]));
+  const awayStop = LANES.map((_, lane) => candidates(awayXI, lane, ["DEF", "MID", "FWD"]));
+
   for (let trial = 0; trial < trials; trial += 1) {
     const random = mulberry32(seed + trial * 7919);
     const record = trial === 0;
@@ -515,27 +643,22 @@ export function runDuelSimulation(
     const play = (side: Side, minute: number) => {
       const attacking = side === "home" ? homeXI : awayXI;
       const defending = side === "home" ? awayXI : homeXI;
+      const carryOptions = side === "home" ? homeCarry : awayCarry;
+      const stopOptions = side === "home" ? awayStop : homeStop;
       const weights = side === "home" ? homeLanes : awayLanes;
       const laneIndex = drawLane(random, weights);
       const edge = side === "home" ? HOME_EDGE : 0;
 
-      const carrier = pickRotating(attacking, laneIndex, ["FWD", "MID", "DEF"], random, (man) =>
-        (man.takeOn - 9) * 0.35,
-      );
-      const stopper = pickRotating(defending, laneIndex, ["DEF", "MID", "FWD"], random, (man) =>
-        (man.stop - 9) * 0.25,
-      );
+      const carrier = choose(carryOptions[laneIndex], random, (man) => (man.takeOn - 9) * 0.35);
+      const stopper = choose(stopOptions[laneIndex], random, (man) => (man.stop - 9) * 0.25);
       // The man who finishes the move is usually not the man who carried it.
-      const creator = pickRotating(
-        attacking.filter((entry) => entry !== carrier),
-        laneIndex,
-        ["FWD", "MID", "DEF"],
+      const creator = choose(
+        carryOptions[laneIndex],
         random,
         (man) => (man.threat - 9) * 0.6,
+        carrier,
       );
-      const blocker = pickRotating(defending, laneIndex, ["DEF", "MID", "FWD"], random, (man) =>
-        (man.block - 9) * 0.3,
-      );
+      const blocker = choose(stopOptions[laneIndex], random, (man) => (man.block - 9) * 0.3);
       const keeper = defending.find((entry) => entry.band === "GK") ?? null;
       if (!carrier || !stopper || !creator || !blocker || !keeper) return;
 
@@ -569,7 +692,7 @@ export function runDuelSimulation(
       const blockLine = line(blocker, side === "home" ? "away" : "home");
       shotLine.duels += 1;
       blockLine.duels += 1;
-      if (random() > chainP(CHANCE_MADE, creator.threat + edge, blocker.block)) {
+      if (random() > chainP(clamp(CHANCE_MADE * chanceOf(side), 0.02, 0.94), creator.threat + edge, blocker.block)) {
         blockLine.won += 1;
         return;
       }
@@ -655,23 +778,252 @@ export function runDuelSimulation(
     }
   }
 
-  const ordered = [...scorelines.entries()]
+  return {
+    trials,
+    homeWins,
+    draws,
+    awayWins,
+    homeGoals: homeGoalsTotal,
+    awayGoals: awayGoalsTotal,
+    btts,
+    over25,
+    cleanSheetHome,
+    cleanSheetAway,
+    scorelines,
+    biggestHome,
+    biggestAway,
+    highest,
+    lines,
+    sample,
+  };
+}
+
+const round2 = (value: number) => Math.round(value * 100) / 100;
+const pctOf = (count: number, trials: number) => Math.round((count / trials) * 1000) / 10;
+
+function orderedScorelines(run: RawRun): DuelScoreline[] {
+  return [...run.scorelines.entries()]
     .map(([key, count]) => {
-      const [homeGoals, awayGoals] = key.split("-").map(Number);
-      return {
-        home: homeGoals ?? 0,
-        away: awayGoals ?? 0,
-        count,
-        pct: Math.round((count / trials) * 1000) / 10,
-      };
+      const [home, away] = key.split("-").map(Number);
+      return { home: home ?? 0, away: away ?? 0, count, pct: pctOf(count, run.trials) };
     })
     .sort((left, right) => right.count - left.count || left.home - right.home);
+}
 
-  const pct = (count: number) => Math.round((count / trials) * 1000) / 10;
+function scenarioOutcome(run: RawRun): DuelScenario["outcome"] {
+  return {
+    home: pctOf(run.homeWins, run.trials),
+    draw: pctOf(run.draws, run.trials),
+    away: pctOf(run.awayWins, run.trials),
+    mostLikely: orderedScorelines(run)[0] ?? null,
+    homeGoals: round2(run.homeGoals / run.trials),
+    awayGoals: round2(run.awayGoals / run.trials),
+    btts: pctOf(run.btts, run.trials),
+    over25: pctOf(run.over25, run.trials),
+  };
+}
+
+/**
+ * How far a side's own nights actually swing.
+ *
+ * Not a number picked to make the page interesting. Each of the eleven's own
+ * match ratings vary from week to week, and the average of their standard
+ * deviations is how much a normal night moves a man; a rating point is worth
+ * about 1.6 levels on the engine's scale (levelFor), so that spread translated
+ * into levels is what "one of those nights" means for this side. A squad with
+ * steady performers gets a narrower band than a volatile one, and the page can
+ * say which it is.
+ */
+function formSpread(team: SimTeamProfile): {
+  shift: number;
+  games: number;
+  source: "history" | "assumed";
+} {
+  const spreads: number[] = [];
+  for (const player of team.lineup) {
+    const ratings = (player.matchRatings ?? [])
+      .filter((line) => line.rating !== null && line.rating !== undefined && (line.minutes ?? 0) >= 45)
+      .map((line) => line.rating as number);
+    if (ratings.length < 3) continue;
+    const average = mean(ratings);
+    spreads.push(Math.sqrt(mean(ratings.map((value) => (value - average) ** 2))));
+  }
+  if (spreads.length < 5) return { shift: ASSUMED_SPREAD, games: spreads.length, source: "assumed" };
+  // A rating point is about 1.6 levels, and a night is not the worst night.
+  return {
+    shift: Math.round(clamp(mean(spreads) * 1.6, 0.3, 1.4) * 10) / 10,
+    games: spreads.length,
+    source: "history",
+  };
+}
+
+/** The contest that moves furthest when a side plays above or below its form. */
+function pivotOf(profile: SimFormProfile, side: Side, shift: number): DuelScenario["pivot"] {
+  const base = buildDuelBoard(profile);
+  const moved = buildDuelBoard(profile, {
+    shift: { home: side === "home" ? shift : 0, away: side === "away" ? shift : 0 },
+  });
+  const key = (row: DuelPairing) => `${row.side}:${row.attacker.name}|${row.defender.name}`;
+  const movedBy = new Map([...moved.lanes, ...moved.midfield].map((row) => [key(row), row]));
+  let best: DuelScenario["pivot"] = null;
+  let bestDelta = 0;
+  for (const row of [...base.lanes, ...base.midfield].filter((entry) => entry.side === side)) {
+    const after = movedBy.get(key(row));
+    if (!after) continue;
+    const delta = Math.abs(after.winPct - row.winPct);
+    if (delta <= bestDelta) continue;
+    bestDelta = delta;
+    best = {
+      side: row.side,
+      lane: row.label,
+      kind: row.kind,
+      attacker: row.attacker.name,
+      defender: row.defender.name,
+      from: row.winPct,
+      to: after.winPct,
+    };
+  }
+  return best;
+}
+
+/** How many matches the anchor solves on, before the real batch is played. */
+const ANCHOR_TRIALS = 900;
+/** A side's night can swing this far when its own history has too little to read. */
+const ASSUMED_SPREAD = 0.6;
+
+/**
+ * Play the fixture `trials` times, duel by duel, inside the market's reading.
+ *
+ * The odds translation already says what this fixture is expected to produce —
+ * how many goals, and how they are split between the two sides. A model that
+ * ignored it would answer a different question ("what do these elevens do in
+ * general") and be wrong about this fixture, so the baseline is the anchor: the
+ * number of chances each side gets is solved until the matches the players play
+ * produce the expected goals, and from there nothing is imposed. Who takes the
+ * chances, who beats whom, who misses and who wins all come out of the duels,
+ * and the spread of results around the baseline is the players' own.
+ *
+ * On top of that, each side can be played a level above or below its own form.
+ * The size of that swing is read from the side's own last ten matches, so the
+ * page can say what a good night or an off night is worth to this eleven rather
+ * than to football in general.
+ */
+export function runDuelSimulation(
+  profile: SimFormProfile,
+  options: { trials?: number; seed?: number; baseline?: DuelSimulation["baseline"] } = {},
+): DuelSimulation {
+  const trials = clamp(Math.round(options.trials ?? 2000), 1, 20_000);
+  const seed = Math.abs(Math.round(options.seed ?? 1)) || 1;
+  const expectations = profile.expectations;
+  const baseline: DuelSimulation["baseline"] =
+    options.baseline ??
+    (expectations
+      ? {
+          source: expectations.source,
+          homeGoals: expectations.homeGoals,
+          awayGoals: expectations.awayGoals,
+          totalGoals: expectations.totalGoals,
+          btts: expectations.bothTeamsScore,
+          over25: expectations.over25,
+        }
+      : null);
+
+  const [home, away] = profile.teams;
+
+  // Solve the chance volume to the baseline. Two unknowns (one per side) and
+  // two targets, so a few ratio corrections settle it: goals scale almost
+  // linearly with how often a good position becomes a shot.
+  const chance: DuelShift = { home: 1, away: 1 };
+  if (baseline) {
+    for (let round = 0; round < 3; round += 1) {
+      // The anchor's own stream is fixed: how many goals this fixture is worth
+      // is a property of the fixture, not of the seed the page happens to use,
+      // so two replays differ in their matches and not in their baseline.
+      const probe = playMatches(profile, {
+        trials: ANCHOR_TRIALS,
+        seed: 1_000_003 + round * 37,
+        shift: { home: 0, away: 0 },
+        chance,
+      });
+      const playedHome = probe.homeGoals / probe.trials;
+      const playedAway = probe.awayGoals / probe.trials;
+      const homeRatio = clamp(Math.max(0.15, baseline.homeGoals) / Math.max(0.05, playedHome), 0.4, 2.6);
+      const awayRatio = clamp(Math.max(0.15, baseline.awayGoals) / Math.max(0.05, playedAway), 0.4, 2.6);
+      chance.home = clamp(chance.home * homeRatio, 0.3, 3);
+      chance.away = clamp(chance.away * awayRatio, 0.3, 3);
+      if (Math.abs(homeRatio - 1) < 0.015 && Math.abs(awayRatio - 1) < 0.015) break;
+    }
+  }
+
+  const run = playMatches(profile, { trials, seed, shift: { home: 0, away: 0 }, chance });
+  const board = buildDuelBoard(profile);
+  const ordered = orderedScorelines(run);
+  const pct = (count: number) => pctOf(count, run.trials);
+
+  const playedHome = run.homeGoals / run.trials;
+  const playedAway = run.awayGoals / run.trials;
+  const anchored: DuelSimulation["anchored"] = baseline
+    ? {
+        homeGoals: round2(playedHome),
+        awayGoals: round2(playedAway),
+        driftPct:
+          Math.round(
+            ((Math.abs(playedHome - baseline.homeGoals) + Math.abs(playedAway - baseline.awayGoals)) /
+              Math.max(0.2, baseline.homeGoals + baseline.awayGoals)) *
+              1000,
+          ) / 10,
+        chanceScale: { home: round2(chance.home), away: round2(chance.away) },
+      }
+    : null;
+
+  const homeSpread = formSpread(home);
+  const awaySpread = formSpread(away);
+  const spread: DuelShift = { home: homeSpread.shift, away: awaySpread.shift };
+  const scenarioTrials = clamp(Math.round(trials * 0.3), 400, 1500);
+  const scenarios: DuelScenario[] = [
+    {
+      id: "expected",
+      side: "home",
+      direction: "expected",
+      label: "as expected",
+      shift: 0,
+      outcome: scenarioOutcome(run),
+      swing: { home: 0, draw: 0, away: 0 },
+      pivot: null,
+    },
+  ];
+  for (const side of ["home", "away"] as Side[]) {
+    for (const direction of ["under", "over"] as const) {
+      const shift: DuelShift = { home: 0, away: 0 };
+      shift[side] = (direction === "under" ? -1 : 1) * spread[side];
+      const probe = playMatches(profile, {
+        trials: scenarioTrials,
+        seed: seed + (side === "home" ? 503 : 911) + (direction === "under" ? 17 : 29),
+        shift,
+        chance,
+      });
+      const outcome = scenarioOutcome(probe);
+      scenarios.push({
+        id: `${side}-${direction}`,
+        side,
+        direction,
+        label: `${(side === "home" ? home : away).short} ${direction === "under" ? "below par" : "above par"}`,
+        shift: Math.round(shift[side] * 10) / 10,
+        outcome,
+        swing: {
+          home: round2(outcome.home - pct(run.homeWins)),
+          draw: round2(outcome.draw - pct(run.draws)),
+          away: round2(outcome.away - pct(run.awayWins)),
+        },
+        pivot: pivotOf(profile, side, shift[side]),
+      });
+    }
+  }
+
   const stronger = board.strength.gap >= 0 ? "home" : "away";
-  const upsetWins = stronger === "home" ? awayWins : homeWins;
+  const upsetWins = stronger === "home" ? run.awayWins : run.homeWins;
 
-  const players: DuelPlayerLine[] = [...lines.entries()]
+  const players: DuelPlayerLine[] = [...run.lines.entries()]
     .map(([player, row]) => ({
       name: player.name,
       side: row.side,
@@ -687,6 +1039,7 @@ export function runDuelSimulation(
     .sort((left, right) => right.winPct - left.winPct || right.goals - left.goals);
 
   const twists: DuelSimulation["twists"] = [];
+  const { biggestHome, biggestAway, highest } = run;
   if (biggestHome.home > biggestHome.away) {
     twists.push({
       label: "biggest home win",
@@ -715,13 +1068,16 @@ export function runDuelSimulation(
     pct: pct(upsetWins),
     kind: "upset",
   });
-  const noScore = scorelines.get("0-0") ?? 0;
+  const noScore = run.scorelines.get("0-0") ?? 0;
   if (noScore) {
     twists.push({ label: "goalless", detail: "0–0", pct: pct(noScore), kind: "draw" });
   }
 
-  const note =
-    trials < 200
+  const note = baseline
+    ? `Anchored to the odds translation: ${baseline.totalGoals.toFixed(2)} goals, ${baseline.homeGoals.toFixed(
+        2,
+      )}–${baseline.awayGoals.toFixed(2)}. The ${trials.toLocaleString()} matches below were then played possession by possession, and the scorelines are what the duels made of that baseline.`
+    : trials < 200
       ? `Only ${trials} matches played — enough to watch, not enough to trust a percentage.`
       : `Every scoreline above came out of ${trials.toLocaleString()} matches played possession by possession.`;
 
@@ -730,23 +1086,28 @@ export function runDuelSimulation(
     seed,
     board,
     outcome: {
-      home: pct(homeWins),
-      draw: pct(draws),
-      away: pct(awayWins),
+      home: pct(run.homeWins),
+      draw: pct(run.draws),
+      away: pct(run.awayWins),
       mostLikely: ordered[0] ?? null,
-      homeGoals: Math.round((homeGoalsTotal / trials) * 100) / 100,
-      awayGoals: Math.round((awayGoalsTotal / trials) * 100) / 100,
-      totalGoals: Math.round(((homeGoalsTotal + awayGoalsTotal) / trials) * 100) / 100,
-      btts: pct(btts),
-      over25: pct(over25),
-      cleanSheetHome: pct(cleanSheetHome),
-      cleanSheetAway: pct(cleanSheetAway),
+      homeGoals: round2(playedHome),
+      awayGoals: round2(playedAway),
+      totalGoals: round2(playedHome + playedAway),
+      btts: pct(run.btts),
+      over25: pct(run.over25),
+      cleanSheetHome: pct(run.cleanSheetHome),
+      cleanSheetAway: pct(run.cleanSheetAway),
     },
     scorelines: ordered.slice(0, 24),
     twists,
     players,
-    sample,
+    sample: run.sample,
     note,
+    baseline,
+    anchored,
+    scenarios,
+    spread,
+    spreadSource: { home: homeSpread.source, away: awaySpread.source },
   };
 }
 

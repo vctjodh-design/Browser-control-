@@ -408,7 +408,8 @@ engine never produces it.
 ## Player duels
 
 The **Player duels** tab plays the fixture a third way, and it is the one that
-answers "why that score". `lib/squad-duel-sim.ts` puts both predicted elevens on
+answers "why that score". It begins from the market's read (below) and then
+plays the fixture men against men. `lib/squad-duel-sim.ts` puts both predicted elevens on
 five channels of the pitch and plays 190 possessions as a chain of named
 contests: the winger in a channel against the full-back in that channel (carry),
 the creator against that channel's tram (progression), the forward against the
@@ -417,22 +418,35 @@ logit on the two men's own numbers — the skills their level gives them plus th
 additive weights their own match history argues for — so a winger who has been
 beating his man for a month really is likelier to beat this one.
 
-Nothing is drawn around an average. A 3-0 is a winger winning five of six
-carries and a striker beating the keeper twice; a 1-1 is the keeper answering
-the most shots he faces. The page shows both halves so the score can be checked
+Once the baseline is set, nothing is drawn around an average. A 3-0 is a winger
+winning five of six carries and a striker beating the keeper twice; a 1-1 is the
+keeper answering the most shots he faces. The page shows both halves so the score can be checked
 against the reason: the board of man-versus-man percentages (`GET
 /api/football/matches/:id/duels`), then the outcome of 1,000 to 20,000 of those
 matches, then the men who are winning their contests and what they are turning
 that into — shots, goals, saves. A single representative match is listed
 contest by contest, so the link from a duel to a goal is visible.
 
-The fixed numbers are football's rather than this fixture's: a possession
-survives its carry six times in ten, a progression five and a half, a final-third
-contest becomes a shot a third of the time, and a shot at an even keeper goes in
-a little over a tenth of the time — the same for both sides. The only difference
-between the teams is who is winning those duels. 5,000 matches take well under a
-second, so the sample is large enough to read the likelihood and the twists (a
-rout, the biggest away win, the goalless game) rather than guess at them.
+That alone would answer the wrong question, so the fixture starts where the
+market says it starts. The odds translation already turns the price board into a
+goal expectation for each side; `runDuelSimulation` solves the one number the
+players cannot know — how often a good position becomes a shot, per side — until
+the matches the duels play produce those goals. It is solved on its own fixed
+stream, so the anchor is a property of the fixture rather than of the seed the
+page happens to use, and it costs about 0.5s. Everything after that is the
+players: who takes the chances, who beats whom, who misses. 5,000 matches take
+around two seconds, the played goals sit within a couple of per cent of the
+market's, and the panel prints both numbers side by side including that gap.
+
+Around the baseline the page plays the fixture four more times — each side once
+a little above and once a little below its own form. How big "a little" is comes
+from the elevens themselves: the average of each man's own match-to-match rating
+spread, translated into levels (a rating point is about 1.6 levels), so a steady
+squad gets a narrow band and a volatile one a wide one, and the panel says which
+it read. Each row gives the result share on that night, the scoreline that comes
+up most, the swing against playing to form, and the contest that moves furthest
+— the named duel the change pivots on — so an upset or a rout is attributable to
+men rather than to a wider random draw.
 
 House sim also takes a *batch*: type how many rounds to play (1 to 100,000), press
 SIMULATE, and the same match — same eleven, same levels, same engine — is played

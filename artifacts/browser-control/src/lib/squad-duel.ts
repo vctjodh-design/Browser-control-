@@ -39,6 +39,45 @@ export type DuelPlayerLine = {
 
 export type DuelTwist = { label: string; detail: string; pct: number; kind: string };
 
+/** What the odds translation says this fixture produces, before anyone plays. */
+export type DuelBaseline = {
+  source: 'odds' | 'form';
+  homeGoals: number;
+  awayGoals: number;
+  totalGoals: number;
+  btts: number | null;
+  over25: number | null;
+};
+
+/** The same fixture with one side above or below its own form. */
+export type DuelScenario = {
+  id: string;
+  side: DuelSide;
+  direction: 'under' | 'expected' | 'over';
+  label: string;
+  shift: number;
+  outcome: {
+    home: number;
+    draw: number;
+    away: number;
+    mostLikely: DuelScoreline | null;
+    homeGoals: number;
+    awayGoals: number;
+    btts: number;
+    over25: number;
+  };
+  swing: { home: number; draw: number; away: number };
+  pivot: {
+    side: DuelSide;
+    lane: string;
+    kind: string;
+    attacker: string;
+    defender: string;
+    from: number;
+    to: number;
+  } | null;
+};
+
 export type DuelSimulation = {
   fixtureId: number;
   teams: [string, string];
@@ -67,6 +106,16 @@ export type DuelSimulation = {
   players: DuelPlayerLine[];
   sample: { minute: number; side: DuelSide; text: string; goal: boolean }[];
   note: string;
+  baseline: DuelBaseline | null;
+  anchored: {
+    homeGoals: number;
+    awayGoals: number;
+    driftPct: number;
+    chanceScale: { home: number; away: number };
+  } | null;
+  scenarios: DuelScenario[];
+  spread: { home: number; away: number };
+  spreadSource: { home: 'history' | 'assumed'; away: 'history' | 'assumed' };
 };
 
 export async function loadDuels(

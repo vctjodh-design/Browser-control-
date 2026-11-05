@@ -113,3 +113,45 @@ test("the stronger eleven wins more of the trials", () => {
   assert.ok(run.outcome.home > run.outcome.away, "the better side should win more often");
   assert.ok(run.outcome.homeGoals > run.outcome.awayGoals, "and score more goals");
 });
+
+test("the played matches land on the goals the market set", () => {
+  const anchored = profile(6.9, 6.9);
+  anchored.expectations = {
+    source: "odds",
+    totalGoals: 3.4,
+    homeGoals: 2.4,
+    awayGoals: 1.0,
+    over25: 0.6,
+    bothTeamsScore: 0.55,
+    homeCleanSheet: 0.2,
+    awayCleanSheet: 0.3,
+    homeCorners: 5,
+    awayCorners: 4,
+  };
+  const run = runDuelSimulation(anchored, { trials: 2500, seed: 11 });
+  assert.ok(Math.abs(run.outcome.homeGoals - 2.4) < 0.35, `home goals ${run.outcome.homeGoals}`);
+  assert.ok(Math.abs(run.outcome.awayGoals - 1.0) < 0.3, `away goals ${run.outcome.awayGoals}`);
+  assert.ok(run.anchored && run.anchored.driftPct < 12, `drift ${run.anchored?.driftPct}`);
+  assert.ok(run.outcome.home > run.outcome.away, "a 2.4 v 1.0 fixture should favour the home side");
+  // The anchor is a property of the fixture, not of the seed the page used.
+  const other = runDuelSimulation(anchored, { trials: 2500, seed: 99 });
+  assert.deepEqual(other.anchored?.chanceScale, run.anchored?.chanceScale);
+});
+
+test("each side can be played a level above or below its own form", () => {
+  const run = runDuelSimulation(profile(6.9, 6.9), { trials: 1500, seed: 5 });
+  assert.equal(run.scenarios.length, 5);
+  const expected = run.scenarios.find((row) => row.direction === "expected");
+  assert.equal(expected?.outcome.home, run.outcome.home);
+  assert.equal(run.scenarios[0].id, "expected");
+  for (const side of ["home", "away"]) {
+    const under = run.scenarios.find((row) => row.side === side && row.direction === "under");
+    const over = run.scenarios.find((row) => row.side === side && row.direction === "over");
+    assert.ok(under && over);
+    assert.ok(under.shift < 0 && over.shift > 0, "a good night should be a positive shift");
+    // Below par has to hurt that side and help the other one.
+    const swing = (row) => (side === "home" ? row.swing.home : row.swing.away);
+    assert.ok(swing(over) > swing(under), `${side}: over ${swing(over)} should beat under ${swing(under)}`);
+    assert.ok(under.pivot && over.pivot, "a changed band should name the contest that moves");
+  }
+});

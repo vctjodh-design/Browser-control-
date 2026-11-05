@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { CircleAlert, Dices, LoaderCircle, Play } from 'lucide-react';
-import { loadDuels, type DuelPairing, type DuelSimulation, type DuelSide } from '@/lib/squad-duel';
+import {
+  loadDuels,
+  type DuelPairing,
+  type DuelScenario,
+  type DuelSimulation,
+  type DuelSide,
+} from '@/lib/squad-duel';
 
 // The fixture played as man-versus-man contests.
 //
@@ -67,6 +73,80 @@ function DuelRow({ row }: { row: DuelPairing }) {
   );
 }
 
+/**
+ * The same fixture played four more times: once with each side a little above
+ * its own form and once a little below.
+ *
+ * The baseline says what the fixture produces. These rows say who can move it —
+ * and the player named under each one is the duel that moves furthest when that
+ * side has that kind of night, so the change has a name attached to it.
+ */
+function ScenarioBlock({ data }: { data: DuelSimulation }) {
+  if (!data.scenarios.length) return null;
+  const [homeShort, awayShort] = data.short;
+  const measured = data.spreadSource.home === 'history' || data.spreadSource.away === 'history';
+  return (
+    <div className="border-b border-[#2c4152] px-3 py-2.5 sm:px-4" data-testid="duel-scenarios">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+        <p className="mono text-[7.5px] uppercase tracking-[.14em] text-[#7f978f]">If a side plays its own night</p>
+        <p className="mono text-[6.5px] uppercase tracking-[.1em] text-[#5f7570]">home · draw · away · score</p>
+      </div>
+      <ul className="mt-1 space-y-[3px]">
+        {data.scenarios.map((scenario) => {
+          const swingSide = scenario.swing.home - scenario.swing.away >= 0 ? 'home' : 'away';
+          const swingValue = scenario.swing[swingSide];
+          const score = scenario.outcome.mostLikely;
+          return (
+            <li
+              key={scenario.id}
+              data-testid={`duel-scenario-${scenario.id}`}
+              className="rounded border border-[#243746] bg-[#182836] px-2 py-[3px]"
+            >
+              <div className="grid grid-cols-[minmax(0,1fr)_32px_32px_32px_42px] items-baseline gap-1">
+                <span className="truncate text-[8.5px] font-bold" style={{ color: sideText(scenario.side) }}>
+                  {scenario.label}
+                  {scenario.direction === 'expected' ? null : (
+                    <span className="mono ml-1 text-[7px] font-normal text-[#6f847f]">
+                      {scenario.shift > 0 ? '+' : ''}
+                      {scenario.shift.toFixed(1)} lv
+                    </span>
+                  )}
+                </span>
+                <span className="mono text-right text-[9px] font-extrabold" style={{ color: HOME_TEXT }}>
+                  {scenario.outcome.home.toFixed(1)}
+                </span>
+                <span className="mono text-right text-[9px] text-[#9fb8ae]">{scenario.outcome.draw.toFixed(1)}</span>
+                <span className="mono text-right text-[9px] font-extrabold" style={{ color: AWAY_TEXT }}>
+                  {scenario.outcome.away.toFixed(1)}
+                </span>
+                <span className="mono text-right text-[8.5px] font-bold text-[#dbe6e0]">
+                  {score ? `${score.home}–${score.away}` : '—'}
+                </span>
+              </div>
+              <p className="mono mt-[2px] text-[7px] leading-3 text-[#6f847f]">
+                {scenario.direction === 'expected'
+                  ? `${scenario.outcome.homeGoals.toFixed(2)}–${scenario.outcome.awayGoals.toFixed(2)} goals · both score ${pct(scenario.outcome.btts)}`
+                  : `${swingSide === 'home' ? homeShort : awayShort} win ${swingValue >= 0 ? '+' : ''}${swingValue.toFixed(1)} pts`}
+                {scenario.pivot
+                  ? ` · pivots on ${scenario.pivot.attacker} v ${scenario.pivot.defender} (${scenario.pivot.from.toFixed(0)}% → ${scenario.pivot.to.toFixed(0)}%)`
+                  : ''}
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-1 text-[7.5px] leading-4 text-[#6f847f]">
+        The band is ±{data.spread.home.toFixed(1)} levels for {homeShort} and ±{data.spread.away.toFixed(1)} for{' '}
+        {awayShort},{' '}
+        {measured
+          ? 'read from how much each eleven’s own ratings move from match to match'
+          : 'a stated default because their ratings were too thin to measure'}
+        . The baseline is the market’s; what changes in these rows is who wins the duels that carry it.
+      </p>
+    </div>
+  );
+}
+
 function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
     <div className="rounded-lg border border-[#243746] bg-[#182836] px-2 py-1.5 text-center">
@@ -121,9 +201,9 @@ export function SquadDuelPanel({ fixtureId, homeName, awayName }: { fixtureId: n
         <div className="min-w-0">
           <h2 className="mono text-[9px] font-extrabold uppercase tracking-[.16em] text-[#dbe6e0]">Player duels</h2>
           <p className="mt-0.5 max-w-[70ch] text-[8.5px] leading-4 text-[#7f978f]">
-            Every possession is a contest between two named players — the winger against that full-back, the
-            midfielder against that midfield, the shot against that keeper. The scoreline is whatever those
-            contests produce.
+            The odds translation sets what this fixture is expected to produce. Every possession is then a
+            contest between two named players — the winger against that full-back, the midfielder against that
+            midfield, the shot against that keeper — and the scoreline is whatever those contests make of it.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -178,7 +258,9 @@ export function SquadDuelPanel({ fixtureId, homeName, awayName }: { fixtureId: n
       ) : null}
 
       {outcome ? (
-        <div className="grid gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
+        <>
+          {data ? <ScenarioBlock data={data} /> : null}
+          <div className="grid gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
           <div className="space-y-2.5">
             <div className="grid grid-cols-3 gap-1.5" data-testid="duel-outcome">
               <Stat label={home.length > 12 ? home.slice(0, 12) : home} value={pct(outcome.home)} tone={HOME_TEXT} />
@@ -194,14 +276,27 @@ export function SquadDuelPanel({ fixtureId, homeName, awayName }: { fixtureId: n
               {outcome.awayGoals.toFixed(2)} goals · {data?.trials.toLocaleString()} matches in{' '}
               {((data?.elapsedMs ?? 0) / 1000).toFixed(1)}s
             </p>
-            {data?.expectations ? (
-              <p
-                className="mono text-[7.5px] uppercase leading-4 tracking-[.09em] text-[#6f847f]"
-                data-testid="duel-vs-market"
+            {data?.baseline ? (
+              <div
+                className="rounded-lg border border-[#2c4152] bg-[#152531] px-2 py-1.5"
+                data-testid="duel-anchor"
               >
-                the market has {data.expectations.homeGoals.toFixed(2)}–{data.expectations.awayGoals.toFixed(2)}{' '}
-                ({data.expectations.totalGoals.toFixed(2)} goals) — this is what the players produced, not a copy of it
-              </p>
+                <p className="mono text-[7px] uppercase tracking-[.12em] text-[#7f978f]">
+                  anchored to the odds translation
+                </p>
+                <p className="mono mt-0.5 text-[8px] uppercase leading-4 tracking-[.06em] text-[#9fb8ae]">
+                  market{' '}
+                  <span className="text-[#dbe6e0]">
+                    {data.baseline.homeGoals.toFixed(2)}–{data.baseline.awayGoals.toFixed(2)}
+                  </span>{' '}
+                  ({data.baseline.totalGoals.toFixed(2)} goals) · played{' '}
+                  <span className="text-[#dbe6e0]">
+                    {data.anchored ? data.anchored.homeGoals.toFixed(2) : outcome.homeGoals.toFixed(2)}–
+                    {data.anchored ? data.anchored.awayGoals.toFixed(2) : outcome.awayGoals.toFixed(2)}
+                  </span>
+                  {data.anchored ? ` (${data.anchored.driftPct.toFixed(1)}% off)` : ''}
+                </p>
+              </div>
             ) : null}
             <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
               <Stat label="both score" value={pct(outcome.btts)} />
@@ -298,6 +393,7 @@ export function SquadDuelPanel({ fixtureId, homeName, awayName }: { fixtureId: n
             </div>
           </div>
         </div>
+        </>
       ) : loading ? (
         <p className="mono flex items-center gap-2 px-4 py-5 text-[9px] uppercase tracking-[.1em] text-[#7f978f]">
           <LoaderCircle size={12} className="animate-spin" /> Playing the duels…
