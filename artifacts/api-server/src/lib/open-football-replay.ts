@@ -49,21 +49,48 @@ function tacticFor(formation: string): string {
   return "T442";
 }
 
+const clamp = (value: number, low: number, high: number): number => Math.min(high, Math.max(low, value));
+
 /**
- * How good the engine should make a player, on its own 1..20 skill scale.
+ * Where each eleven sits on the engine's 1..20 skill scale.
  *
- * Anchored on the league table: a side in the top fifth of its division starts
- * every man around 15, a side at the bottom around 8, and the individual's
- * impact inside his own squad moves him a couple of levels either way. That
- * keeps the gap between, say, Real Madrid and AEK in the match itself rather
- * than only in the paperwork.
+ * The scale is steep — two levels between the sides already turns a match into
+ * a rout, eight makes it 6-0 or worse — so what goes in has to be how good the
+ * two elevens are *relative to each other*, and a league table cannot say
+ * that: leading the Czech or Hungarian league does not make a side better than
+ * a mid-table Serie A club, yet a table-anchored level said exactly that and
+ * played Ferencváros off the park at Milan.
+ *
+ * What can say it is the market's expected scoreline, which the profile
+ * already carries from the fixture's prices. A goal of expected margin is
+ * worth a little over a level, which is the rate at which the engine turns a
+ * two-goal favourite into a two-goal win. Without prices, the league table is
+ * the fallback, at the same gentle rate.
  */
-function levelFor(team: SimTeamProfile, player: SimLineupPlayer): number {
-  const edge = team.table?.edge ?? 0;
-  // His own recent matches move the level too: a run of 8s is worth a level
-  // over a run of 6s (player-form.ts caps that at ±1.6).
-  const level = 11.2 + edge * 4 + (player.impact - 0.5) * 5 + (player.form?.level ?? 0);
-  return Math.max(5, Math.min(19, Math.round(level)));
+function baseLevels(profile: SimFormProfile): [number, number] {
+  const expectation = profile.expectations;
+  if (expectation) {
+    const margin = clamp(expectation.awayGoals - expectation.homeGoals, -3.4, 3.4);
+    const spread = clamp(margin * 1.15, -3.4, 3.4);
+    return [12 - spread / 2, 12 + spread / 2];
+  }
+
+  const [home, away] = profile.teams;
+  const gap = clamp(((away.table?.edge ?? 0) - (home.table?.edge ?? 0)) * 0.9, -2.2, 2.2);
+  return [12 - gap / 2, 12 + gap / 2];
+}
+
+/**
+ * How good the engine should make one player of that eleven.
+ *
+ * His standing inside his own squad and his own recent matches move him a
+ * level either way; they are deliberately small, because the level mostly
+ * describes the team and a single star should tilt a match, not decide it.
+ */
+function levelFor(base: number, player: SimLineupPlayer): number {
+  // player-form.ts caps the run-of-form level at ±1.6.
+  const level = base + (player.impact - 0.5) * 1.4 + (player.form?.level ?? 0) * 0.45;
+  return clamp(Math.round(level), 5, 19);
 }
 
 type EnginePlayer = {
@@ -75,12 +102,12 @@ type EnginePlayer = {
   weights?: Record<string, number>;
 };
 
-function sideSpec(team: SimTeamProfile) {
+function sideSpec(team: SimTeamProfile, base: number) {
   const taken = new Set<string>();
   const players: EnginePlayer[] = team.lineup.map((player, index) => ({
     name: player.name,
     position: engineRole(team.slots[index]?.role ?? player.role, taken),
-    level: levelFor(team, player),
+    level: levelFor(base, player),
     shirt: player.number ?? index + 1,
     weights: player.form?.skills,
   }));
@@ -90,7 +117,7 @@ function sideSpec(team: SimTeamProfile) {
   const bench: EnginePlayer[] = team.bench.slice(0, 3).map((player, index) => ({
     name: player.name,
     position: engineRole(player.role, taken),
-    level: levelFor(team, player),
+    level: levelFor(base, player),
     shirt: player.number ?? 12 + index,
     weights: player.form?.skills,
   }));
@@ -104,10 +131,11 @@ function sideSpec(team: SimTeamProfile) {
 }
 
 export function buildOpenFootballSpec(profile: SimFormProfile, seed: number) {
+  const [homeBase, awayBase] = baseLevels(profile);
   return {
     seed,
-    home: sideSpec(profile.teams[0]),
-    away: sideSpec(profile.teams[1]),
+    home: sideSpec(profile.teams[0], homeBase),
+    away: sideSpec(profile.teams[1], awayBase),
   };
 }
 
@@ -160,10 +188,14 @@ export type OpenFootballReplay = {
  * played again rather than served from the cache.
  */
 export function profileSignature(profile: SimFormProfile): string {
+  const levels = baseLevels(profile);
   const text = profile.teams
-    .map((team) =>
+    .map((team, side) =>
       team.lineup
-        .map((player) => `${player.name}|${player.form?.level ?? 0}|${JSON.stringify(player.form?.skills ?? {})}`)
+        .map(
+          (player) =>
+            `${player.name}|${levelFor(levels[side], player)}|${player.form?.level ?? 0}|${JSON.stringify(player.form?.skills ?? {})}`,
+        )
         .join(","),
     )
     .join("|");

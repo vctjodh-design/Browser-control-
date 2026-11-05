@@ -399,7 +399,7 @@ export function MatchSimPanel({
       ref={shellRef}
       className={`overflow-hidden border border-[#253746] bg-[#111c28] shadow-[0_18px_50px_rgba(23,35,45,.18)] ${
         expanded
-          ? 'fixed inset-0 z-[90] flex h-[100dvh] w-screen flex-col overflow-hidden rounded-none border-0'
+          ? 'fixed inset-0 z-[90] flex flex-col overflow-hidden rounded-none border-0'
           : theatre
             ? 'rounded-none border-x-0'
             : 'mt-5 rounded-[16px]'

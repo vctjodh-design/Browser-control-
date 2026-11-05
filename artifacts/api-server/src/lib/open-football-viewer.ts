@@ -152,19 +152,15 @@ export function renderViewerPage(recording: ViewerRecording, apiBase: string): s
   // `</` is escaped so a player's name can never close the script element.
   const json = JSON.stringify(document).replaceAll("</", "<\\/");
 
-  const clockFrom = (config.match_time_ms ?? 0) / 1000;
-  const minutes = Math.floor(clockFrom / 60);
-  const subtitle =
-    minutes > 0
-      ? `Open Football engine · ${minutes}' played`
-      : "Open Football engine";
-
+  // The engine plays the whole match before it will record one, so its final
+  // scoreline is known before a single frame has been watched. Printing it in
+  // the header spoils the match you are about to watch and, worse, reads as
+  // "the simulation already said 0-12" when nobody has pressed play. The
+  // score belongs to the viewer's own scoreboard, which counts up with the
+  // clock and is still 0-0 at kick-off.
   return PAGE.replace("__CONFIG__", json)
     .replaceAll("__HOME_NAME__", escapeHtml(String(config.home_name ?? "Home")))
-    .replaceAll("__AWAY_NAME__", escapeHtml(String(config.away_name ?? "Away")))
-    .replaceAll("__HOME_GOALS__", String(config.home_goals ?? 0))
-    .replaceAll("__AWAY_GOALS__", String(config.away_goals ?? 0))
-    .replaceAll("__SUBTITLE__", escapeHtml(subtitle));
+    .replaceAll("__AWAY_NAME__", escapeHtml(String(config.away_name ?? "Away")));
 }
 
 function escapeHtml(value: string): string {
@@ -186,30 +182,33 @@ const PAGE = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #0e1419; color: #c8d6e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-.header { text-align: center; padding: 12px 0 10px; }
-.score { font-size: 22px; font-weight: 700; letter-spacing: 2px; }
+html, body { height: 100%; }
+/* The match fills the frame it is given. A fixed 16:9 box is right on a
+   desktop and wrong on a phone, where it turns a full-screen pitch into a
+   short strip with black above and below; the viewer draws into whatever
+   canvas it is handed. */
+body { background: #0e1419; color: #c8d6e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; flex-direction: column; }
+.header { flex: 0 0 auto; text-align: center; padding: 8px 0 6px; }
+.score { font-size: 20px; font-weight: 700; letter-spacing: 2px; }
 .score .sep { color: #3a4f5c; margin: 0 10px; }
 .team-home { color: #6ba3d6; }
 .team-away { color: #d6836b; }
-.levels { font-size: 11px; color: #5d7180; margin-top: 4px; letter-spacing: 1px; }
-.stage-wrap { padding: 0 12px 10px; max-width: 1500px; margin: 0 auto; }
-.stage { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 6px; background: #080c12; }
+.levels { font-size: 10px; color: #5d7180; margin-top: 3px; letter-spacing: 1px; }
+.stage-wrap { flex: 1 1 auto; min-height: 0; width: 100%; padding: 0 10px 8px; max-width: 1500px; margin: 0 auto; }
+.stage { position: relative; width: 100%; height: 100%; min-height: 180px; overflow: hidden; border-radius: 6px; background: #080c12; }
 .stage-placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; color: #7a8c98; text-align: center; padding: 0 24px; }
 #match-canvas { position: relative; display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
-.hint { text-align: center; font-size: 10px; color: #4a5a66; padding-bottom: 10px; letter-spacing: 0.4px; }
+.hint { flex: 0 0 auto; text-align: center; font-size: 10px; color: #4a5a66; padding-bottom: 8px; letter-spacing: 0.4px; }
 </style>
 </head>
 <body>
 <div class="header">
     <div class="score">
         <span class="team-home">__HOME_NAME__</span>
-        <span>__HOME_GOALS__</span>
-        <span class="sep">-</span>
-        <span>__AWAY_GOALS__</span>
+        <span class="sep">v</span>
         <span class="team-away">__AWAY_NAME__</span>
     </div>
-    <div class="levels">__SUBTITLE__</div>
+    <div class="levels">Open Football engine · press play</div>
 </div>
 <div class="stage-wrap">
     <div class="stage">

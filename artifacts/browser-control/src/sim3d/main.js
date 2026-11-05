@@ -386,11 +386,26 @@ function animate() {
   }
 }
 
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
+// The frame this page runs in changes size under it: the panel opens full
+// screen around it, a phone's toolbar slides away, the device rotates. Follow
+// the page's own box rather than the window the canvas was born with, or the
+// pitch stays the size of the old frame and the rest of the screen is black.
+const fitToFrame = () => {
+  const width = document.documentElement.clientWidth || window.innerWidth;
+  const height = document.documentElement.clientHeight || window.innerHeight;
+  if (!width || !height) return;
+  camera.aspect = width / height;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+  // Both the drawing buffer and the element's own style: the renderer writes
+  // an explicit pixel height on the canvas at start-up, and leaving that in
+  // place keeps the old, smaller picture inside a frame that has since grown.
+  renderer.setSize(width, height);
+};
+
+window.addEventListener('resize', fitToFrame);
+window.visualViewport?.addEventListener('resize', fitToFrame);
+new ResizeObserver(fitToFrame).observe(document.documentElement);
+fitToFrame();
 
 // expose for debugging / casual tinkering
 window.__match = match;

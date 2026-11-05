@@ -341,6 +341,35 @@ The engine's own quality switches pass straight through (`?crowd=off`,
 software WebGL included — loses the context mid-match at that size and keeps it
 with the crowd off.
 
+The level handed to the engine is the one number that decides the scoreline, and
+it is taken from the market, not from the league table. The scale is steep: on
+the engine's own 1–20 scale it plays two equal elevens 2-3 or 3-2, a two-level
+gap 3-1, a three-level gap 5-0 and an eight-level gap 7-0. Anchoring levels on
+relative league position therefore priced a Czech or Hungarian league leader as
+if it were better than a mid-table Serie A side, and Milan v Ferencváros was
+played 0-5 the wrong way; Arsenal at Slavia produced 0-12. The profile already
+knows better: its expectations come from the fixture's own prices (Slavia 0.58–
+2.18, Milan 2.24–0.75). `baseLevels` turns the expected margin into levels at a
+little over one level per expected goal and holds the two bases at 12; the
+league table is only the fallback, at the same gentle rate. A player's standing
+inside his squad and his own run of ratings still move him, by about a level.
+The same fixtures now play 3-1 at Milan, 1-3 at AEK, and Slavia–Arsenal comes out
+0-5, 2-3, 1-4, 1-1, 1-1 across five seeds — a heavy afternoon once, not a rout
+every time. `test/engine-levels.test.mjs` holds that shape, and the recording
+signature includes the levels so a retuned mapping replays rather than serving
+the old match from the cache.
+
+The page no longer prints the engine's full-time score in its header. The engine
+plays the whole match before it records one, so the result was known before a
+frame had been watched — it read as "the simulation says 0-12" before anyone
+pressed play. The header names the two sides; the engine's own scoreboard counts
+up with the clock. The stage also fills the frame it is given instead of staying
+in a fixed 16:9 box, which on a phone turned full screen into a short strip with
+black above and below, and the house sim's canvas now follows its frame: the
+renderer wrote an explicit pixel height on the canvas at start-up, so opening
+full screen around a running match left the old, smaller picture inside a black
+box.
+
 The recording still also plays through `src/sim3d/sim/replay.js`
 (`?engine=open-football` on the house frame), which interpolates the tracks into
 pitch metres and raises the house HUD, camera and audio events. The Live tab no
