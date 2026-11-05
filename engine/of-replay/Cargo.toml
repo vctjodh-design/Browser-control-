@@ -18,6 +18,9 @@ edition = "2024"
 core = { git = "https://github.com/ZOXEXIVO/open-football", tag = "v1.8.183" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The viewer's position chunks are gzipped on disk, the way upstream writes
+# them, so the browser streams them straight off the wire.
+flate2 = "1"
 
 [profile.release]
 # The engine's own release profile. A single match is seconds of CPU either

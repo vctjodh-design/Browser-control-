@@ -105,7 +105,7 @@ export function buildOpenFootballSpec(profile: SimFormProfile, seed: number) {
 }
 
 /** Where the built harness lives, relative to the repo, in dev and in Docker. */
-function binaryPath(): string {
+export function openFootballBinaryPath(): string {
   const configured = process.env.OF_REPLAY_BIN;
   if (configured) return configured;
 
@@ -155,7 +155,7 @@ export async function playOpenFootballMatch(
   const cached = cache.get(key);
   if (cached) return cached;
 
-  const binary = binaryPath();
+  const binary = openFootballBinaryPath();
   if (!existsSync(binary)) {
     throw new OpenFootballUnavailableError(
       `The Open Football engine is not built (looked for ${binary}). Run \`cargo build --release\` in engine/of-replay.`,

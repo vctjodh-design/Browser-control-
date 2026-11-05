@@ -1,4 +1,6 @@
 import { Router, type IRouter, type Response } from "express";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { gzipSync } from "node:zlib";
 import {
   GetFootballMatchDetailsParams,
@@ -31,6 +33,13 @@ import {
   OpenFootballUnavailableError,
   playOpenFootballMatch,
 } from "../lib/open-football-replay";
+import {
+  openFootballViewerReady,
+  openFootballViewerRecording,
+  renderViewerPage,
+  viewerScriptPath,
+  viewerWasmPath,
+} from "../lib/open-football-viewer";
 import { getOddsBoard } from "../lib/odds-board";
 import { simulateOddsBoard } from "../lib/odds-simulation";
 import { settleBoard } from "../lib/odds-settlement";
@@ -410,6 +419,138 @@ router.get(
       res.status(502).json({
         error: "The Open Football engine could not play this match right now.",
       });
+    }
+  },
+);
+
+// The engine's own broadcast viewer: the Bevy renderer upstream ships,
+// compiled to WebAssembly, fed with this fixture's recording. The page, its
+// two assets and the position chunks all live under one path, so the frame is
+// same-origin with the app and needs no cross-origin allowance.
+const viewerBase = (fixtureId: number) =>
+  `/api/football/matches/${fixtureId}/open-football-viewer`;
+
+router.get(
+  "/football/matches/:fixtureId/open-football-viewer",
+  async (req, res): Promise<void> => {
+    const fixtureId = Number(req.params.fixtureId);
+    if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+    if (!openFootballViewerReady()) {
+      res.status(503).json({ error: "The Open Football viewer has not been built." });
+      return;
+    }
+
+    const seedValue = Number(req.query.seed);
+    const seed = Number.isFinite(seedValue) && seedValue > 0 ? Math.round(seedValue) : 7;
+
+    try {
+      const profile = await getSimFormProfile(fixtureId);
+      const recording = await openFootballViewerRecording(profile, seed);
+      res.set("Cache-Control", "no-store");
+      res.type("html").send(renderViewerPage(recording, viewerBase(fixtureId)));
+    } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      if (error instanceof OpenFootballUnavailableError) {
+        req.log.error({ reason: error.message }, "Open Football viewer unavailable");
+        res.status(503).json({ error: error.message });
+        return;
+      }
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not open the fixture in the Open Football viewer",
+      );
+      res.status(502).json({ error: "The Open Football viewer could not open this match." });
+    }
+  },
+);
+
+router.get(
+  "/football/matches/:fixtureId/open-football-viewer/static/:asset",
+  async (req, res): Promise<void> => {
+    const asset = req.params.asset;
+    if (asset !== "match_viewer.js" && asset !== "match_viewer_bg.wasm") {
+      res.status(404).json({ error: "No such viewer file." });
+      return;
+    }
+    const file = asset === "match_viewer.js" ? viewerScriptPath() : viewerWasmPath();
+    try {
+      // Both files are held gzipped here and on disk: 22 MB of Bevy inflates
+      // in the browser, and it streams into the wasm compiler from there.
+      const body = await readFile(file);
+      res.set("Content-Encoding", "gzip");
+      res.set("Cache-Control", "private, max-age=86400");
+      res.type(asset === "match_viewer.js" ? "text/javascript" : "application/wasm");
+      res.send(body);
+    } catch (error) {
+      req.log.error({ errorName: error instanceof Error ? error.name : "UnknownError" });
+      res.status(404).json({ error: "No such viewer file." });
+    }
+  },
+);
+
+// The chunk list: how many there are, how long each one runs, and how long the
+// match was — the three numbers the viewer needs before it asks for a chunk.
+router.get(
+  "/football/matches/:fixtureId/open-football-viewer/metadata",
+  async (req, res): Promise<void> => {
+    const fixtureId = Number(req.params.fixtureId);
+    if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+    const seedValue = Number(req.query.seed);
+    const seed = Number.isFinite(seedValue) && seedValue > 0 ? Math.round(seedValue) : 7;
+
+    try {
+      const profile = await getSimFormProfile(fixtureId);
+      const recording = await openFootballViewerRecording(profile, seed);
+      const body = await readFile(path.join(recording.dir, "metadata.json"));
+      res.set("Cache-Control", "private, max-age=3600");
+      res.type("application/json").send(body);
+    } catch (error) {
+      if (error instanceof OpenFootballUnavailableError) {
+        res.status(503).json({ error: error.message });
+        return;
+      }
+      res.status(404).json({ error: "This match has no recording yet." });
+    }
+  },
+);
+
+router.get(
+  "/football/matches/:fixtureId/open-football-viewer/chunk/:index",
+  async (req, res): Promise<void> => {
+    const fixtureId = Number(req.params.fixtureId);
+    const index = Number(req.params.index);
+    if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0 || !Number.isSafeInteger(index)) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    const seedValue = Number(req.query.seed);
+    const seed = Number.isFinite(seedValue) && seedValue > 0 ? Math.round(seedValue) : 7;
+
+    try {
+      const profile = await getSimFormProfile(fixtureId);
+      const recording = await openFootballViewerRecording(profile, seed);
+      const body = await readFile(path.join(recording.dir, `chunk_${index}.json.gz`));
+      // Written gzipped by the engine, handed over as-is.
+      res.set("Content-Encoding", "gzip");
+      res.set("Cache-Control", "private, max-age=3600");
+      res.type("application/gzip").send(body);
+    } catch (error) {
+      if (error instanceof OpenFootballUnavailableError) {
+        res.status(503).json({ error: error.message });
+        return;
+      }
+      res.status(404).json({ error: "No such chunk in this recording." });
     }
   },
 );

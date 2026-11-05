@@ -316,20 +316,47 @@ recording, gzipped, cached per (fixture, seed). A real board (AEK v Real Madrid,
 28 players) is 6.7 MB of JSON, 2.2 MB on the wire, about 6 s of engine time on
 8 cores and 16 s including the form profile.
 
-The Live tab's engine button switches the frame to `?engine=open-football`.
-`src/sim3d/sim/replay.js` then walks the recording instead of simulating:
-it interpolates every track into pitch metres, keeps the walk cycle running off
-measured speed, and raises the same goal / substitution / half-time / full-time
-events into the existing HUD, camera and audio. The stadium does not know which
-engine it is showing.
+The Live tab's engine button now hands the frame to the engine's **own broadcast
+viewer**: the Bevy renderer upstream ships (`src/match`), compiled to WebAssembly
+(22 MB, 7 MB gzipped) and fed this fixture's recording. The pitch, the stands,
+the mow stripes, the crowd, the ad boards, the kits, the name labels and the
+broadcast scoreboard are the GitHub project's own, drawn by its code — not that
+movement re-drawn in the house stadium.
+
+The bridge writes that format directly. `--viewer <dir>` plays the fixture and
+writes what the viewer reads: the recording cut into five-minute position
+chunks, each gzipped; a metadata document (chunk count, chunk length, match
+length); and the fixture document — teams, colours, goals, chances,
+substitutions, and every man's name, shirt, role and starting place. Almost all
+of that the bridge already had; only the chunk shape and the page document are
+new. `lib/open-football-viewer.ts` caches one such directory per (fixture, seed)
+and serves `GET /api/football/matches/:id/open-football-viewer` — the page —
+with its two WebAssembly files and the chunks under the same path, so the frame
+is same-origin with the app and needs no cross-origin allowance. A first request
+plays the match (~15 s); after that the page and its chunks come off disk.
+
+The engine's own quality switches pass straight through (`?crowd=off`,
+`?grain=spare`, `?squad=off`). They are not decoration: the full scene holds
+195 MB of GPU assets, and a machine without a real GPU — the cloud preview's
+software WebGL included — loses the context mid-match at that size and keeps it
+with the crowd off.
+
+The recording still also plays through `src/sim3d/sim/replay.js`
+(`?engine=open-football` on the house frame), which interpolates the tracks into
+pitch metres and raises the house HUD, camera and audio events. The Live tab no
+longer uses it: that was the complaint — the movement was the engine's but the
+picture was ours.
 
 Honest limits: the engine's decision RNG draws from OS entropy, so the same seed
 does *not* reproduce the same scoreline — `seed` pins the shape of the play, not
-the result. A 100k-round study of this engine is therefore not a thing yet; one
-match is. And the recording carries no corners, so the corner counter reads zero
-in engine mode. The Docker image compiles the crate in a `rust:1.99` stage and
-copies the binary to `/app/engine/of-replay/target/release/of_replay`; that
-stage has not been built here (no Docker in this sandbox), only the native build.
+the result. Two requests for the same fixture and seed are cached, so the page
+and its chunks always agree with each other, but a fresh seed is a fresh match.
+A 100k-round study of this engine is therefore not a thing yet; one match is.
+And the recording carries no corners, so the corner counter reads zero in engine
+mode. The Docker image compiles the crate in a `rust:1.99` stage, copies the
+binary to `/app/engine/of-replay/target/release/of_replay`, and carries the
+viewer's two gzipped files in `artifacts/api-server/assets/viewer`; that image
+has not been built here (no Docker in this sandbox), only the native build.
 
 ### Reading the predictions
 The simulation's answer sits above the markets: the result it favours, its most

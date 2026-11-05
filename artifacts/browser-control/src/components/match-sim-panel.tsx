@@ -231,6 +231,13 @@ export function MatchSimPanel({
   }, [fixtureId]);
 
   const source = useMemo(() => {
+    // Engine mode is the engine's own broadcast viewer: its Bevy renderer
+    // (stadium, crowd, kits, scoreboard) playing back the recording this
+    // fixture produced. The house sim is untouched underneath.
+    if (engine === 'open-football') {
+      return `${import.meta.env.BASE_URL}api/football/matches/${fixtureId}/open-football-viewer?seed=${engineSeed}`;
+    }
+
     let homeColour = kitColour(home);
     const awayColour = kitColour(away);
     if (awayColour === homeColour) homeColour = KIT_COLOURS[(KIT_COLOURS.indexOf(homeColour) + 3) % KIT_COLOURS.length];
@@ -243,10 +250,6 @@ export function MatchSimPanel({
       fixture: String(fixtureId),
     });
     if (venue) params.set('venue', venue);
-    if (engine === 'open-football') {
-      params.set('engine', 'open-football');
-      params.set('seed', String(engineSeed));
-    }
     return `${import.meta.env.BASE_URL}sim.html?${params.toString()}`;
   }, [home, away, venue, fixtureId, engine, engineSeed]);
 
@@ -427,8 +430,8 @@ export function MatchSimPanel({
       {engine === 'open-football' ? (
         <div className="border-b border-[#2c4152] bg-[#182836] px-3 py-2.5 sm:px-5" data-testid="sim-engine-note">
           <p className="mono text-[8px] uppercase leading-4 tracking-[.11em] text-[#8ba39c]">
-            One match, played by the Open Football engine from these elevens — its own goals, its own
-            movement. Run it again for another match.
+            The Open Football engine plays these elevens and its own broadcast viewer draws the match:
+            its pitch, its stands, its kits. Run it again for another match.
           </p>
         </div>
       ) : (

@@ -36,6 +36,9 @@ struct TeamSpec {
     name: String,
     #[serde(default)]
     tactic: Option<String>,
+    /// Shirt colour for the broadcast viewer's scoreboard and kit.
+    #[serde(default)]
+    color: Option<String>,
     players: Vec<PlayerSpec>,
     #[serde(default)]
     bench: Vec<PlayerSpec>,
@@ -379,6 +382,149 @@ fn main() {
             "passes": totals[side][2],
             "possession": share,
         });
+    }
+
+    // `--viewer <dir>`: the same match, written in the shape the upstream Bevy
+    // viewer reads — gzipped position chunks, their metadata document and the
+    // fixture the page hands the canvas. That viewer is the engine's own
+    // broadcast renderer (stadium, crowd, kits, scoreboard), so this is what
+    // lets the app show their match rather than an approximation of it.
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--viewer") {
+        let dir = std::path::PathBuf::from(
+            args.get(2).cloned().unwrap_or_else(|| "viewer".to_string()),
+        );
+        std::fs::create_dir_all(&dir).expect("viewer directory");
+
+        // Upstream cuts the recording into five-minute chunks.
+        const CHUNK_MS: u64 = 300_000;
+        let chunks = result.position_data.split_into_chunks(CHUNK_MS);
+        for (index, chunk) in chunks.iter().enumerate() {
+            let raw = serde_json::to_vec(chunk).expect("chunk json");
+            let file = std::fs::File::create(dir.join(format!("chunk_{index}.json.gz")))
+                .expect("chunk file");
+            let mut encoder =
+                flate2::write::GzEncoder::new(file, flate2::Compression::default());
+            encoder.write_all(&raw).expect("chunk gzip");
+            encoder.finish().expect("chunk gzip finish");
+        }
+
+        let metadata = json!({
+            "chunk_count": chunks.len(),
+            "chunk_duration_ms": CHUNK_MS,
+            "total_duration_ms": result.position_data.max_timestamp(),
+        });
+        std::fs::write(dir.join("metadata.json"), serde_json::to_vec(&metadata).unwrap())
+            .expect("metadata");
+
+        // One entry per man, in the order the viewer builds its squad. The
+        // look is three indices into the engine's own colour tables, kept in
+        // range by construction.
+        let player_json = |entry: &Value, is_home: bool| -> Value {
+            let id = entry["id"].as_u64().unwrap_or(0) as u32;
+            let (first, last) = split_name(entry["name"].as_str().unwrap_or(""));
+            let position = entry["role"]
+                .as_str()
+                .and_then(parse_position)
+                .map(|pos| pos.get_short_name())
+                .unwrap_or("MC");
+            json!({
+                "id": id,
+                "shirt_number": entry["shirt"].as_u64().unwrap_or(1) as u8,
+                "first_name": first,
+                "last_name": last,
+                "position": position,
+                "is_home": is_home,
+                "starting": !entry["sub"].as_bool().unwrap_or(false),
+                "skin": (id % 12) as u8,
+                "hair": ((id / 2) % 10) as u8,
+                "eyes": (id % 8) as u8,
+            })
+        };
+
+        let mut players = Vec::new();
+        for entry in home.roster.iter() {
+            players.push(player_json(entry, true));
+        }
+        for entry in away.roster.iter() {
+            players.push(player_json(entry, false));
+        }
+
+        let goals_json: Vec<Value> = score
+            .map(|s| {
+                s.details
+                    .iter()
+                    .filter(|goal| {
+                        goal.stat_type
+                            == core::r#match::player::statistics::MatchStatisticType::Goal
+                    })
+                    .map(|goal| {
+                        json!({
+                            "player_id": goal.player_id,
+                            "time": goal.time,
+                            "is_auto_goal": goal.is_auto_goal,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let chances_json: Vec<Value> = result
+            .chances
+            .iter()
+            .map(|chance| json!({ "player_id": chance.player_id, "time": chance.time }))
+            .collect();
+
+        let viewer_subs: Vec<Value> = result
+            .substitutions
+            .iter()
+            .map(|change| {
+                json!({
+                    "player_in_id": change.player_in_id,
+                    "player_out_id": change.player_out_id,
+                    "time": change.match_time_ms,
+                    "break_ms": change.break_ms,
+                })
+            })
+            .collect();
+
+        let config = json!({
+            "match_time_ms": result.match_time_ms,
+            "home_name": spec.home.name,
+            "away_name": spec.away.name,
+            "home": {
+                "background": spec.home.color.clone().unwrap_or_else(|| "#00307d".to_string()),
+                "foreground": "#ffffff",
+            },
+            "away": {
+                "background": spec.away.color.clone().unwrap_or_else(|| "#b33f00".to_string()),
+                "foreground": "#ffffff",
+            },
+            "home_goals": home_goals,
+            "away_goals": away_goals,
+            "players": players,
+            "goals": goals_json,
+            "chances": chances_json,
+            "substitutions": viewer_subs,
+            "venue": {
+                "field_style": 5,
+                "capacity": 62_000,
+                "attendance": 54_000,
+                "reputation": 9_400,
+                "visitor": 9_200,
+                "youth": false,
+            },
+            "debug": false,
+            "lineup": true,
+        });
+        std::fs::write(dir.join("config.json"), serde_json::to_vec(&config).unwrap())
+            .expect("config");
+
+        println!(
+            "{}",
+            json!({ "dir": dir.to_string_lossy(), "chunks": chunks.len(), "players": players.len() })
+        );
+        return;
     }
 
     let out = json!({
