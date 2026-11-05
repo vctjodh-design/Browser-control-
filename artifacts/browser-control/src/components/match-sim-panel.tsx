@@ -32,19 +32,34 @@ function formLetters(team: SimTeamProfile, games = 5) {
 }
 
 // A match covers 90 minutes of football in roughly nine minutes of real time at
-// 1x, and the game stops drawing frames above WATCHABLE_SPEED so a batch can
-// actually reach the rest of the range.
+// 1x. A batch is not watched at all: the frame plays the rounds as fast as the
+// device's arithmetic allows, so how long 10,000 of them take is a measurement,
+// not a guess, and the run reports what each round is actually costing.
 const MATCH_SECONDS = 540;
 const WATCHABLE_SPEED = 4;
+const MAX_ROUNDS = 100000;
 const SPEEDS = Array.from({ length: 30 }, (_, index) => index + 1);
 
 function durationText(totalMatches: number, speed: number) {
   const seconds = Math.round((totalMatches * MATCH_SECONDS) / Math.max(1, speed));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
+  return clockText(seconds);
+}
+
+function clockText(seconds: number) {
+  const total = Math.max(0, Math.round(seconds));
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  const rest = total % 60;
   if (minutes < 60) return `${minutes}m ${String(rest).padStart(2, '0')}s`;
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
+}
+
+/** How long the rest of the batch needs, at the speed it is actually running. */
+function etaText(run: SeriesRun) {
+  const remaining = Math.max(0, run.total - run.done);
+  if (!run.roundMs) return 'measuring the pace…';
+  if (!remaining) return 'finishing';
+  return `≈ ${clockText((remaining * run.roundMs) / 1000)} left`;
 }
 
 type SeriesResult = {
@@ -63,9 +78,16 @@ type SeriesRun = {
   total: number;
   done: number;
   running: boolean;
-  live: { home: number; away: number } | null;
   results: SeriesResult[];
+  groups: ScorelineGroup[];
+  elapsed: number;
+  roundMs: number;
+  stopped: boolean;
 };
+
+// Every round played lands in the tally for its scoreline, so ten thousand
+// matches read as a handful of rows with how often each came up.
+type ScorelineGroup = { key: string; home: number; away: number; goals: number; count: number };
 
 const RESULT_STYLE: Record<string, string> = {
   W: 'bg-[#2f6b4f] text-[#e8f3ec]',
@@ -203,9 +225,12 @@ export function MatchSimPanel({
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [engineReady, setEngineReady] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [rounds, setRounds] = useState(5);
+  const [rounds, setRounds] = useState(25);
   const [speed, setSpeed] = useState(10);
   const [run, setRun] = useState<SeriesRun | null>(null);
+  // What a round costs on this device, measured by the frame over the first
+  // rounds, so the estimate before a run is a fact rather than a guess.
+  const [roundMs, setRoundMs] = useState(0);
 
   useEffect(() => {
     if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0) {
@@ -275,30 +300,55 @@ export function MatchSimPanel({
         done?: number;
         result?: SeriesResult;
         results?: SeriesResult[];
+        groups?: ScorelineGroup[];
+        elapsed?: number;
+        roundMs?: number;
+        stopped?: boolean;
       } | null;
       if (!data || data.source !== 'match-sim') return;
 
       if (data.type === 'sim-ready') {
         setEngineReady(true);
       } else if (data.type === 'sim-series-start') {
-        setRun({ total: data.total ?? 0, done: 0, running: true, live: null, results: [] });
-      } else if (data.type === 'sim-series-round' && data.result) {
-        const result = data.result;
+        setRun({
+          total: data.total ?? 0,
+          done: 0,
+          running: true,
+          results: [],
+          groups: [],
+          elapsed: 0,
+          roundMs: 0,
+          stopped: false,
+        });
+      } else if (data.type === 'sim-series-progress') {
         setRun((previous) =>
           previous
             ? {
                 ...previous,
-                done: data.done ?? previous.done + 1,
-                live: { home: result.homeScore, away: result.awayScore },
-                results: [...previous.results, result],
+                done: data.done ?? previous.done,
+                total: data.total ?? previous.total,
+                elapsed: data.elapsed ?? previous.elapsed,
+                roundMs: data.roundMs || previous.roundMs,
+                groups: (data.groups ?? previous.groups) as ScorelineGroup[],
+                results: (data.results ?? previous.results) as SeriesResult[],
               }
             : previous,
         );
       } else if (data.type === 'sim-series-done') {
-        const results = (data.results ?? []) as SeriesResult[];
         setRun((previous) =>
-          previous ? { ...previous, running: false, live: null, results, done: results.length } : previous,
+          previous
+            ? {
+                ...previous,
+                running: false,
+                done: data.done ?? previous.done,
+                elapsed: data.elapsed ?? previous.elapsed,
+                groups: (data.groups ?? previous.groups) as ScorelineGroup[],
+                results: (data.results ?? previous.results) as SeriesResult[],
+                stopped: Boolean(data.stopped),
+              }
+            : previous,
         );
+        if (typeof data.roundMs === 'number' && data.roundMs > 0) setRoundMs(data.roundMs);
       }
     };
     window.addEventListener('message', onMessage);
@@ -312,10 +362,10 @@ export function MatchSimPanel({
   };
 
   const startRun = () => {
-    const total = Math.max(1, Math.min(50, Math.round(rounds) || 1));
+    const total = Math.max(1, Math.min(MAX_ROUNDS, Math.round(rounds) || 1));
     setRounds(total);
-    setRun({ total, done: 0, running: true, live: null, results: [] });
-    postToSim({ type: 'sim-series', count: total, speed });
+    setRun({ total, done: 0, running: true, results: [], groups: [], elapsed: 0, roundMs: 0, stopped: false });
+    postToSim({ type: 'sim-series', count: total });
   };
 
   const stopRun = () => postToSim({ type: 'sim-series-stop' });
@@ -333,15 +383,16 @@ export function MatchSimPanel({
   };
 
   const seriesSummary = useMemo(() => {
-    const results = run?.results ?? [];
-    if (!results.length) return null;
-    const homeWins = results.filter((result) => result.homeScore > result.awayScore).length;
-    const draws = results.filter((result) => result.homeScore === result.awayScore).length;
-    const awayWins = results.length - homeWins - draws;
-    const goals = results.reduce((total, result) => total + result.homeScore + result.awayScore, 0);
-    const homeGoals = results.reduce((total, result) => total + result.homeScore, 0) / results.length;
-    const awayGoals = results.reduce((total, result) => total + result.awayScore, 0) / results.length;
-    const averageGoals = goals / results.length;
+    const groups = run?.groups ?? [];
+    const played = groups.reduce((total, group) => total + group.count, 0);
+    if (!played) return null;
+    const homeWins = groups.filter((group) => group.home > group.away).reduce((total, group) => total + group.count, 0);
+    const draws = groups.filter((group) => group.home === group.away).reduce((total, group) => total + group.count, 0);
+    const awayWins = played - homeWins - draws;
+    const homeGoals = groups.reduce((total, group) => total + group.home * group.count, 0) / played;
+    const awayGoals = groups.reduce((total, group) => total + group.away * group.count, 0) / played;
+    const averageGoals = homeGoals + awayGoals;
+    const best = groups[0] ?? null;
 
     // The match was played from the squads and their numbers, not from these
     // targets — so this is the answer to "did it come out over, under or as
@@ -357,7 +408,7 @@ export function MatchSimPanel({
         ].map((row) => ({ ...row, delta: row.played - row.target, verdict: verdict(row.played - row.target) }))
       : [];
 
-    return { homeWins, draws, awayWins, averageGoals, comparison };
+    return { homeWins, draws, awayWins, averageGoals, best, comparison };
   }, [run, profile]);
 
   const running = run?.running ?? false;
@@ -468,17 +519,19 @@ export function MatchSimPanel({
       <div className={`border-b border-[#2c4152] bg-[#182836] px-3 py-2.5 sm:px-5 ${expanded ? 'hidden' : ''}`} data-testid="sim-run-bar">
         <div className="flex flex-wrap items-end gap-2.5">
           <label className="flex flex-col gap-1">
-            <span className="mono text-[7px] uppercase tracking-[.14em] text-[#7f978f]">Matches</span>
+            <span className="mono text-[7px] uppercase tracking-[.14em] text-[#7f978f]">Rounds</span>
             <input
               type="number"
               min={1}
-              max={50}
+              max={MAX_ROUNDS}
               step={1}
               inputMode="numeric"
               value={rounds}
               disabled={running}
               onChange={(event) => setRounds(Number(event.target.value))}
-              onBlur={() => setRounds((value) => Math.max(1, Math.min(50, Math.round(value) || 1)))}
+              onBlur={() =>
+                setRounds((value) => Math.max(1, Math.min(MAX_ROUNDS, Math.round(value) || 1)))
+              }
               className="mono h-7 w-[58px] rounded-md border border-[#334b5d] bg-[#0f1c27] px-2 text-[11px] font-bold text-[#eaf2ee] outline-none focus:border-[#5d8a7b] disabled:opacity-50"
               aria-label="Number of matches to simulate"
               data-testid="input-sim-rounds"
@@ -517,16 +570,16 @@ export function MatchSimPanel({
               className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#3d6156] bg-[#25463c] px-3 text-[9px] font-extrabold text-[#d8f0e3] transition hover:bg-[#2d564a] disabled:cursor-not-allowed disabled:opacity-45"
               data-testid="button-sim-run"
             >
-              <Play size={10} /> Run {Math.max(1, Math.min(50, Math.round(rounds) || 1))}
+              <Play size={10} /> Simulate {Math.max(1, Math.min(MAX_ROUNDS, Math.round(rounds) || 1)).toLocaleString()}
             </button>
           )}
           <span className="mono ml-auto pb-1 text-[8px] uppercase tracking-[.11em] text-[#8ba39c]" data-testid="sim-run-status">
             {running && run
-              ? `Round ${Math.min(run.done + 1, run.total)} of ${run.total}${run.live ? ` · ${run.live.home}–${run.live.away}` : ''}`
-              : run && run.results.length
-                ? `${run.results.length} of ${run.total} played`
-                : engineReady
-                  ? `≈ ${durationText(Math.max(1, Math.min(50, Math.round(rounds) || 1)), speed)} at ${speed}×`
+              ? `${run.done.toLocaleString()} of ${run.total.toLocaleString()} · ${etaText(run)}`
+              : engineReady
+                  ? roundMs
+                    ? `≈ ${clockText((roundMs / 1000) * Math.max(1, Math.min(MAX_ROUNDS, Math.round(rounds) || 1)))} for ${Math.max(1, Math.min(MAX_ROUNDS, Math.round(rounds) || 1)).toLocaleString()} rounds here`
+                    : 'every round is played in full; the pace shows when it starts'
                   : 'Warming up…'}
           </span>
         </div>
@@ -573,19 +626,19 @@ export function MatchSimPanel({
             data-testid="iframe-match-simulation"
           />
         )}
-        {running && speed > WATCHABLE_SPEED ? (
+        {running ? (
           <div
             className="pointer-events-none absolute inset-0 grid place-items-center bg-[#0b1520]/88 px-6 text-center"
             data-testid="sim-batch-overlay"
           >
             <div>
-              <p className="mono text-[9px] uppercase tracking-[.16em] text-[#7fa79a]">Simulating at {speed}×</p>
+              <p className="mono text-[9px] uppercase tracking-[.16em] text-[#7fa79a]">Simulating</p>
               <p className="mt-2 text-[26px] font-extrabold leading-none tracking-[-.02em] text-[#eaf2ee]">
-                {Math.min((run?.done ?? 0) + 1, run?.total ?? 1)}
-                <span className="text-[#5b7a71]"> / {run?.total ?? 1}</span>
+                {(run?.done ?? 0).toLocaleString()}
+                <span className="text-[#5b7a71]"> / {(run?.total ?? 1).toLocaleString()}</span>
               </p>
               <p className="mono mt-2 text-[8px] uppercase leading-3 tracking-[.1em] text-[#6b837c]">
-                {run?.results.length ?? 0} played · the pitch pauses above {WATCHABLE_SPEED}× so the rounds finish sooner
+                {run ? etaText(run) : 'starting'} · every round is played in full
               </p>
             </div>
           </div>
@@ -596,42 +649,55 @@ export function MatchSimPanel({
         <div className={`border-t border-[#2c4152] bg-[#16242f] px-3 py-2.5 sm:px-5 ${expanded ? 'hidden' : ''}`} data-testid="panel-sim-results">
           <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
             <p className="mono text-[7.5px] uppercase tracking-[.14em] text-[#7f978f]">
-              Results · {run.results.length} of {run.total} matches
+              Scores by group · {run.done.toLocaleString()} of {run.total.toLocaleString()} rounds
             </p>
             <p className="mono text-[7.5px] uppercase tracking-[.12em] text-[#8fb7a4]" data-testid="sim-results-state">
-              {running ? `Round ${Math.min(run.done + 1, run.total)} of ${run.total}` : 'Complete'}
+              {running
+                ? etaText(run)
+                : `${run.stopped ? 'Stopped' : 'Complete'} · ${run.done.toLocaleString()} rounds in ${clockText(run.elapsed)}`}
             </p>
           </div>
-          <ol className="grid gap-[3px]" data-testid="sim-results-list">
-            {run.results.map((result) => {
-              const homeWin = result.homeScore > result.awayScore;
-              const awayWin = result.awayScore > result.homeScore;
+          <ol className="grid max-h-[260px] gap-[3px] overflow-y-auto pr-0.5" data-testid="sim-results-groups">
+            {run.groups.map((group) => {
+              const share = (group.count / Math.max(1, run.done)) * 100;
               return (
                 <li
-                  key={result.round}
-                  className="grid grid-cols-[22px_minmax(0,1fr)_46px_minmax(0,1fr)] items-center gap-1.5 rounded border border-[#243746] bg-[#182836] px-2 py-[3px]"
-                  data-testid={`sim-result-${result.round}`}
+                  key={group.key}
+                  className="relative grid grid-cols-[54px_44px_minmax(0,1fr)] items-center gap-2 overflow-hidden rounded border border-[#243746] bg-[#182836] px-2 py-[4px]"
+                  data-testid={`sim-group-${group.key}`}
                 >
-                  <span className="mono text-[7.5px] text-[#6f847f]">R{result.round}</span>
-                  <span
-                    className={`truncate text-right text-[9px] font-bold ${homeWin ? 'text-[#dbe6e0]' : 'text-[#7f918c]'}`}
-                  >
-                    {result.home}
+                  <span className="absolute inset-y-0 left-0 bg-[#25463c]/45" style={{ width: `${share}%` }} />
+                  <span className="mono relative whitespace-nowrap text-[11px] font-extrabold tracking-[.02em] text-[#eaf2ee]">
+                    {group.home}–{group.away}
                   </span>
-                  <span className="mono whitespace-nowrap text-center text-[10px] font-extrabold tracking-[.02em] text-[#eaf2ee]">
-                    {result.homeScore}–{result.awayScore}
-                  </span>
-                  <span className={`truncate text-[9px] font-bold ${awayWin ? 'text-[#dbe6e0]' : 'text-[#7f918c]'}`}>
-                    {result.away}
+                  <span className="mono relative text-[9px] text-[#9fb8ae]">{group.count.toLocaleString()}×</span>
+                  <span className="mono relative text-right text-[9px] text-[#8ba39c]">
+                    {share < 1 ? share.toFixed(2) : share.toFixed(1)}%
                   </span>
                 </li>
               );
             })}
           </ol>
+          {run.results.length <= 20 ? (
+            <ol className="mt-1.5 grid gap-[3px]" data-testid="sim-results-list">
+              {run.results.map((result) => (
+                <li
+                  key={result.round}
+                  className="mono rounded border border-[#243746] bg-[#182836] px-2 py-[2px] text-[8px] text-[#8ba39c]"
+                  data-testid={`sim-result-${result.round}`}
+                >
+                  R{result.round} · {result.homeScore}–{result.awayScore}
+                </li>
+              ))}
+            </ol>
+          ) : null}
           {seriesSummary ? (
             <p className="mono mt-2 text-[7.5px] leading-3 uppercase tracking-[.1em] text-[#7f978f]" data-testid="sim-results-summary">
-              {teams?.[0]?.name ?? home} {seriesSummary.homeWins} wins · {seriesSummary.draws} drawn ·{' '}
-              {teams?.[1]?.name ?? away} {seriesSummary.awayWins} wins · {seriesSummary.averageGoals.toFixed(2)} goals a match
+              {teams?.[0]?.name ?? home} {seriesSummary.homeWins} · {seriesSummary.draws} drawn ·{' '}
+              {teams?.[1]?.name ?? away} {seriesSummary.awayWins} · {seriesSummary.averageGoals.toFixed(2)} goals a match
+              {seriesSummary.best
+                ? ` · most often ${seriesSummary.best.home}–${seriesSummary.best.away}`
+                : ''}
             </p>
           ) : null}
           {seriesSummary?.comparison.length ? (

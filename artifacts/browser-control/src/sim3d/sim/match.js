@@ -53,6 +53,9 @@ export class Match {
     this.onCard = options.onCard || (() => {});
     this.onReset = options.onReset || (() => {});
     this.makeRig = options.makeRig || ((cfg) => new PlayerRig(cfg));
+    // A batch of rounds has no picture: posing twenty-two rigs every tick is by
+    // far the dearest thing in a tick and none of it can be seen.
+    this.headless = false;
 
     this.agents = [];
     this.teams = [];
@@ -488,7 +491,7 @@ export class Match {
     }
 
     this.updateOfficials(dt);
-    this.updateRigs(dt);
+    if (!this.headless) this.updateRigs(dt);
     this.excite = Math.max(0, this.excite - dt * 0.55);
     this.assistTimer = Math.max(0, this.assistTimer - dt);
     if (this.assistTimer <= 0) this.assistCandidate = null;

@@ -389,6 +389,23 @@ No audio file and no service sits in between. The dock's speeds are 1×, 2×, 4�
 the match as many fixed ticks per frame as the device can afford, so how close
 it gets to 30× is the phone's arithmetic rather than a cap in the app.
 
+House sim also takes a *batch*: type how many rounds to play (1 to 100,000), press
+SIMULATE, and the same match — same eleven, same levels, same engine — is played
+that many times with the picture switched off, then the scores come back grouped
+by scoreline with how often each one came up. The batch has its own slice timer
+(`runSeriesSlice` in `main.js`) rather than the frame loop, so it steps the match
+in twelve-millisecond helpings and never draws: `match.headless` skips posing the
+22 rigs, which is the dearest thing in a tick and cannot be seen. Each round is
+still a full ninety minutes and nothing about it is sampled or modelled — the
+only thing given up is the picture. That puts a round at about two seconds on the
+CI machine (a measured figure, shown as an estimate before a run and as a running
+ETA during one), so a hundred rounds is a couple of minutes while a hundred
+thousand is a couple of days of computing: the number is honest, not a promise.
+
+On the pitch under the full screen toggle, the player who watches a single match
+still gets the live version at 1x-30x; the batch is what runs when the count is
+more than a handful.
+
 The page no longer prints the engine's full-time score in its header. The engine
 plays the whole match before it records one, so the result was known before a
 frame had been watched — it read as "the simulation says 0-12" before anyone

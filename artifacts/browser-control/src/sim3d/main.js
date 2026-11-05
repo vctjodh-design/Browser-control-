@@ -78,8 +78,14 @@ scene.add(ball.mesh);
 const audio = new StadiumAudio();
 const commentary = new Commentary();
 
+// While a batch of rounds is running nothing is drawn, spoken or played: the
+// events only carry the score, and every frame of them would cost the next
+// round its turn on the thread.
+let batchActive = false;
+
 const handlers = {
   onEvent: (ev) => {
+    if (batchActive) return;
     hud.addEvent(ev);
     commentary.onEvent(ev, match);
     if (ev.type === 'goal') {
@@ -103,6 +109,7 @@ const handlers = {
     }
   },
   onGoal: (data) => {
+    if (batchActive) return;
     hud.showGoal(data);
     commentary.onGoal(data, match);
     goalFlash = 1;
@@ -115,11 +122,13 @@ const handlers = {
     });
   },
   onCard: (card) => {
+    if (batchActive) return;
     hud.showCard(card);
     commentary.onCard(card, match);
     audio.whistle(1);
   },
   onReset: () => {
+    if (batchActive) return;
     hud.reset();
     goalLog = [];
   },
@@ -169,7 +178,24 @@ const MAX_SPEED = 30;
 // every scoreline reported back. Results are emergent: the squads, ratings and
 // form never change between rounds, only the match itself is replayed.
 const hostWindow = window.parent && window.parent !== window ? window.parent : null;
-const series = { active: false, total: 0, done: 0, results: [] };
+// A batch is the same engine with the picture switched off: no rigs, no
+// camera, no crowd, no commentary — only the twenty-two players, the ball and
+// the clock. It runs in short slices so the page keeps answering while the
+// rounds go by, and every score it produces stays in a tally by scoreline.
+const MAX_ROUNDS = 100000;
+const SLICE_MS = 12;
+const series = {
+  active: false,
+  total: 0,
+  done: 0,
+  results: [],
+  grouped: new Map(),
+  startedAt: 0,
+  elapsed: 0,
+  roundMs: 0,
+  lastPost: 0,
+  timer: 0,
+};
 
 // Everything the odds board needs to settle a bet after the match: goals with
 // minutes and scorers, both halves, corners, cards and shots on target.
@@ -236,65 +262,128 @@ function applySpeed(value) {
   forceRender = true;
 }
 
-function resumeRendering() {
-  renderEnabled = true;
-  forceRender = true;
-}
+const groupsOut = () =>
+  [...series.grouped.values()].sort((a, b) => b.count - a.count || a.goals - b.goals);
 
-function startSeries(count, speed) {
-  series.total = Math.max(1, Math.min(50, Math.round(Number(count) || 1)));
+function startSeries(count) {
+  if (series.active) return;
+  series.total = Math.max(1, Math.min(MAX_ROUNDS, Math.round(Number(count) || 1)));
   series.done = 0;
   series.results = [];
+  series.grouped = new Map();
+  series.startedAt = performance.now();
+  series.elapsed = 0;
+  series.roundMs = 0;
+  series.lastPost = 0;
   series.active = true;
-  applySpeed(speed);
-  if (!started) startMatch();
-  else match.restartMatch();
-  postToHost({ type: 'sim-series-start', total: series.total, speed: timeScale });
+  // Nothing is drawn and no rig is posed while a batch runs, but the engine —
+  // the same one that plays the watched match — is what plays every round.
+  match.headless = true;
+  batchActive = true;
+  renderEnabled = false;
+  hud.setSpeed(1);
+  if (!started) {
+    started = true;
+    hud.hideBanner();
+    match.startMatch();
+  } else {
+    match.restartMatch();
+  }
+  postToHost({ type: 'sim-series-start', total: series.total });
+  series.timer = setTimeout(runSeriesSlice, 0);
 }
 
 function stopSeries() {
   if (!series.active) return;
-  series.active = false;
-  resumeRendering();
-  postToHost({ type: 'sim-series-done', results: series.results, stopped: true });
+  finishSeries(true);
 }
 
-function finishRound(summary) {
-  if (!series.active) return;
-  forceRender = true;
-  series.done += 1;
-  const result = {
-    summary: summary ?? matchSummary(),
-    round: series.done,
-    home: match.teams[0].name,
-    away: match.teams[1].name,
-    homeScore: match.score[0],
-    awayScore: match.score[1],
-    homeShots: match.stats[0].shots,
-    awayShots: match.stats[1].shots,
-    homePossession: match.possessionPct[0],
-    awayPossession: match.possessionPct[1],
-  };
-  series.results.push(result);
-  postToHost({ type: 'sim-series-round', result, done: series.done, total: series.total });
+function finishSeries(stopped) {
+  series.active = false;
+  clearTimeout(series.timer);
+  series.elapsed = (performance.now() - series.startedAt) / 1000;
+  match.headless = false;
+  batchActive = false;
+  // back to the speed the page asked for, and drawing again
+  applySpeed(timeScale);
+  postToHost({
+    type: 'sim-series-done',
+    results: series.results,
+    groups: groupsOut(),
+    total: series.total,
+    done: series.done,
+    elapsed: series.elapsed,
+    stopped: Boolean(stopped),
+  });
+}
 
-  if (series.done >= series.total) {
-    series.active = false;
-    resumeRendering();
-    postToHost({ type: 'sim-series-done', results: series.results });
-    return;
+function recordRound() {
+  series.done += 1;
+  const homeScore = match.score[0];
+  const awayScore = match.score[1];
+  const key = `${homeScore}-${awayScore}`;
+  const group = series.grouped.get(key) ?? { key, home: homeScore, away: awayScore, goals: homeScore + awayScore, count: 0 };
+  group.count += 1;
+  series.grouped.set(key, group);
+
+  // The whole tally is kept; the round-by-round list is only interesting for a
+  // handful of rounds, so it stops growing at a size the page can still draw.
+  if (series.total <= 200) {
+    series.results.push({
+      round: series.done,
+      home: match.teams[0].name,
+      away: match.teams[1].name,
+      homeScore,
+      awayScore,
+    });
   }
-  // straight into the next round, so a long batch never sits idle
-  setTimeout(() => {
-    if (series.active) match.restartMatch();
-  }, 150);
+  series.elapsed = (performance.now() - series.startedAt) / 1000;
+  series.roundMs = (series.elapsed * 1000) / series.done;
+}
+
+function postSeriesProgress(force) {
+  const now = performance.now();
+  if (!force && now - series.lastPost < 200) return;
+  series.lastPost = now;
+  series.elapsed = (now - series.startedAt) / 1000;
+  postToHost({
+    type: 'sim-series-progress',
+    done: series.done,
+    total: series.total,
+    elapsed: series.elapsed,
+    roundMs: series.roundMs,
+    groups: groupsOut(),
+    results: series.results,
+    teams: [match.teams[0].name, match.teams[1].name],
+  });
+}
+
+// One slice: play until the slice budget is gone, then hand the thread back so
+// the page can paint the tally. A full-time whistle starts the next round where
+// the previous one stopped, with the same elevens.
+function runSeriesSlice() {
+  if (!series.active) return;
+  const deadline = performance.now() + SLICE_MS;
+  while (series.active && performance.now() < deadline) {
+    match.update(FIXED);
+    if (match.state === 'fulltime') {
+      recordRound();
+      if (series.done >= series.total) {
+        finishSeries(false);
+        return;
+      }
+      match.restartMatch();
+    }
+  }
+  postSeriesProgress(false);
+  series.timer = setTimeout(runSeriesSlice, 0);
 }
 
 window.addEventListener('message', (event) => {
   if (event.source !== hostWindow) return;
   const data = event.data;
   if (!data || typeof data !== 'object' || data.target !== 'match-sim') return;
-  if (data.type === 'sim-series') startSeries(data.count, data.speed);
+  if (data.type === 'sim-series') startSeries(data.count);
   else if (data.type === 'sim-series-stop') stopSeries();
   else if (data.type === 'sim-speed') applySpeed(data.speed);
 });
@@ -370,7 +459,9 @@ function animate() {
   accumulator = Math.min(accumulator + raw * timeScale, FIXED * stepCap);
   let steps = 0;
   const stepStart = performance.now();
-  while (accumulator >= FIXED && steps < stepCap) {
+  // A batch steps the match on its own slice timer; the frame loop keeps its
+  // hands off so a round is never played twice at once.
+  while (!batchActive && accumulator >= FIXED && steps < stepCap) {
     if (humanMode) readInput();
     match.update(FIXED);
     accumulator -= FIXED;
