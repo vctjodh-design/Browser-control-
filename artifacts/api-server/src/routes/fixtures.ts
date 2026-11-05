@@ -30,6 +30,7 @@ import {
 import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
 import { getSimFormProfile } from "../lib/sim-form-profile";
 import { applyPlayerForm } from "../lib/player-form-apply";
+import { runDuelSimulation } from "../lib/squad-duel-sim";
 import {
   loadFixturePlayerForm,
   PlayerFormUnavailableError,
@@ -525,6 +526,57 @@ router.get(
         "Could not play a batch with the Open Football engine",
       );
       res.status(502).json({ error: "The Open Football engine could not play these rounds." });
+    }
+  },
+);
+
+// The fixture played as a chain of individual contests: each channel of the
+// pitch pairs a named attacker with a named defender, and the match is the
+// sequence of those duels rather than a draw around a goal average. The board
+// comes back with the result so the page can show both the reason and the
+// consequence — who wins his channel, and what that turns into over 90 minutes.
+router.get(
+  "/football/matches/:fixtureId/duels",
+  async (req, res): Promise<void> => {
+    const fixtureId = Number(req.params.fixtureId);
+    if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    const trialsValue = Number(req.query.trials);
+    const trials = Number.isFinite(trialsValue) ? Math.max(1, Math.min(20_000, Math.round(trialsValue))) : 2_000;
+    const seedValue = Number(req.query.seed);
+    const seed = Number.isFinite(seedValue) && seedValue > 0 ? Math.round(seedValue) : 1;
+
+    try {
+      const profile = await engineProfile(fixtureId);
+      const startedAt = Date.now();
+      const result = runDuelSimulation(profile, { trials, seed });
+      res.set("Cache-Control", "no-store");
+      res.json({
+        fixtureId,
+        teams: [profile.teams[0].name, profile.teams[1].name],
+        short: [profile.teams[0].short, profile.teams[1].short],
+        formation: [profile.teams[0].formation, profile.teams[1].formation],
+        expectations: profile.expectations,
+        elapsedMs: Date.now() - startedAt,
+        ...result,
+      });
+    } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      req.log.error(
+        {
+          errorName: error instanceof Error ? error.name : "UnknownError",
+          errorMessage: error instanceof Error ? error.message : undefined,
+        },
+        "Could not play the duel simulation",
+      );
+      res.status(502).json({ error: "The player duels could not be played right now." });
     }
   },
 );

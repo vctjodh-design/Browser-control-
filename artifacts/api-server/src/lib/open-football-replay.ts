@@ -73,7 +73,7 @@ const MIDDLE_LEVEL = 12;
  * gap the data can describe is worth about three levels between the elevens,
  * which is a heavy win rather than a cricket score.
  */
-function levelFor(player: SimLineupPlayer): number {
+export function levelFor(player: SimLineupPlayer): number {
   const rating = player.form?.rating ?? player.formRating ?? null;
   const quality = rating === null ? 0 : clamp((rating - ORDINARY_RATING) * 1.6, -1.1, 1.1);
   // player-form.ts caps the run-of-form level at ±1.6.

@@ -12,6 +12,7 @@ import {
 } from '@workspace/api-client-react';
 import type { FootballMatchCenter, FootballMatchDetails, FootballMatchLastFive, FootballMatchTmpContext, FootballRecentMatch } from '@workspace/api-client-react';
 import { MatchSimPanel } from '@/components/match-sim-panel';
+import { SquadDuelPanel } from '@/components/squad-duel-panel';
 import { MatchTmpPanel } from '@/components/match-tmp-panel';
 import { MatchInsightsPanel } from '@/components/match-insights-panel';
 import { MatchupAnalysisPanel } from '@/components/matchup-analysis-panel';
@@ -47,9 +48,10 @@ import {
   Trophy,
 } from 'lucide-react';
 
-type MatchTab = 'simulation' | 'table' | 'fair-ai' | 'match-center' | 'live-intelligence' | 'live-action' | 'replay' | 'odds' | 'odds-translation' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
+type MatchTab = 'simulation' | 'duels' | 'table' | 'fair-ai' | 'match-center' | 'live-intelligence' | 'live-action' | 'replay' | 'odds' | 'odds-translation' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
 const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'simulation', label: 'Live match', short: '00' },
+  { id: 'duels', label: 'Player duels', short: '16' },
   { id: 'table', label: 'Table', short: '01' },
   { id: 'fair-ai', label: 'Forensics', short: '02' },
   { id: 'match-center', label: 'Match centre', short: '12' },
@@ -525,6 +527,9 @@ export default function MatchDetailsPage() {
                     replayError={replayQuery.error}
                     onRetryReplay={() => { void replayQuery.refetch(); }}
                   />
+                )}
+                {activeTab === 'duels' && (
+                  <SquadDuelPanel key={match.fixtureId} fixtureId={fixtureId} homeName={match.home.name} awayName={match.away.name} />
                 )}
                 {activeTab === 'replay' && isComplete && (
                   <MatchReplayPanel

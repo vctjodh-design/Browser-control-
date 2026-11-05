@@ -405,6 +405,35 @@ not of the app's arithmetic, and the "vs targets" line exists precisely so the
 player can see the gap rather than be told a scoreline is expected when the
 engine never produces it.
 
+## Player duels
+
+The **Player duels** tab plays the fixture a third way, and it is the one that
+answers "why that score". `lib/squad-duel-sim.ts` puts both predicted elevens on
+five channels of the pitch and plays 190 possessions as a chain of named
+contests: the winger in a channel against the full-back in that channel (carry),
+the creator against that channel's tram (progression), the forward against the
+last man (final third), and the shot against that keeper. Each contest is a
+logit on the two men's own numbers — the skills their level gives them plus the
+additive weights their own match history argues for — so a winger who has been
+beating his man for a month really is likelier to beat this one.
+
+Nothing is drawn around an average. A 3-0 is a winger winning five of six
+carries and a striker beating the keeper twice; a 1-1 is the keeper answering
+the most shots he faces. The page shows both halves so the score can be checked
+against the reason: the board of man-versus-man percentages (`GET
+/api/football/matches/:id/duels`), then the outcome of 1,000 to 20,000 of those
+matches, then the men who are winning their contests and what they are turning
+that into — shots, goals, saves. A single representative match is listed
+contest by contest, so the link from a duel to a goal is visible.
+
+The fixed numbers are football's rather than this fixture's: a possession
+survives its carry six times in ten, a progression five and a half, a final-third
+contest becomes a shot a third of the time, and a shot at an even keeper goes in
+a little over a tenth of the time — the same for both sides. The only difference
+between the teams is who is winning those duels. 5,000 matches take well under a
+second, so the sample is large enough to read the likelihood and the twists (a
+rout, the biggest away win, the goalless game) rather than guess at them.
+
 House sim also takes a *batch*: type how many rounds to play (1 to 100,000), press
 SIMULATE, and the same match — same eleven, same levels, same engine — is played
 that many times with the picture switched off, then the scores come back grouped
