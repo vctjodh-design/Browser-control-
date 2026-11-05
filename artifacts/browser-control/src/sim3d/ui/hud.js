@@ -33,7 +33,7 @@ export class HUD {
     };
   }
 
-  bind({ onCamera, onSpeed, onHuman, onSound, onKickoff }) {
+  bind({ onCamera, onSpeed, onHuman, onSound, onCommentary, onKickoff }) {
     document.querySelectorAll('[data-cam]').forEach((btn) => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('[data-cam]').forEach((b) => b.classList.remove('active'));
@@ -55,6 +55,10 @@ export class HUD {
     this.$('toggle-audio').addEventListener('click', (e) => {
       const on = e.currentTarget.classList.toggle('active');
       onSound(on);
+    });
+    this.$('toggle-commentary')?.addEventListener('click', (e) => {
+      const on = e.currentTarget.classList.toggle('active');
+      onCommentary?.(on);
     });
     this.$('kickoff-btn').addEventListener('click', onKickoff);
   }

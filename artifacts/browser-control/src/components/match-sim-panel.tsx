@@ -36,7 +36,7 @@ function formLetters(team: SimTeamProfile, games = 5) {
 // actually reach the rest of the range.
 const MATCH_SECONDS = 540;
 const WATCHABLE_SPEED = 4;
-const SPEEDS = Array.from({ length: 20 }, (_, index) => index + 1);
+const SPEEDS = Array.from({ length: 30 }, (_, index) => index + 1);
 
 function durationText(totalMatches: number, speed: number) {
   const seconds = Math.round((totalMatches * MATCH_SECONDS) / Math.max(1, speed));

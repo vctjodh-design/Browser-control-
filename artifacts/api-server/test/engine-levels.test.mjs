@@ -1,26 +1,28 @@
-// The engine's skill scale is steep: on its own, two levels between two
-// elevens already turns a match into a rout, and six or seven makes it 6-0 or
-// worse. These tests hold the mapping that feeds it to the market's view of
-// the fixture, so a side that leads its own league is never fielded as if it
-// were stronger than a mid-table club from a bigger one.
+// The engine's skill scale is steep: two levels between two elevens already
+// turns a match into a rout. These tests hold the mapping that feeds it to
+// what has been *measured* about each player — his ratings, his standing in his
+// own squad, his run of form — and not to prices or a league table, so the
+// match's result is something the players do rather than something the app
+// decided in advance.
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import { buildOpenFootballSpec, profileSignature } from "../src/lib/open-football-replay.ts";
 
-function lineup(name, impact) {
+function lineup(name, { rating = null, impact = 0.7, level = 0 } = {}) {
   return Array.from({ length: 11 }, (_, index) => ({
     name: `${name} ${index + 1}`,
     role: index === 0 ? "GK" : "CM",
     number: index + 1,
     impact,
+    form: rating === null && level === 0 ? undefined : { skills: {}, level, rating },
   }));
 }
 
-function team(name, edge, impact) {
+function team(name, options) {
   return {
-    side: name,
-    teamId: 1,
+    side: name.toLowerCase(),
+    teamId: name.length,
     name,
     short: name.slice(0, 3),
     record: { form: "WWWWW" },
@@ -29,78 +31,65 @@ function team(name, edge, impact) {
     formation: "4-4-2",
     formationSource: "listed",
     formationConfidence: 1,
-    table: { edge },
-    lineup: lineup(name, impact),
+    table: { edge: 0 },
+    lineup: lineup(name, options),
     bench: [],
     slots: [],
   };
 }
 
-function profile({ homeEdge, awayEdge, homeGoals, awayGoals, homeImpact = 0.7, awayImpact = 0.7 }) {
+function profile(home, away) {
   return {
     fixtureId: 1,
     observedAt: new Date().toISOString(),
     formGames: 15,
     detailGames: 15,
-    teams: [team("Home", homeEdge, homeImpact), team("Away", awayEdge, awayImpact)],
-    expectations:
-      homeGoals === null
-        ? null
-        : { source: "odds", totalGoals: homeGoals + awayGoals, homeGoals, awayGoals },
+    teams: [team("Home", home), team("Away", away)],
+    // Present and deliberately ignored: the prices must not decide the match.
+    expectations: { source: "odds", totalGoals: 2.7, homeGoals: 0.5, awayGoals: 2.2 },
     issues: [],
   };
 }
 
-const levels = (spec) => [
-  spec.home.players.map((player) => player.level),
-  spec.away.players.map((player) => player.level),
-];
+const levels = (spec) => [spec.home.players.map((p) => p.level), spec.away.players.map((p) => p.level)];
 const mean = (values) => values.reduce((total, value) => total + value, 0) / values.length;
 
-test("the prices, not the league table, decide which eleven is stronger", () => {
-  // Leading the Czech league does not make a side better than a mid-table
-  // Serie A club, but the table said exactly that and the engine played
-  // Ferencvaros off the park at Milan.
-  const spec = buildOpenFootballSpec(
-    profile({ homeEdge: -0.36, awayEdge: 1, homeGoals: 2.24, awayGoals: 0.75 }),
-    13,
-  );
-  const [home, away] = levels(spec);
-  assert.ok(mean(home) > mean(away), `expected the home side to be stronger, got ${mean(home)} v ${mean(away)}`);
+test("both sides start level when nothing has been measured about either", () => {
+  const [home, away] = levels(buildOpenFootballSpec(profile({}, {}), 13));
+  assert.deepEqual(new Set([...home, ...away]), new Set([12]));
 });
 
-test("a heavy mismatch stays a few levels, not a rout's worth", () => {
-  const spec = buildOpenFootballSpec(
-    profile({ homeEdge: -1, awayEdge: 0.95, homeGoals: 0.58, awayGoals: 2.18 }),
-    13,
-  );
-  const [home, away] = levels(spec);
-  const gap = Math.abs(mean(away) - mean(home));
-  assert.ok(gap <= 3, `a 1.6-goal favourite arrived as a ${gap.toFixed(1)}-level gap`);
-  assert.ok(mean(away) > mean(home), "the favourite must still be the better side");
+test("the prices do not move a single level", () => {
+  const priced = profile({ rating: 7.3 }, { rating: 6.6 });
+  const unpriced = { ...priced, expectations: { source: "odds", totalGoals: 2.2, homeGoals: 2.6, awayGoals: 0.4 } };
+  assert.deepEqual(levels(buildOpenFootballSpec(priced, 13)), levels(buildOpenFootballSpec(unpriced, 13)));
 });
 
-test("a single star is worth about a level inside his own eleven", () => {
-  const spec = buildOpenFootballSpec(
-    profile({ homeEdge: 0, awayEdge: 0, homeGoals: 1.4, awayGoals: 1.4, homeImpact: 0.95, awayImpact: 0.4 }),
-    13,
-  );
-  const [home, away] = levels(spec);
-  assert.ok(Math.max(...home) - Math.min(...away) <= 3, "individual standing must not outweigh the team's");
-  assert.ok(home[0] > away[0], "the star should be above the modest player");
+test("a side whose players have been rated better is the better side", () => {
+  const [home, away] = levels(buildOpenFootballSpec(profile({ rating: 7.35 }, { rating: 6.55 }), 13));
+  assert.ok(mean(home) > mean(away), `expected the better-rated side to be stronger, got ${mean(home)} v ${mean(away)}`);
 });
 
-test("without prices the table still gives a gentle gap inside the engine's own scale", () => {
-  const spec = buildOpenFootballSpec(profile({ homeEdge: -1, awayEdge: 1, homeGoals: null, awayGoals: null }), 13);
-  const [home, away] = levels(spec);
+test("a rating gap is compressed, so the engine is never handed a rout", () => {
+  const [home, away] = levels(
+    buildOpenFootballSpec(profile({ rating: 8.4, impact: 0.98, level: 1.6 }, { rating: 5.6, impact: 0.05, level: -1.6 }), 13),
+  );
+  const gap = Math.abs(mean(home) - mean(away));
+  assert.ok(gap <= 4, `a huge rating gap arrived as a ${gap.toFixed(1)}-level gap`);
+});
+
+test("every level stays inside the engine's own scale, whatever the data says", () => {
+  const [home, away] = levels(
+    buildOpenFootballSpec(profile({ rating: 9.9, impact: 4, level: 9 }, { rating: 1.1, impact: -3, level: -9 }), 13),
+  );
   for (const level of [...home, ...away]) {
-    assert.ok(Number.isInteger(level) && level >= 1 && level <= 20, `level ${level} is off the engine's scale`);
+    assert.ok(Number.isInteger(level) && level >= 5 && level <= 19, `level ${level} is off the engine's scale`);
   }
-  assert.ok(mean(away) - mean(home) <= 3);
 });
 
 test("the recording signature changes when a level does, so a retuned match is replayed", () => {
-  const market = profile({ homeEdge: -1, awayEdge: 1, homeGoals: 1.4, awayGoals: 1.4 });
-  const table = profile({ homeEdge: -1, awayEdge: 1, homeGoals: null, awayGoals: null });
-  assert.notEqual(profileSignature(market), profileSignature(table));
+  assert.notEqual(
+    profileSignature(profile({ rating: 7.3 }, { rating: 6.6 })),
+    profileSignature(profile({ rating: 6.6 }, { rating: 6.6 })),
+  );
 });

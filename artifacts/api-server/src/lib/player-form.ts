@@ -107,7 +107,13 @@ type FotMobLineupSide = {
   }[];
 };
 type FotMobMatchDetails = {
-  general?: { matchId?: string; matchName?: string; matchTimeUTCDate?: string };
+  general?: {
+    matchId?: string;
+    matchName?: string;
+    matchTimeUTCDate?: string;
+    homeTeam?: { name?: string; id?: number };
+    awayTeam?: { name?: string; id?: number };
+  };
   content?: {
     lineup?: { homeTeam?: FotMobLineupSide; awayTeam?: FotMobLineupSide };
     playerStats?: Record<string, FotMobPlayerStats>;
@@ -379,36 +385,118 @@ export function nameSimilarity(left: string, right: string): number {
   return shared / Math.max(aParts.length, bParts.length);
 }
 
-/** Find the feed's match for a fixture, by the two club names. */
-export async function resolveFotMobMatch(home: string, away: string): Promise<number | null> {
-  const query = encodeURIComponent(`${home} ${away}`);
-  let suggestions: { suggestions?: FotMobSuggestion[] }[] = [];
-  try {
-    suggestions = await fotmobJson<{ suggestions?: FotMobSuggestion[] }[]>(`search/suggest?term=${query}`);
-  } catch {
-    return null;
-  }
-  const candidates = suggestions
-    .flatMap((group) => group.suggestions ?? [])
-    .filter((entry) => entry.type === "match" && entry.id)
-    .slice(0, 4);
+/**
+ * Sponsor and suffix words that a club's own name does not need.
+ *
+ * "RSC Anderlecht" is indexed as "Anderlecht" and "Red Bull Salzburg" as
+ * "Salzburg", and a search for the two full names together returns nothing at
+ * all — which is how a Europa League fixture ended up with no player data.
+ */
+const CLUB_NOISE =
+  /\b(rsc|rfc|krc|kvo|kv|rbc|fc|cf|sc|sk|ac|as|ss|us|sv|fk|bk|if|aik|vfl|vfb|tsg|bsc|club|city|united|athletic|athletico|de|red bull|rb)\b/g;
 
-  for (const candidate of candidates) {
-    const matchId = Number(candidate.id);
-    if (!Number.isSafeInteger(matchId)) continue;
+function shortClub(name: string): string {
+  const trimmed = name.replace(CLUB_NOISE, " ").replace(/\s+/g, " ").trim();
+  return trimmed || name;
+}
+
+/** The queries worth asking the feed's search, most specific first. */
+/**
+ * How well a name in the feed answers to the name this app holds.
+ *
+ * The feed writes some clubs in English — "Slavia Prague" for SK Slavia
+ * Praha — so the surname rule that matches footballers is not enough on its
+ * own. A shared distinctive word ("slavia") identifies the club well enough
+ * to look at its match; the date and the opponent decide the rest.
+ */
+function clubSimilarity(feedName: string, queryName: string): number {
+  const direct = nameSimilarity(feedName, queryName);
+  if (direct >= 0.6) return direct;
+  const feed = normaliseName(feedName).split(" ").filter(Boolean);
+  const query = normaliseName(queryName).split(" ").filter(Boolean);
+  const shared = feed.find((part) => part.length >= 4 && query.includes(part));
+  return shared ? 0.65 + Math.min(0.2, shared.length / 40) : direct;
+}
+
+function searchTerms(home: string, away: string): string[] {
+  const terms = [
+    `${home} ${away}`,
+    `${shortClub(home)} ${shortClub(away)}`,
+    home,
+    away,
+    shortClub(home),
+    shortClub(away),
+  ];
+  return [...new Set(terms.map((term) => term.trim()).filter(Boolean))];
+}
+
+/**
+ * Find the feed's match for a fixture, by the two club names.
+ *
+ * The feed's search index is a name index, not a fixture index: asking it for
+ * two clubs at once mostly returns nothing, while each club on its own always
+ * offers the match. So every spelling of both names is asked, the match
+ * candidates are pooled, and the one that names these two clubs *and* sits on
+ * this fixture's date wins — a past meeting between the same two sides must
+ * not be mistaken for tonight's.
+ */
+export async function resolveFotMobMatch(
+  home: string,
+  away: string,
+  reference: Date = new Date(),
+): Promise<number | null> {
+  const ids: number[] = [];
+  for (const term of searchTerms(home, away)) {
+    try {
+      const suggestions = await fotmobJson<{ suggestions?: FotMobSuggestion[] }[]>(
+        `search/suggest?term=${encodeURIComponent(term)}`,
+      );
+      for (const group of suggestions) {
+        for (const entry of group.suggestions ?? []) {
+          if (entry.type !== "match" || !entry.id) continue;
+          const id = Number(entry.id);
+          if (Number.isSafeInteger(id) && !ids.includes(id)) ids.push(id);
+        }
+      }
+    } catch {
+      // One spelling failing is not the search failing.
+    }
+    if (ids.length >= 8) break;
+  }
+
+  let best: { matchId: number; days: number; score: number } | null = null;
+  for (const matchId of ids.slice(0, 8)) {
     try {
       const details = await fotmobJson<FotMobMatchDetails>(`matchDetails?matchId=${matchId}`);
-      const name = details.general?.matchName ?? "";
-      const [homePart, awayPart] = name.split("-vs-");
-      if (!homePart || !awayPart) continue;
-      const homeScore = nameSimilarity(homePart, home);
-      const awayScore = nameSimilarity(awayPart.split("_")[0] ?? awayPart, away);
-      if (homeScore >= 0.6 && awayScore >= 0.6) return matchId;
+      const general = details.general;
+      const namedHome = general?.homeTeam?.name ?? general?.matchName?.split("-vs-")[0] ?? "";
+      const namedAway =
+        general?.awayTeam?.name ?? (general?.matchName?.split("-vs-")[1] ?? "").split("_")[0] ?? "";
+      const homeScore = clubSimilarity(namedHome, home);
+      const awayScore = clubSimilarity(namedAway, away);
+      if (homeScore < 0.6 || awayScore < 0.6) continue;
+
+      const kickoff = general?.matchTimeUTCDate ? new Date(general.matchTimeUTCDate) : null;
+      const days = kickoff && !Number.isNaN(kickoff.getTime()) ? Math.abs(kickoff.getTime() - reference.getTime()) / 86_400_000 : 365;
+      const score = homeScore + awayScore;
+      const candidate = { matchId, days, score };
+      if (!best) {
+        best = candidate;
+        continue;
+      }
+      const bestOnDate = best.days <= 10;
+      const isOnDate = days <= 10;
+      if (isOnDate !== bestOnDate) {
+        if (isOnDate) best = candidate;
+      } else if (days < best.days || (days === best.days && score > best.score)) {
+        best = candidate;
+      }
     } catch {
       continue;
     }
   }
-  return null;
+
+  return best?.matchId ?? null;
 }
 
 // ---------------------------------------------------------------------------

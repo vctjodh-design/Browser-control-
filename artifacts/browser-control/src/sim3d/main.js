@@ -11,7 +11,7 @@ import { MatchReplay } from './sim/replay.js';
 import { CameraRig } from './camera.js';
 import { HUD } from './ui/hud.js';
 import { StadiumAudio } from './audio.js';
-import { matchExpectations } from './sim/form-profile.js';
+import { Commentary } from './commentary.js';
 
 const canvas = document.getElementById('scene');
 const renderer = new THREE.WebGLRenderer({
@@ -76,10 +76,12 @@ const ball = new MatchBall();
 scene.add(ball.mesh);
 
 const audio = new StadiumAudio();
+const commentary = new Commentary();
 
 const handlers = {
   onEvent: (ev) => {
     hud.addEvent(ev);
+    commentary.onEvent(ev, match);
     if (ev.type === 'goal') {
       audio.cheer();
     } else if (ev.type === 'shot') {
@@ -102,6 +104,7 @@ const handlers = {
   },
   onGoal: (data) => {
     hud.showGoal(data);
+    commentary.onGoal(data, match);
     goalFlash = 1;
     goalLog.push({
       side: data.team === 0 ? 'home' : 'away',
@@ -113,6 +116,7 @@ const handlers = {
   },
   onCard: (card) => {
     hud.showCard(card);
+    commentary.onCard(card, match);
     audio.whistle(1);
   },
   onReset: () => {
@@ -147,6 +151,7 @@ hud.bind({
     });
   },
   onSound: (on) => audio.setEnabled(on),
+  onCommentary: (on) => commentary.setEnabled(on),
   onKickoff: () => startMatch(),
 });
 
@@ -157,7 +162,7 @@ let started = false;
 let goalFlash = 0;
 let accumulator = 0;
 const FIXED = 1 / 60;
-const MAX_SPEED = 20;
+const MAX_SPEED = 30;
 
 // ------------------------------------------------------------ series runner
 // The match page can ask for the same fixture to be played out N times and
@@ -298,15 +303,16 @@ const clock = new THREE.Clock();
 
 function startMatch() {
   if (started) return;
-  // The market and the clubs' own scoring numbers travel with the profile, so
-  // the match is played to the same expectation the board is priced around.
-  const targets = matchExpectations();
-  if (targets) match.setTargets(targets);
+  // Nothing from the market goes into the match. The eleven that was picked,
+  // each player's own level and the points his recent matches added to his
+  // skills are the whole input; who is clinical, who is wasteful and who wins
+  // is what happens on this pitch, and no target scoreline damps it.
   started = true;
   hud.hideBanner();
   audio.init();
   audio.resume();
   audio.whistle(1);
+  commentary.onKickoff(match);
   match.startMatch();
   setTimeout(() => audio.whistle(1), 320);
 }
@@ -409,6 +415,7 @@ fitToFrame();
 
 // expose for debugging / casual tinkering
 window.__match = match;
+window.__commentary = commentary;
 window.__scene = scene;
 window.__cam = camRig;
 window.__three = THREE;

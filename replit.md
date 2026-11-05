@@ -341,23 +341,53 @@ The engine's own quality switches pass straight through (`?crowd=off`,
 software WebGL included — loses the context mid-match at that size and keeps it
 with the crowd off.
 
-The level handed to the engine is the one number that decides the scoreline, and
-it is taken from the market, not from the league table. The scale is steep: on
-the engine's own 1–20 scale it plays two equal elevens 2-3 or 3-2, a two-level
-gap 3-1, a three-level gap 5-0 and an eight-level gap 7-0. Anchoring levels on
-relative league position therefore priced a Czech or Hungarian league leader as
-if it were better than a mid-table Serie A side, and Milan v Ferencváros was
-played 0-5 the wrong way; Arsenal at Slavia produced 0-12. The profile already
-knows better: its expectations come from the fixture's own prices (Slavia 0.58–
-2.18, Milan 2.24–0.75). `baseLevels` turns the expected margin into levels at a
-little over one level per expected goal and holds the two bases at 12; the
-league table is only the fallback, at the same gentle rate. A player's standing
-inside his squad and his own run of ratings still move him, by about a level.
-The same fixtures now play 3-1 at Milan, 1-3 at AEK, and Slavia–Arsenal comes out
-0-5, 2-3, 1-4, 1-1, 1-1 across five seeds — a heavy afternoon once, not a rout
-every time. `test/engine-levels.test.mjs` holds that shape, and the recording
+Nothing about the fixture's price or its league position decides who wins.
+`levelFor` builds each man's level on the engine's 1–20 scale from what has been
+*measured* about him — the ratings he has actually been given in the matches
+this app has read, his standing inside his own squad, and whether his recent run
+is better or worse than usual — and the match is then whatever those players do
+against each other. A side looks stronger because its players are better at
+football, not because the board made it favourite; two elevens with nothing
+measured about them both start at 12 and the match decides.
+
+The engine's scale is steep (measured: two equal elevens play 2-3 or 3-2, a
+two-level gap 3-1, three levels 5-0, eight levels 7-0), so each term is capped:
+the widest gap the data can describe is worth about three levels. The same
+fixtures now play AEK 2-1 Real Madrid, Milan 3-2 Ferencváros and AEK 0-2 Real
+Madrid across seeds — results that come out of the squads rather than out of the
+prices or out of relative league standing, which used to make a Czech or
+Hungarian league leader stronger than a mid-table Serie A side and played
+Milan–Ferencváros 0-5 the wrong way. `test/engine-levels.test.mjs` holds that,
+including that changing the prices changes not a single level, and the recording
 signature includes the levels so a retuned mapping replays rather than serving
 the old match from the cache.
+
+The house simulation had the same problem from the other end: `startMatch` fed
+it the market's expected goals and `scoringGate` damped a side that was ahead of
+the expectation. That gate is gone. The eleven, each player's level and the
+points his own matches added to his skills are the whole input, and who is
+clinical, who is wasteful and who wins is what happens on this pitch.
+
+The player card's data comes from the feed's *search*, and that search is a name
+index rather than a fixture index: asked for two clubs at once it usually
+returns nothing, which is how a Europa League tie (Anderlecht v Salzburg) ended
+up with "no player data". Every spelling of both clubs is now asked separately
+— full name, name without sponsor words, and the pair — the match candidates
+are pooled, and the one that names these two clubs *and* sits on this fixture's
+date wins. Names the feed writes in another language are matched on the
+distinctive word ("Slavia" in "Slavia Prague" for SK Slavia Praha). An unplayed
+fixture has no ratings yet — the feed lists the last starting XI — so the card
+shows the eleven, who is out, and the weights from their own history, and says
+nothing about a rating it does not have.
+
+The house match is now commentated: `src/sim3d/commentary.js` turns the events
+the simulation already raises into speech through the browser's own speech
+synthesis — kick-off, shots with the shooter's name, goals with the scorer and
+the new score, cards, half and full time — with a COMMENTARY switch in the dock.
+No audio file and no service sits in between. The dock's speeds are 1×, 2×, 4×,
+10× and 30×, and the panel's speed selector now runs to 30; the frame loop steps
+the match as many fixed ticks per frame as the device can afford, so how close
+it gets to 30× is the phone's arithmetic rather than a cap in the app.
 
 The page no longer prints the engine's full-time score in its header. The engine
 plays the whole match before it records one, so the result was known before a

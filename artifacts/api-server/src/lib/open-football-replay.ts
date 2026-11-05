@@ -51,46 +51,34 @@ function tacticFor(formation: string): string {
 
 const clamp = (value: number, low: number, high: number): number => Math.min(high, Math.max(low, value));
 
-/**
- * Where each eleven sits on the engine's 1..20 skill scale.
- *
- * The scale is steep — two levels between the sides already turns a match into
- * a rout, eight makes it 6-0 or worse — so what goes in has to be how good the
- * two elevens are *relative to each other*, and a league table cannot say
- * that: leading the Czech or Hungarian league does not make a side better than
- * a mid-table Serie A club, yet a table-anchored level said exactly that and
- * played Ferencváros off the park at Milan.
- *
- * What can say it is the market's expected scoreline, which the profile
- * already carries from the fixture's prices. A goal of expected margin is
- * worth a little over a level, which is the rate at which the engine turns a
- * two-goal favourite into a two-goal win. Without prices, the league table is
- * the fallback, at the same gentle rate.
- */
-function baseLevels(profile: SimFormProfile): [number, number] {
-  const expectation = profile.expectations;
-  if (expectation) {
-    const margin = clamp(expectation.awayGoals - expectation.homeGoals, -3.4, 3.4);
-    const spread = clamp(margin * 1.15, -3.4, 3.4);
-    return [12 - spread / 2, 12 + spread / 2];
-  }
-
-  const [home, away] = profile.teams;
-  const gap = clamp(((away.table?.edge ?? 0) - (home.table?.edge ?? 0)) * 0.9, -2.2, 2.2);
-  return [12 - gap / 2, 12 + gap / 2];
-}
+/** What an ordinary player of this level looks like, in the feed's own ratings. */
+const ORDINARY_RATING = 6.9;
+/** The engine's middle: level 12 is a competent professional, not a star. */
+const MIDDLE_LEVEL = 12;
 
 /**
- * How good the engine should make one player of that eleven.
+ * How good the engine should make one player.
  *
- * His standing inside his own squad and his own recent matches move him a
- * level either way; they are deliberately small, because the level mostly
- * describes the team and a single star should tilt a match, not decide it.
+ * Nothing here decides who wins. The level is built from what has been
+ * *measured* about the man — the ratings he has actually been given in the
+ * matches we have read, his standing inside his own squad, and whether his
+ * recent run is better or worse than usual — and the result of the match is
+ * whatever those players then do on the pitch. No price, no expected
+ * scoreline and no league position goes in: a favourite emerges because its
+ * players are better at football, or it does not emerge at all.
+ *
+ * The engine's scale is steep (two levels between two elevens already turns a
+ * match into a rout), so each term is compressed and capped: even the widest
+ * gap the data can describe is worth about three levels between the elevens,
+ * which is a heavy win rather than a cricket score.
  */
-function levelFor(base: number, player: SimLineupPlayer): number {
+function levelFor(player: SimLineupPlayer): number {
+  const rating = player.form?.rating ?? player.formRating ?? null;
+  const quality = rating === null ? 0 : clamp((rating - ORDINARY_RATING) * 1.6, -1.1, 1.1);
   // player-form.ts caps the run-of-form level at ±1.6.
-  const level = base + (player.impact - 0.5) * 1.4 + (player.form?.level ?? 0) * 0.45;
-  return clamp(Math.round(level), 5, 19);
+  const form = (player.form?.level ?? 0) * 0.2;
+  const standing = (player.impact - 0.5) * 0.7;
+  return clamp(Math.round(MIDDLE_LEVEL + quality + form + standing), 5, 19);
 }
 
 type EnginePlayer = {
@@ -102,12 +90,12 @@ type EnginePlayer = {
   weights?: Record<string, number>;
 };
 
-function sideSpec(team: SimTeamProfile, base: number) {
+function sideSpec(team: SimTeamProfile) {
   const taken = new Set<string>();
   const players: EnginePlayer[] = team.lineup.map((player, index) => ({
     name: player.name,
     position: engineRole(team.slots[index]?.role ?? player.role, taken),
-    level: levelFor(base, player),
+    level: levelFor(player),
     shirt: player.number ?? index + 1,
     weights: player.form?.skills,
   }));
@@ -117,7 +105,7 @@ function sideSpec(team: SimTeamProfile, base: number) {
   const bench: EnginePlayer[] = team.bench.slice(0, 3).map((player, index) => ({
     name: player.name,
     position: engineRole(player.role, taken),
-    level: levelFor(base, player),
+    level: levelFor(player),
     shirt: player.number ?? 12 + index,
     weights: player.form?.skills,
   }));
@@ -131,11 +119,10 @@ function sideSpec(team: SimTeamProfile, base: number) {
 }
 
 export function buildOpenFootballSpec(profile: SimFormProfile, seed: number) {
-  const [homeBase, awayBase] = baseLevels(profile);
   return {
     seed,
-    home: sideSpec(profile.teams[0], homeBase),
-    away: sideSpec(profile.teams[1], awayBase),
+    home: sideSpec(profile.teams[0]),
+    away: sideSpec(profile.teams[1]),
   };
 }
 
@@ -188,13 +175,12 @@ export type OpenFootballReplay = {
  * played again rather than served from the cache.
  */
 export function profileSignature(profile: SimFormProfile): string {
-  const levels = baseLevels(profile);
   const text = profile.teams
-    .map((team, side) =>
+    .map((team) =>
       team.lineup
         .map(
           (player) =>
-            `${player.name}|${levelFor(levels[side], player)}|${player.form?.level ?? 0}|${JSON.stringify(player.form?.skills ?? {})}`,
+            `${player.name}|${levelFor(player)}|${player.form?.level ?? 0}|${JSON.stringify(player.form?.skills ?? {})}`,
         )
         .join(","),
     )
