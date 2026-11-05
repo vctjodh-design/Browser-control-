@@ -12,6 +12,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
+import { cpus } from "node:os";
 import path from "node:path";
 import type { SimFormProfile, SimLineupPlayer, SimTeamProfile } from "./sim-form-profile";
 
@@ -190,6 +191,117 @@ export function profileSignature(profile: SimFormProfile): string {
 
 const cache = new Map<string, OpenFootballReplay>();
 const MAX_CACHED = 8;
+
+export type OpenFootballScoreline = { seed: number; home: number; away: number };
+
+/** The engine writes `"score":{"away":n,"home":m}`; the order is its own. */
+function readScore(text: string): { home: number; away: number } | null {
+  const body = /"score":\{([^}]{0,80})\}/.exec(text);
+  if (!body) return null;
+  const home = /"home":(-?\d+)/.exec(body[1]);
+  const away = /"away":(-?\d+)/.exec(body[1]);
+  if (!home || !away) return null;
+  return { home: Number(home[1]), away: Number(away[1]) };
+}
+
+/**
+ * The score of one played match, and nothing else.
+ *
+ * A batch of rounds only needs the scoreline, and a full recording is six
+ * megabytes of positions nobody asked for. The engine writes the score before
+ * it writes the tracking data, so this reads the stream until the score is
+ * there and then stops the engine — the match is already over by then.
+ */
+function playForScore(spec: unknown): Promise<{ home: number; away: number }> {
+  const binary = openFootballBinaryPath();
+  if (!existsSync(binary)) {
+    return Promise.reject(
+      new OpenFootballUnavailableError(
+        `The Open Football engine is not built (looked for ${binary}). Run \`cargo build --release\` in engine/of-replay.`,
+      ),
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(binary, [], { stdio: ["pipe", "pipe", "pipe"] });
+    const stderr: Buffer[] = [];
+    let text = "";
+    let settled = false;
+
+    const finish = (error: Error | null, score?: { home: number; away: number }) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve(score as { home: number; away: number });
+    };
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      text += chunk.toString("utf8");
+      const score = readScore(text);
+      if (score) {
+        child.kill();
+        finish(null, score);
+        return;
+      }
+      // The tracking data behind the score is megabytes and none of it is
+      // needed here; the match is over the moment the score is written.
+      if (text.length > 8 * 1024 * 1024) text = text.slice(0, 1024 * 1024);
+    });
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.on("error", (error) => finish(error));
+    child.on("close", (code) => {
+      if (settled) return;
+      const score = readScore(text);
+      if (score) {
+        finish(null, score);
+        return;
+      }
+      const tail = Buffer.concat(stderr).toString("utf8").slice(-300);
+      finish(
+        new OpenFootballUnavailableError(
+          code === 0
+            ? "The engine's recording carried no score."
+            : `The engine exited with ${code}. ${tail}`,
+        ),
+      );
+    });
+
+    child.stdin.end(JSON.stringify(spec));
+  });
+}
+
+/**
+ * Plays `count` matches from `firstSeed` on, in parallel, and returns the
+ * scoreline of each. Same engine, same elevens, one seed apart: the rounds are
+ * independent matches, not replays of a single one.
+ */
+export async function playOpenFootballScores(
+  profile: SimFormProfile,
+  firstSeed: number,
+  count: number,
+  // One engine process per core's worth: they are single-threaded, so eight
+  // matches at a time is eight times the football for the same wall clock.
+  // A sample you can read a likelihood off needs hundreds of matches, so the
+  // throughput matters more than leaving a core idle.
+  concurrency = Math.max(2, Math.min(8, cpus().length)),
+): Promise<OpenFootballScoreline[]> {
+  const seeds = Array.from({ length: count }, (_, index) => firstSeed + index);
+  const results: OpenFootballScoreline[] = new Array(seeds.length);
+  let next = 0;
+
+  const worker = async (): Promise<void> => {
+    while (next < seeds.length) {
+      const index = next++;
+      const seed = seeds[index];
+      const score = await playForScore(buildOpenFootballSpec(profile, seed));
+      results[index] = { seed, home: score.home, away: score.away };
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, seeds.length) }, worker));
+  return results;
+}
 
 export async function playOpenFootballMatch(
   profile: SimFormProfile,

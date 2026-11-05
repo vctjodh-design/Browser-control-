@@ -39,6 +39,7 @@ import {
 import {
   OpenFootballUnavailableError,
   playOpenFootballMatch,
+  playOpenFootballScores,
 } from "../lib/open-football-replay";
 import {
   openFootballViewerReady,
@@ -476,6 +477,54 @@ router.get(
         "Could not read a player's matches",
       );
       res.status(502).json({ error: "This player's matches could not be read right now." });
+    }
+  },
+);
+
+// A batch of engine matches. The panel asks for a handful at a time and keeps
+// the tally itself, so a run of thousands shows its progress as it goes and can
+// be stopped between requests.
+router.get(
+  "/football/matches/:fixtureId/open-football-scores",
+  async (req, res): Promise<void> => {
+    const fixtureId = Number(req.params.fixtureId);
+    if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    const seedValue = Number(req.query.seed);
+    const seed = Number.isFinite(seedValue) && seedValue > 0 ? Math.round(seedValue) : 7;
+    const countValue = Number(req.query.count);
+    const count = Number.isFinite(countValue) ? Math.max(1, Math.min(32, Math.round(countValue))) : 1;
+
+    try {
+      const profile = await engineProfile(fixtureId);
+      const startedAt = Date.now();
+      const results = await playOpenFootballScores(profile, seed, count);
+      res.set("Cache-Control", "no-store");
+      res.json({
+        results,
+        engine: "open-football",
+        teams: [results.length ? profile.teams[0].name : "", results.length ? profile.teams[1].name : ""],
+        elapsedMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      if (error instanceof OpenFootballUnavailableError) {
+        req.log.error({ reason: error.message }, "Open Football batch unavailable");
+        res.status(503).json({ error: error.message });
+        return;
+      }
+      req.log.error(
+        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Could not play a batch with the Open Football engine",
+      );
+      res.status(502).json({ error: "The Open Football engine could not play these rounds." });
     }
   },
 );

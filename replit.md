@@ -389,6 +389,22 @@ No audio file and no service sits in between. The dock's speeds are 1×, 2×, 4�
 the match as many fixed ticks per frame as the device can afford, so how close
 it gets to 30× is the phone's arithmetic rather than a cap in the app.
 
+A batch of rounds is read as a likelihood, not a list: the panel puts the
+home/draw/away share first, then the scoreline that came up most, then how far
+the sample could be out (a 95% margin on the share) and whether it is settled or
+noise. Twelve rounds cannot tell 1-0 from 1-1, and the page now says so instead
+of presenting a coin toss as a conclusion. The Open Football engine runs on
+every core the server has, which is about three matches every four seconds, so a
+read worth trusting is a couple of minutes of waiting.
+
+That engine's own scoring rate is lower than a bookmaker's line: evenly matched
+elevens average about 2.2 goals and a quarter to two-fifths of matches drawn,
+and once one eleven is four levels better it wins ninety per cent of the time
+rather than scoring two or three. Both are properties of the engine we play,
+not of the app's arithmetic, and the "vs targets" line exists precisely so the
+player can see the gap rather than be told a scoreline is expected when the
+engine never produces it.
+
 House sim also takes a *batch*: type how many rounds to play (1 to 100,000), press
 SIMULATE, and the same match — same eleven, same levels, same engine — is played
 that many times with the picture switched off, then the scores come back grouped

@@ -361,14 +361,92 @@ export function MatchSimPanel({
     frame.postMessage({ target: 'match-sim', ...message }, window.location.origin);
   };
 
+  // The engine's rounds are played on the server, a handful at a time: the
+  // page asks for the next few while the tally grows, so it can report progress
+  // and stop between them. Same engine that draws the picture above, one seed
+  // apart per round.
+  const engineRun = useRef({ cancelled: false });
+
+  const addGroup = (map: Map<string, ScorelineGroup>, home: number, away: number) => {
+    const key = `${home}-${away}`;
+    const group = map.get(key) ?? { key, home, away, goals: home + away, count: 0 };
+    group.count += 1;
+    map.set(key, group);
+  };
+
+  const startEngineBatch = async (total: number) => {
+    engineRun.current = { cancelled: false };
+    const startedAt = performance.now();
+    const groups = new Map<string, ScorelineGroup>();
+    let done = 0;
+    let seed = Math.max(1, engineSeed);
+    // Each request plays a chunk on the server, where the engine fans out over
+    // its cores; eight a time keeps that pool busy without queueing.
+    const CHUNK = 8;
+
+    setRun({ total, done: 0, running: true, results: [], groups: [], elapsed: 0, roundMs: 0, stopped: false });
+
+    while (done < total && !engineRun.current.cancelled) {
+      const count = Math.min(CHUNK, total - done);
+      let scores: { home: number; away: number }[] = [];
+      try {
+        const response = await fetch(
+          `${import.meta.env.BASE_URL}api/football/matches/${fixtureId}/open-football-scores?seed=${seed}&count=${count}`,
+        );
+        if (!response.ok) throw new Error(`status ${response.status}`);
+        const payload = (await response.json()) as { results?: { home: number; away: number }[] };
+        scores = payload.results ?? [];
+      } catch {
+        setRun((previous) => (previous ? { ...previous, running: false, stopped: true } : previous));
+        return;
+      }
+      if (!scores.length) break;
+      for (const score of scores) addGroup(groups, score.home, score.away);
+      done += scores.length;
+      seed += count;
+      const elapsed = (performance.now() - startedAt) / 1000;
+      setRoundMs((elapsed * 1000) / Math.max(1, done));
+      const tally = [...groups.values()].sort((a, b) => b.count - a.count || a.goals - b.goals);
+      setRun((previous) =>
+        previous
+          ? { ...previous, done, elapsed, roundMs: (elapsed * 1000) / Math.max(1, done), groups: tally }
+          : previous,
+      );
+    }
+
+    const elapsed = (performance.now() - startedAt) / 1000;
+    setRun((previous) =>
+      previous
+        ? {
+            ...previous,
+            running: false,
+            done,
+            elapsed,
+            roundMs: (elapsed * 1000) / Math.max(1, done),
+            stopped: engineRun.current.cancelled,
+          }
+        : previous,
+    );
+  };
+
   const startRun = () => {
     const total = Math.max(1, Math.min(MAX_ROUNDS, Math.round(rounds) || 1));
     setRounds(total);
+    if (engine === 'open-football') {
+      void startEngineBatch(total);
+      return;
+    }
     setRun({ total, done: 0, running: true, results: [], groups: [], elapsed: 0, roundMs: 0, stopped: false });
     postToSim({ type: 'sim-series', count: total });
   };
 
-  const stopRun = () => postToSim({ type: 'sim-series-stop' });
+  const stopRun = () => {
+    if (engine === 'open-football') {
+      engineRun.current.cancelled = true;
+      return;
+    }
+    postToSim({ type: 'sim-series-stop' });
+  };
 
   const changeSpeed = (value: number) => {
     setSpeed(value);
@@ -392,7 +470,19 @@ export function MatchSimPanel({
     const homeGoals = groups.reduce((total, group) => total + group.home * group.count, 0) / played;
     const awayGoals = groups.reduce((total, group) => total + group.away * group.count, 0) / played;
     const averageGoals = homeGoals + awayGoals;
-    const best = groups[0] ?? null;
+    // The answer the batch is for: which way the match most likely goes, what
+    // score it most likely finishes on, and how much the sample could be out
+    // by. A dozen rounds cannot tell one scoreline from another, so the margin
+    // is stated rather than hidden.
+    const ranked = [...groups].sort((a, b) => b.count - a.count || a.goals - b.goals);
+    const best = ranked[0] ?? null;
+    const share = (count: number) => (count / played) * 100;
+    const homeShare = share(homeWins);
+    const drawShare = share(draws);
+    const awayShare = share(awayWins);
+    const p = homeWins / played;
+    const margin = 1.96 * Math.sqrt((p * (1 - p)) / played) * 100;
+    const confidence = played >= 120 ? 'settled' : played >= 40 ? 'rough' : 'a guess';
 
     // The match was played from the squads and their numbers, not from these
     // targets — so this is the answer to "did it come out over, under or as
@@ -408,7 +498,20 @@ export function MatchSimPanel({
         ].map((row) => ({ ...row, delta: row.played - row.target, verdict: verdict(row.played - row.target) }))
       : [];
 
-    return { homeWins, draws, awayWins, averageGoals, best, comparison };
+    return {
+      homeWins,
+      draws,
+      awayWins,
+      played,
+      homeShare,
+      drawShare,
+      awayShare,
+      margin,
+      confidence,
+      averageGoals,
+      best,
+      comparison,
+    };
   }, [run, profile]);
 
   const running = run?.running ?? false;
@@ -512,10 +615,11 @@ export function MatchSimPanel({
         <div className={`border-b border-[#2c4152] bg-[#182836] px-3 py-2.5 sm:px-5 ${expanded ? 'hidden' : ''}`} data-testid="sim-engine-note">
           <p className="mono text-[8px] uppercase leading-4 tracking-[.11em] text-[#8ba39c]">
             The Open Football engine plays these elevens and its own broadcast viewer draws the match:
-            its pitch, its stands, its kits. Run it again for another match.
+            its pitch, its stands, its kits. Run it again for another match. Its player tops out at
+            16×; the rounds below don't use it at all — they play the match on the engine itself.
           </p>
         </div>
-      ) : (
+      ) : null}
       <div className={`border-b border-[#2c4152] bg-[#182836] px-3 py-2.5 sm:px-5 ${expanded ? 'hidden' : ''}`} data-testid="sim-run-bar">
         <div className="flex flex-wrap items-end gap-2.5">
           <label className="flex flex-col gap-1">
@@ -537,6 +641,7 @@ export function MatchSimPanel({
               data-testid="input-sim-rounds"
             />
           </label>
+          {engine === 'open-football' ? null : (
           <label className="flex flex-col gap-1">
             <span className="mono text-[7px] uppercase tracking-[.14em] text-[#7f978f]">Speed</span>
             <select
@@ -553,6 +658,7 @@ export function MatchSimPanel({
               ))}
             </select>
           </label>
+          )}
           {running ? (
             <button
               type="button"
@@ -566,7 +672,9 @@ export function MatchSimPanel({
             <button
               type="button"
               onClick={startRun}
-              disabled={!engineReady}
+              // A batch of engine rounds runs on the server; it does not need the
+              // viewer above to have finished loading its wasm.
+              disabled={engine === 'house' && !engineReady}
               className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#3d6156] bg-[#25463c] px-3 text-[9px] font-extrabold text-[#d8f0e3] transition hover:bg-[#2d564a] disabled:cursor-not-allowed disabled:opacity-45"
               data-testid="button-sim-run"
             >
@@ -592,7 +700,6 @@ export function MatchSimPanel({
           </div>
         ) : null}
       </div>
-      )}
 
       <div
         className={            expanded
@@ -657,6 +764,37 @@ export function MatchSimPanel({
                 : `${run.stopped ? 'Stopped' : 'Complete'} · ${run.done.toLocaleString()} rounds in ${clockText(run.elapsed)}`}
             </p>
           </div>
+          {seriesSummary?.best ? (
+            <div className="mb-2" data-testid="sim-expectation">
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { label: teams?.[0]?.short ?? home, value: seriesSummary.homeShare, tone: '#8fd0a8' },
+                  { label: 'draw', value: seriesSummary.drawShare, tone: '#9fb8ae' },
+                  { label: teams?.[1]?.short ?? away, value: seriesSummary.awayShare, tone: '#9fb8ae' },
+                ].map((row) => (
+                  <div
+                    key={row.label}
+                    className="rounded border border-[#243746] bg-[#182836] px-2 py-1.5 text-center"
+                  >
+                    <p className="mono text-[7px] uppercase leading-3 tracking-[.1em] text-[#7f978f]">{row.label}</p>
+                    <p className="mono text-[15px] font-extrabold leading-tight" style={{ color: row.tone }}>
+                      {row.value.toFixed(0)}%
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <p
+                className="mono mt-1.5 text-[7.5px] uppercase leading-3 tracking-[.1em] text-[#9fb8ae]"
+                data-testid="sim-most-likely"
+              >
+                Most likely {seriesSummary.best.home}–{seriesSummary.best.away} (
+                {((seriesSummary.best.count / Math.max(1, seriesSummary.played)) * 100).toFixed(0)}%) after{' '}
+                {seriesSummary.played.toLocaleString()} rounds · the win share is ±{seriesSummary.margin.toFixed(0)}% ·{' '}
+                {seriesSummary.confidence}
+                {seriesSummary.confidence === 'settled' ? '' : ' — a few hundred rounds settles it'}
+              </p>
+            </div>
+          ) : null}
           <ol className="grid max-h-[260px] gap-[3px] overflow-y-auto pr-0.5" data-testid="sim-results-groups">
             {run.groups.map((group) => {
               const share = (group.count / Math.max(1, run.done)) * 100;
