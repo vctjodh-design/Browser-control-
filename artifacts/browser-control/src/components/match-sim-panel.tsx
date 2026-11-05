@@ -645,7 +645,7 @@ export function MatchSimPanel({
         ) : null}
       </div>
 
-      {run && run.results.length ? (
+      {run && (run.groups.length || run.results.length) ? (
         <div className={`border-t border-[#2c4152] bg-[#16242f] px-3 py-2.5 sm:px-5 ${expanded ? 'hidden' : ''}`} data-testid="panel-sim-results">
           <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
             <p className="mono text-[7.5px] uppercase tracking-[.14em] text-[#7f978f]">
