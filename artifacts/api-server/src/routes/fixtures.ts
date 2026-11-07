@@ -31,6 +31,7 @@ import { getKickoffScoreFixtures } from "../lib/kickoffscore-fixtures";
 import { getSimFormProfile } from "../lib/sim-form-profile";
 import { applyPlayerForm } from "../lib/player-form-apply";
 import { runDuelSimulation } from "../lib/squad-duel-sim";
+import { buildInevitability, InevitabilityUnavailableError } from "../lib/inevitability-engine";
 import {
   loadFixturePlayerForm,
   PlayerFormUnavailableError,
@@ -577,6 +578,50 @@ router.get(
         "Could not play the duel simulation",
       );
       res.status(502).json({ error: "The player duels could not be played right now." });
+    }
+  },
+);
+
+// The same duel board resolved once instead of sampled two thousand times: one
+// match, its goal minutes, and the chain of contests that produced them. The
+// duel route answers "what this fixture usually does"; this one answers "what
+// this match does", and prints its reasoning so it can be checked after full
+// time rather than taken on trust.
+router.get(
+  "/football/matches/:fixtureId/inevitability",
+  async (req, res): Promise<void> => {
+    const fixtureId = Number(req.params.fixtureId);
+    if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    try {
+      const profile = await engineProfile(fixtureId);
+      const startedAt = Date.now();
+      const verdict = buildInevitability(profile);
+      res.set("Cache-Control", "no-store");
+      res.json({ elapsedMs: Date.now() - startedAt, ...verdict });
+    } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      if (error instanceof InevitabilityUnavailableError) {
+        res.status(422).json({
+          error: "This fixture has no contest to resolve. Its squads have no board to read.",
+        });
+        return;
+      }
+      req.log.error(
+        {
+          errorName: error instanceof Error ? error.name : "UnknownError",
+          errorMessage: error instanceof Error ? error.message : undefined,
+        },
+        "Could not resolve the fixture",
+      );
+      res.status(502).json({ error: "The fixture could not be resolved right now." });
     }
   },
 );

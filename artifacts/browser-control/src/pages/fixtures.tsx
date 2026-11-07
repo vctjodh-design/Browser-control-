@@ -345,6 +345,7 @@ export default function FixturesPage() {
             <Link href="/processing" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6]" data-testid="link-processing">Processing</Link>
             <Link href="/database" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6]" data-testid="link-database">Database</Link>
             <Link href="/model-training" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6]" data-testid="link-model-training">Model training</Link>
+            <Link href="/inevitability" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6]" data-testid="link-inevitability">Inevitability</Link>
           </nav>
         </div>
       </header>

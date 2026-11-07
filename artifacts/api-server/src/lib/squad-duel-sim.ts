@@ -29,7 +29,7 @@ import { levelFor } from "./open-football-replay.ts";
 import type { SimFormProfile, SimLineupPlayer, SimTeamProfile } from "./sim-form-profile";
 
 type Side = "home" | "away";
-type Band = "GK" | "DEF" | "MID" | "FWD";
+export type Band = "GK" | "DEF" | "MID" | "FWD";
 type Lane = "left" | "left-in" | "centre" | "right-in" | "right";
 
 const LANES: Lane[] = ["left", "left-in", "centre", "right-in", "right"];
@@ -68,7 +68,12 @@ const DUEL_SCALE = 3.2;
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
 const logistic = (value: number) => 1 / (1 + Math.exp(-value));
 
-function bandOf(role: string | null | undefined): Band {
+/** What an ordinary professional looks like in the feed's own ratings. */
+const ORDINARY_RATING = 6.9;
+/** Level 12 is a competent professional; the scale runs 5..19. */
+const MIDDLE_LEVEL = 12;
+
+export function bandOf(role: string | null | undefined): Band {
   const value = (role ?? "").toUpperCase();
   if (value.startsWith("GK")) return "GK";
   if (value.startsWith("D") || value === "LB" || value === "RB" || value === "CB") return "DEF";
@@ -98,7 +103,7 @@ function blend(player: SimLineupPlayer, level: number, parts: [string, number][]
   return total;
 }
 
-type Rated = {
+export type Rated = {
   player: SimLineupPlayer;
   name: string;
   role: string;
@@ -115,11 +120,45 @@ type Rated = {
   keeper: number;
 };
 
-function rated(player: SimLineupPlayer, lane: number, shift = 0): Rated {
+/** How good a player is, on the engine's level scale. Swappable so a caller can
+ *  insist on a basis that only uses what was known before kick-off. */
+export type LevelBasis = (player: SimLineupPlayer) => number;
+
+/**
+ * A player's level from what was known about him *before* this fixture.
+ *
+ * `levelFor` reads `form.rating`, which is the rating the feed gave him in the
+ * match being looked at — fine for replaying a match, but for a forecast it is
+ * the result arriving before the prediction. And when the fixture has not been
+ * played there is no such rating, so every man would fall back to the same
+ * middle level and every contest would come out even.
+ *
+ * So the forecast is built on the pre-match record instead: his recent average
+ * rating, how much his own squad relies on him, and which way his form is
+ * running. Decimal, not rounded — two tenths of a rating point is a real
+ * difference between a winger and the full-back who has to stop him, and
+ * rounding it away is what flattened every fixture to the same scoreline.
+ */
+export function preMatchLevel(player: SimLineupPlayer): number {
+  const rating = player.averageRating;
+  const quality = rating === null || rating === undefined
+    ? 0
+    : clamp((rating - ORDINARY_RATING) * 2.1, -1.8, 1.8);
+  const standing = (player.impact - 0.5) * 0.9;
+  const trend = clamp(player.ratingTrend ?? 0, -0.8, 0.8) * 0.35;
+  return clamp(MIDDLE_LEVEL + quality + standing + trend, 5, 19);
+}
+
+function rated(
+  player: SimLineupPlayer,
+  lane: number,
+  shift = 0,
+  levelOf: LevelBasis = levelFor,
+): Rated {
   // `shift` is how far above or below his own form this eleven is playing
   // tonight. It is 0 for the fixture as expected, and the spread of a side's
   // own match-to-match ratings for the "one of those nights" runs.
-  const level = levelFor(player) + shift;
+  const level = levelOf(player) + shift;
   return {
     player,
     name: player.name,
@@ -155,15 +194,22 @@ function laneOf(team: SimTeamProfile, index: number): number {
   return clamp(Math.floor(nz * LANES.length), 0, LANES.length - 1);
 }
 
-function ratedXI(team: SimTeamProfile, shift = 0): Rated[] {
+export function ratedXI(
+  team: SimTeamProfile,
+  shift = 0,
+  levelOf: LevelBasis = levelFor,
+): Rated[] {
   return team.lineup.map((player, index) => {
     // A substitute brought in for an injured starter has no position of his
     // own in the sheet he came from, so the slot he fills says what he is here.
+    // A sheet that names no role at all is the same case: without this every
+    // man in it would band as a forward.
     const slotRole = team.slots[index]?.role;
-    if (slotRole && player.role.toUpperCase() === "SUB") {
-      return rated({ ...player, role: slotRole }, laneOf(team, index), shift);
+    const role = (player.role ?? "").toUpperCase();
+    if (slotRole && (!role || role === "SUB")) {
+      return rated({ ...player, role: slotRole }, laneOf(team, index), shift, levelOf);
     }
-    return rated(player, laneOf(team, index), shift);
+    return rated(player, laneOf(team, index), shift, levelOf);
   });
 }
 
@@ -176,7 +222,7 @@ function ratedXI(team: SimTeamProfile, shift = 0): Rated[] {
  * position, which is what a side with three at the back asks of its wide
  * midfielders anyway.
  */
-function pick(list: Rated[], lane: number, bands: Band[]): Rated | null {
+export function pick(list: Rated[], lane: number, bands: Band[]): Rated | null {
   let best: { player: Rated; cost: number } | null = null;
   for (const player of list) {
     const bandRank = bands.indexOf(player.band);
@@ -414,12 +460,13 @@ function mean(values: number[]): number {
  */
 export function buildDuelBoard(
   profile: SimFormProfile,
-  options: { shift?: DuelShift } = {},
+  options: { shift?: DuelShift; level?: LevelBasis } = {},
 ): DuelBoard {
   const [home, away] = profile.teams;
   const shift = options.shift ?? { home: 0, away: 0 };
-  const homeXI = ratedXI(home, shift.home);
-  const awayXI = ratedXI(away, shift.away);
+  const level = options.level ?? levelFor;
+  const homeXI = ratedXI(home, shift.home, level);
+  const awayXI = ratedXI(away, shift.away, level);
   const lanes: DuelPairing[] = [];
   const midfield: DuelPairing[] = [];
 
@@ -573,6 +620,19 @@ type RawRun = {
  * the one number the market sets (see `runDuelSimulation`); everything else is
  * the players.
  */
+/**
+ * The channel a possession starts in: the wings are where play starts, a direct
+ * side goes through the middle more often, and each side plays its own shape
+ * rather than the same five lanes every time.
+ */
+export function laneWeightsOf(team: SimTeamProfile): number[] {
+  const direct = clamp((team.style.longBallShare ?? 0.2) / 0.4, 0, 1);
+  const crosses = clamp((team.style.crosses ?? 20) / 40, 0, 1);
+  const centre = 1 + direct * 0.9;
+  const wing = 1 + crosses * 0.8;
+  return [wing, 0.9, centre, 0.9, wing];
+}
+
 function playMatches(
   profile: SimFormProfile,
   options: { trials: number; seed: number; shift: DuelShift; chance: DuelShift },
@@ -614,18 +674,8 @@ function playMatches(
   let highest = { home: 0, away: 0, count: 0 };
   let sample: DuelSimulation["sample"] = [];
 
-  // The channel a possession starts in: the wings are where play starts, a
-  // direct side goes through the middle more often, and each side plays its own
-  // shape rather than the same five lanes every time.
-  const laneWeights = (team: SimTeamProfile): number[] => {
-    const direct = clamp((team.style.longBallShare ?? 0.2) / 0.4, 0, 1);
-    const crosses = clamp((team.style.crosses ?? 20) / 40, 0, 1);
-    const centre = 1 + direct * 0.9;
-    const wing = 1 + crosses * 0.8;
-    return [wing, 0.9, centre, 0.9, wing];
-  };
-  const homeLanes = laneWeights(home);
-  const awayLanes = laneWeights(away);
+  const homeLanes = laneWeightsOf(home);
+  const awayLanes = laneWeightsOf(away);
 
   // Who can take each part in each channel, worked out once for the match.
   const homeCarry = LANES.map((_, lane) => candidates(homeXI, lane, ["FWD", "MID", "DEF"]));
@@ -1122,7 +1172,7 @@ function drawLane(random: () => number, weights: number[]): number {
 }
 
 /** The chance the attacking number beats the defending one. */
-function winP(attack: number, defence: number): number {
+export function winP(attack: number, defence: number): number {
   return logistic((attack - defence) / DUEL_SCALE);
 }
 
@@ -1133,7 +1183,7 @@ function winP(attack: number, defence: number): number {
  * the base rather than at base-times-a-half: the odds of the two men's numbers
  * move it up or down from there.
  */
-function chainP(base: number, attack: number, defence: number): number {
+export function chainP(base: number, attack: number, defence: number): number {
   // A man who wins 58% of his duels does not thereby double his side's chances:
   // a possession has three men to beat, so the edge each of them carries into
   // one step is a fraction of his duel edge. Without that the same advantage
@@ -1148,7 +1198,7 @@ function chainP(base: number, attack: number, defence: number): number {
  * and even when it does not. Nothing about the fixture's price or expectation
  * goes in.
  */
-function possessionShare(home: SimTeamProfile, away: SimTeamProfile): number {
+export function possessionShare(home: SimTeamProfile, away: SimTeamProfile): number {
   const left = home.style.possession;
   const right = away.style.possession;
   if (typeof left === "number" && typeof right === "number" && left > 0 && right > 0) {
@@ -1158,3 +1208,19 @@ function possessionShare(home: SimTeamProfile, away: SimTeamProfile): number {
 }
 
 export const DUEL_LANES = LANES;
+export const DUEL_LANE_LABELS = LANE_LABEL;
+
+/**
+ * The fixed rates a match is played on. Exported so the single-trace resolver
+ * (`inevitability-engine.ts`) walks the fixture on the same numbers the sampled
+ * simulation does, instead of keeping a second copy that can drift from it.
+ */
+export const DUEL_CONSTANTS = {
+  possessions: POSSESSIONS,
+  carrySurvives: CARRY_SURVIVES,
+  progressSurvives: PROGRESS_SURVIVES,
+  chanceMade: CHANCE_MADE,
+  shotToGoal: SHOT_TO_GOAL,
+  homeEdge: HOME_EDGE,
+  duelScale: DUEL_SCALE,
+} as const;

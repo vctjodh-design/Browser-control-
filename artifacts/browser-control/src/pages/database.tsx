@@ -50,6 +50,7 @@ function Header({ kind }: { kind: ArchiveKind }) {
       <Link href="/tester" aria-current={kind === 'tester' ? 'page' : undefined} className={kind === 'tester' ? activeClass : idleClass} data-testid="link-tester"><FlaskConical size={13} /> Tester</Link>
       <Link href="/fixtures" className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]" data-testid="link-fixtures"><CalendarDays size={13} /> Fixtures</Link>
       <Link href="/model-training" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]" data-testid="link-model-training">Model training</Link>
+      <Link href="/inevitability" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]" data-testid="link-inevitability">Inevitability</Link>
     </nav>
   </div></header>;
 }

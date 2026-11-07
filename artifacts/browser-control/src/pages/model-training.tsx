@@ -199,6 +199,7 @@ export default function ModelTrainingPage() {
             <Link href="/processing" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]" data-testid="link-processing">Processing</Link>
             <Link href="/database" className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]" data-testid="link-database"><Database size={13} /> Database</Link>
             <Link href="/model-training" aria-current="page" className="inline-flex h-8 items-center rounded-lg bg-[#253746] px-3 text-[10px] font-extrabold text-[#f8f2e7]" data-testid="link-model-training">Model training</Link>
+            <Link href="/inevitability" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] hover:bg-[#fbfaf6]" data-testid="link-inevitability">Inevitability</Link>
             <button
               type="button"
               onClick={() => {

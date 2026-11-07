@@ -13,6 +13,7 @@ import {
 import type { FootballMatchCenter, FootballMatchDetails, FootballMatchLastFive, FootballMatchTmpContext, FootballRecentMatch } from '@workspace/api-client-react';
 import { MatchSimPanel } from '@/components/match-sim-panel';
 import { SquadDuelPanel } from '@/components/squad-duel-panel';
+import { InevitabilityPanel } from '@/components/inevitability-panel';
 import { MatchTmpPanel } from '@/components/match-tmp-panel';
 import { MatchInsightsPanel } from '@/components/match-insights-panel';
 import { MatchupAnalysisPanel } from '@/components/matchup-analysis-panel';
@@ -48,10 +49,11 @@ import {
   Trophy,
 } from 'lucide-react';
 
-type MatchTab = 'simulation' | 'duels' | 'table' | 'fair-ai' | 'match-center' | 'live-intelligence' | 'live-action' | 'replay' | 'odds' | 'odds-translation' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
+type MatchTab = 'simulation' | 'duels' | 'inevitability' | 'table' | 'fair-ai' | 'match-center' | 'live-intelligence' | 'live-action' | 'replay' | 'odds' | 'odds-translation' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
 const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'simulation', label: 'Live match', short: '00' },
   { id: 'duels', label: 'Player duels', short: '16' },
+  { id: 'inevitability', label: 'Inevitability', short: '17' },
   { id: 'table', label: 'Table', short: '01' },
   { id: 'fair-ai', label: 'Forensics', short: '02' },
   { id: 'match-center', label: 'Match centre', short: '12' },
@@ -388,6 +390,7 @@ export default function MatchDetailsPage() {
             <Link href="/processing" className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f1f0e9] px-3 text-[10px] font-extrabold text-[#60716a] transition hover:bg-white" data-testid="link-processing">Processing</Link>
             <Link href="/database" className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f1f0e9] px-3 text-[10px] font-extrabold text-[#60716a] transition hover:bg-white" data-testid="link-database">Database</Link>
             <Link href="/model-training" className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f1f0e9] px-3 text-[10px] font-extrabold text-[#60716a] transition hover:bg-white" data-testid="link-model-training">Model training</Link>
+            <Link href="/inevitability" className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f1f0e9] px-3 text-[10px] font-extrabold text-[#60716a] transition hover:bg-white" data-testid="link-inevitability">Inevitability</Link>
             <Link href={fixturesHref} className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#d9d8cf] bg-[#f1f0e9] px-3 text-[10px] font-extrabold text-[#60716a] transition hover:bg-white" data-testid="link-back-fixtures"><ArrowLeft size={14} /> All fixtures</Link>
           </div>
         </div>
@@ -530,6 +533,9 @@ export default function MatchDetailsPage() {
                 )}
                 {activeTab === 'duels' && (
                   <SquadDuelPanel key={match.fixtureId} fixtureId={fixtureId} homeName={match.home.name} awayName={match.away.name} />
+                )}
+                {activeTab === 'inevitability' && (
+                  <InevitabilityPanel key={match.fixtureId} fixtureId={fixtureId} />
                 )}
                 {activeTab === 'replay' && isComplete && (
                   <MatchReplayPanel
