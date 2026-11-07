@@ -163,18 +163,49 @@ function hasApiStatus(error: unknown, status: number) {
   );
 }
 
-function releaseBrowserSession(sessionId: string) {
-  if (!sessionId || typeof window === 'undefined') return;
-  void fetch(`/api/browser/sessions/${encodeURIComponent(sessionId)}`, {
-    method: 'DELETE',
-    keepalive: true,
-  }).catch(() => undefined);
+const SESSION_STORAGE_KEY = 'browser-control:session';
+const RESTORED_TAB_LIMIT = 12;
+
+type StoredSession = {
+  sessionId: string;
+  urls: string[];
+  activeIndex: number;
+};
+
+function readStoredSession(): StoredSession | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredSession> | null;
+    if (!parsed || typeof parsed.sessionId !== 'string' || !parsed.sessionId) return null;
+    const urls = Array.isArray(parsed.urls)
+      ? parsed.urls.filter((url): url is string => typeof url === 'string' && /^https?:\/\//i.test(url))
+      : [];
+    return {
+      sessionId: parsed.sessionId,
+      urls: urls.slice(0, RESTORED_TAB_LIMIT),
+      activeIndex: typeof parsed.activeIndex === 'number' && parsed.activeIndex >= 0 ? parsed.activeIndex : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSession(value: StoredSession | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!value) window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    else window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    // Private mode or a full quota: the session simply is not remembered.
+  }
 }
 
 function BrowserConsole() {
   const client = useQueryClient();
   const health = useHealthCheck();
-  const [sessionId, setSessionId] = useState('');
+  const [sessionId, setSessionId] = useState(() => readStoredSession()?.sessionId ?? '');
   const [address, setAddress] = useState('');
   const [typeText, setTypeText] = useState('');
   const [keyText, setKeyText] = useState('');
@@ -184,7 +215,8 @@ function BrowserConsole() {
   const [copyStatus, setCopyStatus] = useState('');
   const [sessionNotice, setSessionNotice] = useState('');
   const [pointerPosition, setPointerPosition] = useState<BrowserPoint | null>(null);
-  const activeSessionIdRef = useRef('');
+  const persistedSignatureRef = useRef('');
+  const rememberedRef = useRef<StoredSession | null>(readStoredSession());
   const imageRef = useRef<HTMLImageElement>(null);
   const outputPanelRef = useRef<HTMLDivElement>(null);
   const pointerPositionRef = useRef<BrowserPoint | null>(null);
@@ -214,32 +246,86 @@ function BrowserConsole() {
   const state = sessionQuery.data as BrowserState | undefined;
   const activeTab = state?.tabs.find((tab) => tab.id === state.activeTabId) ?? state?.tabs.find((tab) => tab.active);
   const outputText = state ? getOutputText(state, outputMode) : '';
-  activeSessionIdRef.current = sessionId;
 
   useEffect(() => {
     if (state?.currentUrl) setAddress(state.currentUrl);
   }, [state?.currentUrl]);
 
+  // No page-exit or unmount release on purpose. Mobile Chrome fires `pagehide`
+  // whenever a tab goes to the background, and React unmounts this component
+  // whenever the user visits another page in the SPA. Either way a DELETE went
+  // out for a session that was still wanted, so the user came back to every
+  // tab gone. The session id is now remembered in localStorage and abandoned
+  // sessions are cleaned up server-side: 30 minutes idle, then LRU eviction.
+
   useEffect(() => {
-    // No page-exit release here on purpose. Mobile Chrome fires `pagehide`
-    // whenever the tab goes to the background (new tab, app switch) — often
-    // with `persisted: false` even though the page comes back untouched — and
-    // the keepalive DELETE then goes out while the connection is being torn
-    // down. The server honours it, the SPA keeps its sessionId, and the user
-    // returns to "This browser session has ended or expired" with every tab
-    // gone. Abandonment is handled server-side instead: sessions expire after
-    // 30 minutes idle and are evicted least-recently-used at the cap.
+    if (!sessionId || !state) return;
+    const urls = state.tabs
+      .map((tab) => tab.url ?? '')
+      .filter((url) => /^https?:\/\//i.test(url))
+      .slice(0, RESTORED_TAB_LIMIT);
+    const activeIndex = Math.max(0, state.tabs.findIndex((tab) => tab.id === state.activeTabId));
+    // The viewport polls twice a second; only touch storage when tabs change.
+    const signature = JSON.stringify({ sessionId, urls, activeIndex });
+    if (signature === persistedSignatureRef.current) return;
+    persistedSignatureRef.current = signature;
+    rememberedRef.current = { sessionId, urls, activeIndex };
+    writeStoredSession({ sessionId, urls, activeIndex });
+  }, [sessionId, state]);
+
+  // A session the server no longer has (workspace archived, process restarted)
+  // leaves the remembered tabs here. They are reopened when the user starts the
+  // next session, rather than spawning a browser nobody asked for.
+  const pendingRestoreRef = useRef<StoredSession | null>(null);
+
+  useEffect(() => {
+    const remembered = rememberedRef.current;
+    if (!remembered) return;
+    let cancelled = false;
+    void (async () => {
+      const probe = await fetch(
+        `/api/browser/sessions/${encodeURIComponent(remembered.sessionId)}?restoreProbe=1`,
+      ).catch(() => null);
+      if (cancelled || !probe || probe.status !== 404) return;
+      rememberedRef.current = null;
+      writeStoredSession(null);
+      if (remembered.urls.length === 0) return;
+      pendingRestoreRef.current = remembered;
+      setAddress(remembered.urls[0] ?? '');
+      setSessionNotice(
+        `Your previous session ended. Starting a session reopens the ${remembered.urls.length} tab${remembered.urls.length === 1 ? '' : 's'} you had.`,
+      );
+    })();
     return () => {
-      releaseBrowserSession(activeSessionIdRef.current);
+      cancelled = true;
     };
   }, []);
 
+  const reopenRememberedTabsFrom = async (created: BrowserState) => {
+    const pending = pendingRestoreRef.current;
+    pendingRestoreRef.current = null;
+    if (!pending) return;
+    let latest = created;
+    for (const url of pending.urls.slice(1)) {
+      latest = await createTab.mutateAsync({ sessionId: created.sessionId, data: { url } });
+      acceptState(latest);
+    }
+    const wanted = latest.tabs[Math.min(pending.activeIndex, latest.tabs.length - 1)];
+    if (wanted && wanted.id !== latest.activeTabId) {
+      acceptState(await activateTab.mutateAsync({ sessionId: created.sessionId, tabId: wanted.id }));
+    }
+  };
+
   useEffect(() => {
     if (!sessionId || !hasApiStatus(sessionQuery.error, 404)) return;
+    // The session died while the page was open. Keep the remembered tabs so a
+    // reload can reopen them; do not silently spawn a replacement here.
     client.removeQueries({ queryKey: getGetBrowserSessionQueryKey(sessionId) });
     setSessionId('');
     setAddress('');
-    setSessionNotice('This browser session has ended or expired. Start a new session to continue.');
+    setSessionNotice(
+      'This browser session has ended or expired. Reload the page, then start a session to reopen your tabs.',
+    );
   }, [client, sessionId, sessionQuery.error]);
 
   const acceptState = (next: BrowserState) => {
@@ -326,6 +412,16 @@ function BrowserConsole() {
         acceptState(next);
         setAddress(next.currentUrl);
         setSessionNotice('');
+        if (pendingRestoreRef.current) {
+          void (async () => {
+            try {
+              await reopenRememberedTabsFrom(next);
+              setSessionNotice('Reopened the tabs you had.');
+            } catch {
+              setSessionNotice('Reopened the first tab; the rest could not be reopened.');
+            }
+          })();
+        }
       },
     });
   };
@@ -375,6 +471,10 @@ function BrowserConsole() {
 
   const onCloseSession = () => {
     if (!sessionId || busy) return;
+    // Forget the session before the request goes out: if the response is lost
+    // the app must not mistake the 404 for an expired session and restore it.
+    rememberedRef.current = null;
+    writeStoredSession(null);
     closeSession.mutate({ sessionId }, {
       onSuccess: () => {
         client.removeQueries({ queryKey: getGetBrowserSessionQueryKey(sessionId) });
@@ -383,6 +483,8 @@ function BrowserConsole() {
         setTypeText('');
         setKeyText('');
         setSyncTabs(false);
+        setSessionNotice('');
+        writeStoredSession(null);
       },
     });
   };
