@@ -96,7 +96,14 @@ function fixtureIdOf(matchUrl: string): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
-export async function loadFixtures(date: string, signal?: AbortSignal): Promise<FixtureOption[]> {
+const FIXTURE_LIST_ATTEMPTS = 3;
+
+/** The feed behind the list can be briefly refused, especially while a run is going. */
+function isTransientStatus(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
+
+async function readFixtureList(date: string, signal?: AbortSignal): Promise<FixtureOption[]> {
   const response = await fetch(`/api/football/fixtures?date=${encodeURIComponent(date)}`, {
     signal,
     headers: { accept: 'application/json' },
@@ -104,8 +111,31 @@ export async function loadFixtures(date: string, signal?: AbortSignal): Promise<
   const body = (await response.json().catch(() => null)) as
     | { fixtures?: FixtureOption[]; error?: string }
     | null;
-  if (!response.ok) throw new Error(body?.error ?? `Fixtures could not be loaded (${response.status}).`);
+  if (!response.ok) {
+    throw new InevitabilityRequestError(
+      body?.error ?? `Fixtures could not be loaded (${response.status}).`,
+      response.status,
+      retryAfterSecondsOf(response),
+    );
+  }
   return (body?.fixtures ?? []).filter((fixture) => fixtureIdOf(fixture.matchUrl) !== null);
+}
+
+/**
+ * One refused read of the list should not empty the page: a transient failure is
+ * retried a couple of times, so a reload during a busy run still lands on the date.
+ */
+export async function loadFixtures(date: string, signal?: AbortSignal): Promise<FixtureOption[]> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await readFixtureList(date, signal);
+    } catch (error) {
+      const transient = error instanceof InevitabilityRequestError && isTransientStatus(error.status);
+      if (!transient || attempt >= FIXTURE_LIST_ATTEMPTS - 1 || signal?.aborted) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1_500 * 2 ** attempt));
+      if (signal?.aborted) throw error;
+    }
+  }
 }
 
 export function fixtureId(fixture: FixtureOption): number | null {

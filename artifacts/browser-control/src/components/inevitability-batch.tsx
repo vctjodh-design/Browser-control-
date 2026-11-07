@@ -48,6 +48,7 @@ type StoredRow =
 type RunSnapshot = { version: number; date: string; savedAt: number; rows: StoredRow[] };
 
 const SNAPSHOT_VERSION = 1;
+const STOPPED_MID_READ = 'Skipped: stopped mid-read.';
 
 function snapshotKey(date: string): string {
   return `browser-control:inevitability-batch:${date}`;
@@ -59,8 +60,14 @@ function readSnapshot(date: string): RunSnapshot | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as RunSnapshot;
     if (parsed?.version !== SNAPSHOT_VERSION || parsed.date !== date || !Array.isArray(parsed.rows)) return null;
-    const rows = parsed.rows.filter((row) =>
-      row?.fixture?.matchUrl && (row.kind === 'resolved' ? Boolean(row.verdict) : Boolean(row.reason)),
+    const rows = parsed.rows.filter(
+      (row) =>
+        row?.fixture?.matchUrl &&
+        (row.kind === 'resolved'
+          ? Boolean(row.verdict)
+          : // A read cut off by Stop was never made, so older saves carrying it are
+            // dropped and the fixture comes back queued instead of skipped for good.
+            Boolean(row.reason) && row.reason !== STOPPED_MID_READ),
     );
     return rows.length ? { ...parsed, rows } : null;
   } catch {
@@ -178,21 +185,29 @@ export function InevitabilityBatch({
     haltRef.current = false;
 
     const stored = readSnapshot(date);
-    if (!fixtures.length || !stored) {
+    if (!stored) {
       setRows([]);
       setRestoredAt(null);
       return;
     }
 
+    // A saved row carries its own fixture, so the date's results still show when the
+    // fixture list is slow or refused — the run is not lost just because the list is.
     const saved = new Map(stored.rows.map((row) => [row.fixture.matchUrl, row]));
     setRows(
-      fixtures.map<BatchRow>((fixture) => {
-        const previous = saved.get(fixture.matchUrl);
-        if (!previous) return { kind: 'pending', fixture };
-        return previous.kind === 'resolved'
-          ? { kind: 'resolved', fixture, verdict: previous.verdict }
-          : { kind: 'skipped', fixture, reason: previous.reason };
-      }),
+      fixtures.length
+        ? fixtures.map<BatchRow>((fixture) => {
+            const previous = saved.get(fixture.matchUrl);
+            if (!previous) return { kind: 'pending', fixture };
+            return previous.kind === 'resolved'
+              ? { kind: 'resolved', fixture, verdict: previous.verdict }
+              : { kind: 'skipped', fixture, reason: previous.reason };
+          })
+        : stored.rows.map<BatchRow>((row) =>
+            row.kind === 'resolved'
+              ? { kind: 'resolved', fixture: row.fixture, verdict: row.verdict }
+              : { kind: 'skipped', fixture: row.fixture, reason: row.reason },
+          ),
     );
     setRestoredAt(stored.savedAt);
   }, [date, fixtures]);
@@ -219,6 +234,11 @@ export function InevitabilityBatch({
   const settled = resolved.length + skipped.length;
   const total = rows.length;
   const percent = total ? Math.round((settled / total) * 100) : 0;
+  // What the button will actually read: a restored list continues where it stopped,
+  // and a date whose fixtures are all settled needs the deliberate re-read.
+  const outstanding = total ? total - settled : fixtures.length;
+  const resuming = outstanding > 0 && outstanding < fixtures.length;
+  const finished = total > 0 && outstanding === 0;
   const remainingCooling = cooling ? Math.max(0, Math.ceil((cooling.until - clock) / 1_000)) : 0;
   const counts = useMemo(() => {
     const tally = { firm: 0, leaning: 0, 'knife-edge': 0 };
@@ -228,8 +248,35 @@ export function InevitabilityBatch({
     return tally;
   }, [rows]);
 
-  const start = async () => {
+  const start = async (readAgain = false) => {
     if (running || !fixtures.length) return;
+
+    // What this date already settled stays settled: a refreshed page picks the run up
+    // where it stopped instead of paying upstream for every fixture a second time.
+    // Only a deliberate re-read of a finished date starts from nothing.
+    const kept = new Map<string, StoredRow>();
+    if (!readAgain) {
+      for (const row of rows) {
+        if (row.kind === 'resolved') {
+          kept.set(row.fixture.matchUrl, { kind: 'resolved', fixture: row.fixture, verdict: row.verdict });
+        } else if (row.kind === 'skipped') {
+          kept.set(row.fixture.matchUrl, { kind: 'skipped', fixture: row.fixture, reason: row.reason });
+        }
+      }
+    }
+    const entries: Array<{ fixture: FixtureOption; index: number }> = [];
+    const queued = fixtures.map<BatchRow>((fixture, index) => {
+      const previous = kept.get(fixture.matchUrl);
+      if (previous) {
+        return previous.kind === 'resolved'
+          ? { kind: 'resolved', fixture, verdict: previous.verdict }
+          : { kind: 'skipped', fixture, reason: previous.reason };
+      }
+      entries.push({ fixture, index });
+      return { kind: 'pending', fixture };
+    });
+    if (!entries.length) return;
+
     const controller = new AbortController();
     abortRef.current = controller;
     paceRef.current = BASE_PACE_MS;
@@ -238,10 +285,9 @@ export function InevitabilityBatch({
     setHalted('');
     setCooling(null);
     setRestoredAt(null);
-    setRows(fixtures.map((fixture) => ({ kind: 'pending', fixture })));
+    setRows(queued);
     setRunning(true);
 
-    const entries = fixtures.map((fixture, index) => ({ fixture, index }));
     let cursor = 0;
     const setRow = (index: number, row: BatchRow) =>
       setRows((previous) => previous.map((current, position) => (position === index ? row : current)));
@@ -328,6 +374,12 @@ export function InevitabilityBatch({
           paceRef.current = Math.max(BASE_PACE_MS, Math.round(paceRef.current * 0.85));
         } catch (error) {
           if (controller.signal.aborted) return;
+          // A halted run never read this fixture, so it returns to the queue rather
+          // than being remembered as a skip that a later Continue will not touch.
+          if (haltRef.current) {
+            setRow(entry.index, { kind: 'pending', fixture: entry.fixture });
+            return;
+          }
           setRow(entry.index, { kind: 'skipped', fixture: entry.fixture, reason: skipReason(error) });
         }
       }
@@ -346,11 +398,9 @@ export function InevitabilityBatch({
     abortRef.current = null;
     setRunning(false);
     setCooling(null);
-    setRows((previous) =>
-      previous.map((row) =>
-        row.kind === 'running' ? { kind: 'skipped', fixture: row.fixture, reason: 'Skipped: stopped mid-read.' } : row,
-      ),
-    );
+    // A read that was cut off never happened: the fixtures that were mid-flight go
+    // back in the queue, so Stop followed by Continue does not quietly lose them.
+    setRows((previous) => previous.map((row) => (row.kind === 'running' ? { kind: 'pending', fixture: row.fixture } : row)));
   };
 
   return (
@@ -378,12 +428,19 @@ export function InevitabilityBatch({
         ) : (
           <button
             type="button"
-            onClick={() => void start()}
+            onClick={() => void start(finished)}
             disabled={!fixtures.length}
             className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg bg-[#253746] px-3.5 text-[10px] font-extrabold text-[#f8f2e7] transition hover:bg-[#1d2b37] disabled:opacity-40"
             data-testid="button-batch-start"
           >
-            <Play size={11} /> Process {fixtures.length || ''} fixtures
+            <Play size={11} />
+            {finished
+              ? 'Read the date again'
+              : resuming
+                ? `Continue · ${outstanding} left`
+                : fixtures.length
+                  ? `Process ${fixtures.length} fixtures`
+                  : 'Process the date'}
           </button>
         )}
       </div>

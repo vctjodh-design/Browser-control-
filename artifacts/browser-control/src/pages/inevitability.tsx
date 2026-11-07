@@ -27,6 +27,21 @@ import { InevitabilityBatch } from '@/components/inevitability-batch';
 // verdict — it is meant to be read after full time, not taken on trust.
 
 const today = () => new Date().toISOString().slice(0, 10);
+const KEPT_DATE_KEY = 'browser-control:inevitability-date';
+
+/**
+ * The date being worked on outlives a reload, so a date that was half processed is
+ * still the page you land back on, with its results in place, rather than today.
+ */
+function readKeptDate(): string {
+  try {
+    const saved = window.localStorage.getItem(KEPT_DATE_KEY);
+    if (saved && /^\d{4}-\d{2}-\d{2}$/.test(saved)) return saved;
+  } catch {
+    // Storage can be disabled; today is still a fine place to start.
+  }
+  return today();
+}
 
 function scoreOf(fixture: FixtureOption) {
   return fixture.homeScore === null || fixture.awayScore === null
@@ -74,7 +89,7 @@ function Header() {
 }
 
 export default function InevitabilityPage() {
-  const [date, setDate] = useState(today);
+  const [date, setDate] = useState(readKeptDate);
   const [fixtures, setFixtures] = useState<FixtureOption[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [verdict, setVerdict] = useState<InevitabilityVerdict | null>(null);
@@ -82,6 +97,14 @@ export default function InevitabilityPage() {
   const [loadingVerdict, setLoadingVerdict] = useState(false);
   const [error, setError] = useState('');
   const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(KEPT_DATE_KEY, date);
+    } catch {
+      // Nothing to keep; the page still works for this visit.
+    }
+  }, [date]);
 
   useEffect(() => {
     const controller = new AbortController();
