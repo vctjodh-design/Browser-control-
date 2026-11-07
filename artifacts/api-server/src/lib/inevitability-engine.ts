@@ -52,6 +52,15 @@ const round3 = (value: number) => Math.round(value * 1000) / 1000;
 const other = (side: Side): Side => (side === "home" ? "away" : "home");
 
 /**
+ * No side is read past five goals.
+ *
+ * A sixth says more about the board than about the match: the walk multiplies
+ * independent contest rates, so a rout compounds faster than a side can really
+ * score. Five is a result a reader can hold against a real one.
+ */
+export const INEVITABILITY_MAX_GOALS = 5;
+
+/**
  * A number in [0, 1) that never moves for the same input.
  *
  * FNV-1a over the fixture and the side. The engine needs one thing that behaves
@@ -83,12 +92,25 @@ function goalCount(worth: number, seed: string): number {
   let term = Math.exp(-worth);
   let cumulative = term;
   let goals = 0;
-  while (quantile > cumulative && goals < 15) {
+  while (quantile > cumulative && goals < INEVITABILITY_MAX_GOALS * 2) {
     goals += 1;
     term *= worth / goals;
     cumulative += term;
   }
   return goals;
+}
+
+/**
+ * What a side turned into a shot over the whole walk.
+ *
+ * Not its goal worth: the worth is what those openings are worth once the
+ * finish is priced, and the two answer different questions. This is the volume
+ * a defence actually had to deal with.
+ */
+function openingsOf(attempts: Attempt[], side: Side): number {
+  return attempts
+    .filter((attempt) => attempt.side === side)
+    .reduce((sum, attempt) => sum + attempt.pCarry * attempt.pProgress * attempt.pChance, 0);
 }
 
 /** Thrown when a fixture offers no contest to resolve at all. */
@@ -170,6 +192,39 @@ export type InevitabilityConfidence = {
   basis: string;
 };
 
+/**
+ * The sheet a side keeps, and what the opponent brought to break it.
+ *
+ * The engine used to leave this to a supporting count on another panel. It is a
+ * call in its own right: a side that holds the sheet clean does not win 2–1, it
+ * wins 2–0, and the scoreline should say which.
+ */
+export type InevitabilityShutout = {
+  /** The side that keeps it clean, or null when both sides score. */
+  side: Side | null;
+  clean: boolean;
+  keeper: string;
+  /** Goals the opponent's own play is worth here. */
+  threat: number;
+  /** Openings the opponent created: entries that became a shot. */
+  shotsFaced: number;
+  /** What this defence concedes a game in its own recent matches. */
+  concededPerGame: number;
+  /** Clean sheets in this side's own recent matches. */
+  cleanSheets: number;
+  recentGames: number;
+  text: string;
+  basis: string;
+};
+
+/** One reasoning pass over the fixture, with the numbers it read and what it called. */
+export type InevitabilityMethod = {
+  id: string;
+  label: string;
+  reads: string;
+  call: string;
+};
+
 export type InevitabilityVerdict = {
   fixtureId: number;
   teams: [string, string];
@@ -177,6 +232,10 @@ export type InevitabilityVerdict = {
   scoreline: string;
   verdict: { home: number; away: number; winner: Side | "draw"; text: string };
   lynchpin: InevitabilityLynchpin;
+  /** The sheet either side keeps, read off the opponent's own numbers. */
+  shutout: InevitabilityShutout;
+  /** Every reasoning pass that shaped the verdict, in the order it was read. */
+  methods: InevitabilityMethod[];
   /** The lynchpin channel's own arithmetic, from possessions to goals. */
   cascade: InevitabilityStep[];
   goals: InevitabilityGoal[];
@@ -490,24 +549,136 @@ export function buildInevitability(profile: SimFormProfile): InevitabilityVerdic
   });
 
   const worth: Record<Side, number> = { home: played.home, away: played.away };
+  const squads: Record<Side, SimTeamProfile> = { home, away };
+  const elevens: Record<Side, Rated[]> = {
+    home: ratedXI(home, 0, preMatchLevel),
+    away: ratedXI(away, 0, preMatchLevel),
+  };
+  const keeperOf = (side: Side) =>
+    elevens[side].find((man) => man.band === "GK")?.name ?? `${squads[side].short} keeper`;
+  // What each side actually turned into a shot in this walk, not what it was worth.
+  const openings: Record<Side, number> = {
+    home: openingsOf(played.attempts, "home"),
+    away: openingsOf(played.attempts, "away"),
+  };
+
+  /**
+   * The sheet one side keeps, read off the other side's own numbers.
+   *
+   * Two rates decide it: what the opponent's play is worth here, and what they
+   * score a game, against what this defence concedes a game. The sheet holds
+   * when the opponent is worth less than a goal and their scoring rate does not
+   * run ahead of the concession.
+   */
+  const shutoutOf = (side: Side): InevitabilityShutout => {
+    const defence = squads[side];
+    const attack = squads[other(side)];
+    const threat = round2(worth[other(side)]);
+    const shotsFaced = round1(openings[other(side)]);
+    // A club with no completed matches in the archive reports nothing, not zero:
+    // reading its own goal worth is the honest fallback.
+    const concededPerGame = Number.isFinite(defence.record.goalsAgainstPerGame)
+      ? defence.record.goalsAgainstPerGame
+      : threat;
+    const scoredPerGame = attack.record.goalsForPerGame || threat;
+    // Two ways to a clean sheet. A side worth well under a goal rarely scores at
+    // all, so the sheet holds on this match's own arithmetic. Above that it holds
+    // only when the opponent's scoring rate does not run ahead of the concession:
+    // their attack against this defence, which is what a sheet actually is.
+    const clean =
+      threat <= 0.85 || (threat <= 1.25 && scoredPerGame <= concededPerGame + 0.1);
+    const keeper = keeperOf(side);
+    return {
+      // Only a sheet that holds has a side; both scoring means neither keeps one.
+      side: clean ? side : null,
+      clean,
+      keeper,
+      threat,
+      shotsFaced,
+      concededPerGame: round2(concededPerGame),
+      cleanSheets: defence.record.cleanSheets,
+      recentGames: defence.record.games,
+      text: clean
+        ? `${keeper} keeps the sheet clean: ${attack.short} are worth ${threat.toFixed(
+            2,
+          )} goals here and score ${scoredPerGame.toFixed(
+            2,
+          )} a game, against ${defence.short} conceding ${concededPerGame.toFixed(2)}.`
+        : `${keeper}'s sheet does not hold: ${attack.short} are worth ${threat.toFixed(
+            2,
+          )} goals and score ${scoredPerGame.toFixed(
+            2,
+          )} a game, more than ${defence.short}'s ${concededPerGame.toFixed(2)} conceded.`,
+      basis: `Clean sheets ${defence.record.cleanSheets} in ${defence.record.games}, ${concededPerGame.toFixed(
+        2,
+      )} conceded a game; ${attack.short} score ${scoredPerGame.toFixed(
+        2,
+      )} a game and made ${shotsFaced.toFixed(1)} openings here.`,
+    };
+  };
+
+  const stronger: Side | null =
+    worth.home === worth.away ? null : worth.home > worth.away ? "home" : "away";
+  // Only the side the verdict calls stronger may keep the sheet: a clean sheet
+  // for the weaker side would be this verdict arguing with its own arithmetic.
+  const shutout: InevitabilityShutout = stronger
+    ? shutoutOf(stronger)
+    : {
+        ...shutoutOf("home"),
+        side: null,
+        clean: false,
+        text: "The two sides are worth the same, so neither sheet is called clean: both score.",
+      };
+
+  // The goals are drawn once for the fixture and then split by worth, but no side
+  // is ever read past the cap: five goals is a result a reader can check, and a
+  // sixth is the walk compounding rather than the match.
   const totalWorth = worth.home + worth.away;
-  const totalGoals = totalWorth > 0 ? goalCount(totalWorth, `${profile.fixtureId}:goals`) : 0;
-  const shares = [
-    totalWorth > 0 ? (totalGoals * worth.home) / totalWorth : 0,
-    totalWorth > 0 ? (totalGoals * worth.away) / totalWorth : 0,
-  ];
-  const counts: [number, number] = [Math.floor(shares[0] + 1e-9), Math.floor(shares[1] + 1e-9)];
-  const leftover = totalGoals - counts[0] - counts[1];
-  if (leftover > 0) {
-    // A goal left over by the division goes to the larger remainder, and a tie
-    // goes to the side worth more: the split may never tell a stronger side it
-    // lost to a weaker one.
-    const order = [0, 1].sort(
-      (left, right) =>
-        shares[right] - counts[right] - (shares[left] - counts[left]) ||
-        [worth.home, worth.away][right] - [worth.home, worth.away][left],
+  const drawn =
+    totalWorth > 0
+      ? Math.min(goalCount(totalWorth, `${profile.fixtureId}:goals`), INEVITABILITY_MAX_GOALS * 2)
+      : 0;
+  let counts: [number, number] = [0, 0];
+
+  if (shutout.clean && stronger) {
+    // A clean sheet fixes the other side at nothing, and the margin is the strong
+    // side's own worth read in whole goals.
+    counts[stronger === "home" ? 0 : 1] = clamp(
+      Math.round(worth[stronger]),
+      1,
+      INEVITABILITY_MAX_GOALS,
     );
-    for (let index = 0; index < leftover; index += 1) counts[order[index % 2]] += 1;
+  } else {
+    const shares = [
+      totalWorth > 0 ? (drawn * worth.home) / totalWorth : 0,
+      totalWorth > 0 ? (drawn * worth.away) / totalWorth : 0,
+    ];
+    counts = [Math.floor(shares[0] + 1e-9), Math.floor(shares[1] + 1e-9)];
+    const leftover = drawn - counts[0] - counts[1];
+    if (leftover > 0) {
+      // A goal left over by the division goes to the larger remainder, and a tie
+      // goes to the side worth more: the split may never tell a stronger side it
+      // lost to a weaker one.
+      const order = [0, 1].sort(
+        (left, right) =>
+          shares[right] - counts[right] - (shares[left] - counts[left]) ||
+          [worth.home, worth.away][right] - [worth.home, worth.away][left],
+      );
+      for (let index = 0; index < leftover; index += 1) counts[order[index % 2]] += 1;
+    }
+    counts[0] = Math.min(counts[0], INEVITABILITY_MAX_GOALS);
+    counts[1] = Math.min(counts[1], INEVITABILITY_MAX_GOALS);
+    // The sheet is broken, so both score: a 1–0 from this same walk would
+    // contradict the sheet call that was just made.
+    if (drawn >= 2) {
+      if (counts[0] === 0) {
+        counts[0] = 1;
+        counts[1] = Math.max(1, counts[1] - 1);
+      } else if (counts[1] === 0) {
+        counts[1] = 1;
+        counts[0] = Math.max(1, counts[0] - 1);
+      }
+    }
   }
 
   const goals: InevitabilityGoal[] = [];
@@ -545,6 +716,78 @@ export function buildInevitability(profile: SimFormProfile): InevitabilityVerdic
   const scoreline = `${home.short} ${homeScore}–${awayScore} ${away.short}`;
   const winner: Side | "draw" =
     homeScore > awayScore ? "home" : awayScore > homeScore ? "away" : "draw";
+  const winnerSide: Side | null = winner === "draw" ? null : winner;
+  const margin = Math.abs(homeScore - awayScore);
+  const firstGoal = goals[0] ?? null;
+  const trailing: Side | null = firstGoal ? other(firstGoal.side) : null;
+
+  // Every pass that shaped the verdict, in the order it was read. The sheet call
+  // is one of them and it is the one that picks the scoreline, so a reader can
+  // argue with a number instead of with a tone.
+  const methods: InevitabilityMethod[] = [
+    {
+      id: "board",
+      label: "Duel ledger",
+      reads: `${board.lanes.length + board.midfield.length} man-versus-man contests, on take-on, stop, create, break-up, block and finish.`,
+      call: `${lynchpin.attacker} holds ${Math.round(lynchpin.share * 10)} carries in 10 against ${
+        lynchpin.defender
+      }, which makes the ${lynchpin.lane} channel the one the board is lopsided in.`,
+    },
+    {
+      id: "cover",
+      label: "Forced-adaptation test",
+      reads: `How far the nearest cover stands from ${lynchpin.defender} — ${lynchpin.coverDistance.toFixed(
+        2,
+      )} slots — weighted by the edge he is losing.`,
+      call: `${lynchpin.forcedAdaptation.toFixed(2)} of forced adaptation: ${
+        lynchpin.coverDistance >= 0.45
+          ? "answering it costs a change of shape, not a shuffle"
+          : "answering it costs only a shuffle, so the edge itself has to carry it"
+      } — that is why this contest, and not the biggest mismatch, decides the match.`,
+    },
+    {
+      id: "sheet",
+      label: "Clean-sheet ledger",
+      reads: shutout.basis,
+      call: shutout.text,
+    },
+    {
+      id: "margin",
+      label: "Margin ladder",
+      reads: `Worth of ${round2(worth.home).toFixed(2)} against ${round2(
+        worth.away,
+      ).toFixed(2)} goals, read in whole goals and capped at ${INEVITABILITY_MAX_GOALS} a side.`,
+      call:
+        shutout.clean && winnerSide
+          ? `${squads[winnerSide].short} win by ${margin}: ${margin}-0 is the ladder step their worth reaches, and ${
+              Math.min(margin + 1, INEVITABILITY_MAX_GOALS)
+            }-0 would need a goal the board does not give them.`
+          : `No sheet is clean, so the drawn total of ${drawn} is split by worth into ${homeScore}–${awayScore}, the ladder step both sides' own play reaches.`,
+    },
+    {
+      id: "state",
+      label: "Game-state test",
+      reads: firstGoal
+        ? `The first goal lands on ${firstGoal.minute}', from ${firstGoal.scorer}'s ${firstGoal.channel} possession.`
+        : "The walk produces no goal at all.",
+      call:
+        firstGoal && trailing
+          ? `${squads[trailing].short} trail from ${firstGoal.minute}' and have to ${
+              squads[trailing].tactics.risk >= 0.5
+                ? "raise the risk they already play with"
+                : "push their line up"
+            } to answer it, which is the state the rest of the match is played in.`
+          : "With no goal in the walk, neither side is ever chasing the game.",
+    },
+    {
+      id: "volume",
+      label: "Volume ceiling",
+      reads: `${played.attempts.length} possessions were priced, producing ${round1(
+        openings.home + openings.away,
+      )} openings across the two sides.`,
+      call: `The cap is ${INEVITABILITY_MAX_GOALS} goals a side: nothing in this walk generates a sixth, so a bigger scoreline would be the board's arithmetic rather than the match.`,
+    },
+  ];
 
   // The lynchpin channel's own arithmetic: what the mismatch is worth once the
   // whole chain from carry to finish is walked, on this fixture's numbers.
@@ -629,6 +872,12 @@ export function buildInevitability(profile: SimFormProfile): InevitabilityVerdic
   for (const goal of goals) {
     trace.push(`${goal.minute}' ${goal.team} — ${goal.scorer}, ${goal.channel}. ${goal.detail}.`);
   }
+  trace.push(`Sheet — ${shutout.text}`);
+  trace.push(
+    `Ceiling — ${played.attempts.length} possessions and ${round1(
+      openings.home + openings.away,
+    )} openings, read against a cap of ${INEVITABILITY_MAX_GOALS} goals a side.`,
+  );
   trace.push(`Full time — ${scoreline}`);
 
   return {
@@ -641,18 +890,22 @@ export function buildInevitability(profile: SimFormProfile): InevitabilityVerdic
       away: awayScore,
       winner,
       text: `${scoreline}. ${
+        shutout.clean ? `${shutout.keeper} keeps the sheet clean` : "Neither sheet holds"
+      }, ${
         lynchpin.share >= 0.5
           ? `${lynchpin.attacker} is not answered in the ${lynchpin.lane} channel`
-          : `Nothing ${lynchpin.team} run wins its channel, and ${lynchpin.defender} is where it costs most`
+          : `nothing ${lynchpin.team} run wins its channel and ${lynchpin.defender} is where it costs most`
       }, and everything below follows from that.`,
     },
     lynchpin,
+    shutout,
+    methods,
     cascade,
     goals,
     expectedGoals: { home: round2(played.home), away: round2(played.away) },
     confidence,
     trace,
     killCondition: `${lynchpin.attacker} unavailable, or ${lynchpin.defender} replaced by a fresher ${lynchpin.defenderRole}, and this verdict is void.`,
-    note: `One match, resolved once. ${played.attempts.length} possessions were priced at their own worth and read in order, so this scoreline is the arithmetic residue of the contests above — not one draw out of two thousand.`,
+    note: `One match, resolved once. ${played.attempts.length} possessions were priced at their own worth and read in order, so this scoreline is the arithmetic residue of the contests above — not one draw out of two thousand. The sheet call fixes the losing side at nothing, and no side is read past ${INEVITABILITY_MAX_GOALS} goals.`,
   };
 }

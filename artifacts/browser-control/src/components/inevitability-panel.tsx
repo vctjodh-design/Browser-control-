@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CircleAlert, LoaderCircle } from 'lucide-react';
 import { loadInevitability, type InevitabilityVerdict } from '@/lib/inevitability';
-import { Cascade, LynchpinCard, Script, VerdictHeader } from '@/components/inevitability-verdict';
+import { Cascade, LynchpinCard, Reasoning, Script, VerdictHeader } from '@/components/inevitability-verdict';
 
 // The match page's Inevitability tab: the same fixture resolved once, on the
 // squads alone. It sits next to Player duels on purpose — that tab samples the
@@ -69,6 +69,7 @@ export function InevitabilityPanel({ fixtureId }: { fixtureId: number }) {
         <Cascade verdict={verdict} />
         <Script verdict={verdict} />
       </div>
+      <Reasoning verdict={verdict} />
       <p className="px-1 text-[10px] leading-5 text-[#93958b]">{verdict.note}</p>
     </div>
   );

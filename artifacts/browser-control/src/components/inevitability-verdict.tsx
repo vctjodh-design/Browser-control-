@@ -1,5 +1,5 @@
 import { Link } from 'wouter';
-import { ArrowRight, Crosshair, Gauge, Skull, Target } from 'lucide-react';
+import { ArrowRight, Crosshair, Gauge, Shield, Skull, Target } from 'lucide-react';
 import type { InevitabilityVerdict } from '@/lib/inevitability';
 
 // The verdict, drawn once and used by both surfaces: the Inevitability page and
@@ -53,14 +53,31 @@ export function VerdictHeader({
         </dl>
       </div>
       <div className="grid gap-2 border-t border-[#e1dfd7] px-4 py-3 sm:grid-cols-[auto_1fr] sm:items-start sm:gap-4 sm:px-6">
-        <p
-          className={`mono inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-[8px] font-extrabold uppercase tracking-[.13em] ${tone}`}
-          data-testid="chip-confidence"
-          title={verdict.confidence.basis}
-        >
-          <Gauge size={11} /> {verdict.confidence.label}
-          <span className="text-[#9a9c93]">· {verdict.confidence.separation.toFixed(2)}</span>
-        </p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <p
+            className={`mono inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-[8px] font-extrabold uppercase tracking-[.13em] ${tone}`}
+            data-testid="chip-confidence"
+            title={verdict.confidence.basis}
+          >
+            <Gauge size={11} /> {verdict.confidence.label}
+            <span className="text-[#9a9c93]">· {verdict.confidence.separation.toFixed(2)}</span>
+          </p>
+          {/* The sheet call picks the scoreline, so it is stated next to it. */}
+          <p
+            className={`mono inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-[8px] font-extrabold uppercase tracking-[.13em] ${
+              verdict.shutout.clean
+                ? 'border-[#c3d2c8] bg-[#eef3ee] text-[#4c6b58]'
+                : 'border-[#dedcd2] bg-[#f4f2ea] text-[#8b8d84]'
+            }`}
+            data-testid="chip-shutout"
+            title={verdict.shutout.basis}
+          >
+            <Shield size={11} />{' '}
+            {verdict.shutout.clean
+              ? `Clean sheet · ${verdict.shutout.side === 'home' ? verdict.short[0] : verdict.short[1]}`
+              : 'Both score'}
+          </p>
+        </div>
         <div>
           <p className="text-[10px] leading-5 text-[#5d6a66]" data-testid="text-confidence">
             {verdict.confidence.text}
@@ -228,6 +245,45 @@ export function Script({ verdict }: { verdict: InevitabilityVerdict }) {
           {verdict.killCondition}
         </p>
       </div>
+    </section>
+  );
+}
+
+/**
+ * The reasoning ledger.
+ *
+ * Each pass names what it read and what it called, in the order the engine read
+ * them. The clean-sheet ledger is a pass here rather than a footnote because it
+ * is the one that decides whether the winner's margin sits on a zero.
+ */
+export function Reasoning({ verdict }: { verdict: InevitabilityVerdict }) {
+  return (
+    <section
+      className="overflow-hidden rounded-[17px] border border-[#d6d5cc] bg-[#f9f8f3]"
+      data-testid="section-reasoning"
+    >
+      <div className="border-b border-[#e1dfd7] bg-[#f1f0e9] px-4 py-3 sm:px-6">
+        <p className="mono text-[9px] uppercase tracking-[.17em] text-[#9b7160]">How this was reasoned</p>
+        <p className="mt-1 text-[10px] leading-4 text-[#8b8d84]">
+          Every pass that shaped the verdict, with the numbers it read and the call it made.
+        </p>
+      </div>
+      <ol className="divide-y divide-[#eceae1]">
+        {verdict.methods.map((method, index) => (
+          <li
+            key={method.id}
+            className="flex items-baseline gap-3 px-4 py-3 sm:px-6"
+            data-testid={`reasoning-step-${index}`}
+          >
+            <span className="mono w-4 shrink-0 text-[9px] text-[#b0b2a8]">{index + 1}</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-bold text-[#3d4c4a]">{method.label}</p>
+              <p className="mt-0.5 text-[10px] leading-4 text-[#8b8d84]">{method.reads}</p>
+              <p className="mt-1 text-[10px] leading-4 text-[#5d6a66]">{method.call}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }

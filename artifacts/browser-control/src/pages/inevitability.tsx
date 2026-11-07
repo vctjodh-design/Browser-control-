@@ -16,7 +16,7 @@ import {
   type FixtureOption,
   type InevitabilityVerdict,
 } from '@/lib/inevitability';
-import { Cascade, LynchpinCard, Script, VerdictHeader } from '@/components/inevitability-verdict';
+import { Cascade, LynchpinCard, Reasoning, Script, VerdictHeader } from '@/components/inevitability-verdict';
 import { InevitabilityBatch } from '@/components/inevitability-batch';
 
 // The Inevitability Engine's own page.
@@ -268,6 +268,7 @@ export default function InevitabilityPage() {
               <Cascade verdict={verdict} />
               <Script verdict={verdict} />
             </div>
+            <Reasoning verdict={verdict} />
             <p className="px-1 text-[10px] leading-5 text-[#93958b]">{verdict.note}</p>
           </div>
         )}

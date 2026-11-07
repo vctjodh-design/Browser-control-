@@ -58,6 +58,28 @@ export type InevitabilityConfidence = {
   basis: string;
 };
 
+/** The sheet a side keeps, and what the opponent brought to break it. */
+export type InevitabilityShutout = {
+  side: InevitabilitySide | null;
+  clean: boolean;
+  keeper: string;
+  threat: number;
+  shotsFaced: number;
+  concededPerGame: number;
+  cleanSheets: number;
+  recentGames: number;
+  text: string;
+  basis: string;
+};
+
+/** One reasoning pass over the fixture, with the numbers it read and what it called. */
+export type InevitabilityMethod = {
+  id: string;
+  label: string;
+  reads: string;
+  call: string;
+};
+
 export type InevitabilityVerdict = {
   fixtureId: number;
   teams: [string, string];
@@ -70,6 +92,8 @@ export type InevitabilityVerdict = {
     text: string;
   };
   lynchpin: InevitabilityLynchpin;
+  shutout: InevitabilityShutout;
+  methods: InevitabilityMethod[];
   cascade: InevitabilityStep[];
   goals: InevitabilityGoal[];
   expectedGoals: { home: number; away: number };
