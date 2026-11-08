@@ -62,7 +62,7 @@ export function VerdictHeader({
             <Gauge size={11} /> {verdict.confidence.label}
             <span className="text-[#9a9c93]">· {verdict.confidence.separation.toFixed(2)}</span>
           </p>
-          {/* The sheet call picks the scoreline, so it is stated next to it. */}
+          {/* The sheet is read off the scoreline, so it is stated next to it. */}
           <p
             className={`mono inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-[8px] font-extrabold uppercase tracking-[.13em] ${
               verdict.shutout.clean
@@ -75,7 +75,9 @@ export function VerdictHeader({
             <Shield size={11} />{' '}
             {verdict.shutout.clean
               ? `Clean sheet · ${verdict.shutout.side === 'home' ? verdict.short[0] : verdict.short[1]}`
-              : 'Both score'}
+              : verdict.verdict.home === 0 && verdict.verdict.away === 0
+                ? 'No goals'
+                : 'Both score'}
           </p>
         </div>
         <div>

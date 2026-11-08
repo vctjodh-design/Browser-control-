@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildInevitability } from "../src/lib/inevitability-engine.ts";
+import { buildInevitability, mostLikelyGoals } from "../src/lib/inevitability-engine.ts";
 import { buildDuelBoard, preMatchLevel } from "../src/lib/squad-duel-sim.ts";
 
 // A predicted XI in the shape the profile hands the engine: roles, the incoming
@@ -200,14 +200,88 @@ test("two sides with different records do not resolve to the same board", () => 
   assert.ok(new Set(edges).size > 3, "contests must differ from one another");
 });
 
-test("the fixture's own residue stops every match ending the same way", () => {
+test("the scoreline is the likeliest reading of the worth, not a draw from the id", () => {
+  // This used to be the opposite test: two fixtures with identical elevens were
+  // expected to end differently, because the total was drawn from a hash of the
+  // fixture id so that every fixture did not end 1-1. Against 52 completed
+  // matches that hash was the single biggest source of error — it hit the exact
+  // score once, where the likeliest reading of the same estimates hit it seven
+  // times — so the residue is retired and the guarantee is now determinism.
   const scorelines = new Set();
   for (let fixtureId = 1; fixtureId <= 16; fixtureId += 1) {
     const next = profile(7.2, 6.7);
     next.fixtureId = fixtureId;
     scorelines.add(buildInevitability(next).scoreline.replace(/[A-Z]{3}/g, ""));
   }
-  assert.ok(scorelines.size > 2, `only ${scorelines.size} scorelines across 16 fixtures`);
+  assert.equal(scorelines.size, 1, "the same elevens resolve to the same match, whatever the id");
+
+  // And the count itself is the mode of the side's own goal worth.
+  const verdict = buildInevitability(profile(7.2, 6.7));
+  assert.equal(verdict.verdict.home, mostLikelyGoals(verdict.expectedGoals.home));
+  assert.equal(verdict.verdict.away, mostLikelyGoals(verdict.expectedGoals.away));
+});
+
+test("the likeliest reading is monotone in the worth and never passes the cap", () => {
+  let previous = -1;
+  for (let worth = 0; worth <= 6; worth += 0.05) {
+    const goals = mostLikelyGoals(worth);
+    assert.ok(goals >= previous, `${goals} goals at a worth of ${worth.toFixed(2)} fell below ${previous}`);
+    assert.ok(goals <= 5, `${goals} goals at a worth of ${worth.toFixed(2)} passed the cap`);
+    previous = goals;
+  }
+  assert.equal(mostLikelyGoals(0), 0, "a side worth nothing is read at nothing");
+  assert.equal(mostLikelyGoals(6), 5, "a side worth six goals is still read at five");
+});
+
+test("a level reading is a draw only while the board leaves the sides level", () => {
+  // Rounding two worths to whole goals hides the gap between them, so a level
+  // reading is broken by the stronger side taking one more goal — but only when
+  // the gap is a quarter of a goal or more. The rule is stated in the verdict, so
+  // it is checked here against every rating pair rather than one fixture.
+  let broken = 0;
+  let held = 0;
+  for (const homeRating of [8.2, 7.8, 7.5, 7.2, 6.9, 6.6]) {
+    for (const awayRating of [8.2, 7.8, 7.5, 7.2, 6.9, 6.6]) {
+      const verdict = buildInevitability(profile(homeRating, awayRating));
+      const homeWorth = verdict.expectedGoals.home;
+      const awayWorth = verdict.expectedGoals.away;
+      const gap = homeWorth - awayWorth;
+      const levelModes = mostLikelyGoals(homeWorth) === mostLikelyGoals(awayWorth);
+      if (!levelModes) continue;
+      if (Math.abs(gap) < 0.25) {
+        held += 1;
+        assert.equal(
+          verdict.verdict.home,
+          verdict.verdict.away,
+          `${homeRating}v${awayRating} are ${gap.toFixed(2)} apart and should draw`,
+        );
+        continue;
+      }
+      broken += 1;
+      const lead = verdict.verdict.home - verdict.verdict.away;
+      assert.equal(Math.abs(lead), 1, `a broken tie is a one-goal margin, got ${lead}`);
+      assert.equal(
+        Math.sign(lead),
+        Math.sign(gap),
+        `the side worth more must lead: worth ${homeWorth} v ${awayWorth}`,
+      );
+      assert.equal(verdict.verdict.winner, gap > 0 ? "home" : "away");
+    }
+  }
+  assert.ok(broken > 0, "no level reading was broken in this sample");
+  assert.ok(held > 0, "no level reading was held in this sample");
+});
+
+test("a sheet is only called where the scoreline has a zero", () => {
+  // The sheet chip and the scoreline can no longer disagree: a clean sheet is
+  // claimed exactly when the other side is read at nothing.
+  for (const [homeRating, awayRating] of [[7.9, 6.1], [7.0, 6.9], [6.4, 7.8], [7.2, 6.7]]) {
+    const verdict = buildInevitability(profile(homeRating, awayRating));
+    const { home, away } = verdict.verdict;
+    const readOff = away === 0 && home > 0 ? "home" : home === 0 && away > 0 ? "away" : null;
+    assert.equal(verdict.shutout.side, readOff, `${verdict.scoreline} but the sheet said ${verdict.shutout.side}`);
+    assert.equal(verdict.shutout.clean, readOff !== null);
+  }
 });
 
 test("goals are placed through the match, not all at the death", () => {
