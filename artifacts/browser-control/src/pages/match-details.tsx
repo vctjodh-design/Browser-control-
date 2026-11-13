@@ -435,7 +435,12 @@ export default function MatchDetailsPage() {
             </section>
 
             <section className="mt-5 overflow-hidden rounded-[16px] border border-[#d6d5cc] bg-[#f9f8f3] shadow-[0_12px_40px_rgba(47,59,64,.04)]">
-              <div role="tablist" aria-label="Match details sections" className="flex gap-1 overflow-x-auto border-b border-[#deddd4] bg-[#f4f3ed] p-2 sm:p-2.5" data-testid="tabs-match-details">
+              {/* Eighteen tabs behind a sideways scroll meant most of them were
+                  never seen on a phone: the row stopped at "Inevitability" and
+                  the tabs past it looked like they did not exist. They wrap onto
+                  as many lines as they need on narrow screens, and only scroll
+                  sideways once there is room for one line. */}
+              <div role="tablist" aria-label="Match details sections" className="flex flex-wrap gap-1 border-b border-[#deddd4] bg-[#f4f3ed] p-2 sm:flex-nowrap sm:overflow-x-auto sm:p-2.5" data-testid="tabs-match-details">
                 {visibleTabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} onClick={() => chooseTab(tab.id)} className={`flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold transition sm:px-4 ${activeTab === tab.id ? 'bg-[#253746] text-[#f8f2e7] shadow-sm' : 'text-[#718079] hover:bg-[#e9eee8] hover:text-[#344550]'}`} data-testid={`tab-${tab.id}`}><span className={`mono text-[8px] ${activeTab === tab.id ? 'text-[#d8a08a]' : 'text-[#a7a99f]'}`}>{tab.short}</span>{tab.label}</button>)}
               </div>
               <div className={activeTab === 'simulation' ? 'p-0' : 'p-4 sm:p-6'}>
