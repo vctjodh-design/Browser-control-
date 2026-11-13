@@ -14,6 +14,7 @@ import type { FootballMatchCenter, FootballMatchDetails, FootballMatchLastFive, 
 import { MatchSimPanel } from '@/components/match-sim-panel';
 import { SquadDuelPanel } from '@/components/squad-duel-panel';
 import { InevitabilityPanel } from '@/components/inevitability-panel';
+import { DecisionTreePanel } from '@/components/decision-tree-panel';
 import { MatchTmpPanel } from '@/components/match-tmp-panel';
 import { MatchInsightsPanel } from '@/components/match-insights-panel';
 import { MatchupAnalysisPanel } from '@/components/matchup-analysis-panel';
@@ -49,11 +50,12 @@ import {
   Trophy,
 } from 'lucide-react';
 
-type MatchTab = 'simulation' | 'duels' | 'inevitability' | 'table' | 'fair-ai' | 'match-center' | 'live-intelligence' | 'live-action' | 'replay' | 'odds' | 'odds-translation' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
+type MatchTab = 'simulation' | 'duels' | 'inevitability' | 'decision' | 'table' | 'fair-ai' | 'match-center' | 'live-intelligence' | 'live-action' | 'replay' | 'odds' | 'odds-translation' | 'form' | 'h2h' | 'tmp' | 'insights' | 'graphs' | 'predictions' | 'lastfive';
 const tabs: { id: MatchTab; label: string; short: string }[] = [
   { id: 'simulation', label: 'Live match', short: '00' },
   { id: 'duels', label: 'Player duels', short: '16' },
   { id: 'inevitability', label: 'Inevitability', short: '17' },
+  { id: 'decision', label: 'Decision tree', short: '18' },
   { id: 'table', label: 'Table', short: '01' },
   { id: 'fair-ai', label: 'Forensics', short: '02' },
   { id: 'match-center', label: 'Match centre', short: '12' },
@@ -536,6 +538,9 @@ export default function MatchDetailsPage() {
                 )}
                 {activeTab === 'inevitability' && (
                   <InevitabilityPanel key={match.fixtureId} fixtureId={fixtureId} />
+                )}
+                {activeTab === 'decision' && (
+                  <DecisionTreePanel key={match.fixtureId} fixtureId={fixtureId} />
                 )}
                 {activeTab === 'replay' && isComplete && (
                   <MatchReplayPanel

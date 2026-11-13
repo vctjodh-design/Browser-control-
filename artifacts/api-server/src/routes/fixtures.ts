@@ -32,6 +32,7 @@ import { getSimFormProfile } from "../lib/sim-form-profile";
 import { applyPlayerForm } from "../lib/player-form-apply";
 import { runDuelSimulation } from "../lib/squad-duel-sim";
 import { buildInevitability, InevitabilityUnavailableError } from "../lib/inevitability-engine";
+import { buildDecisionTree } from "../lib/decision-tree";
 import {
   loadFixturePlayerForm,
   PlayerFormUnavailableError,
@@ -622,6 +623,51 @@ router.get(
         "Could not resolve the fixture",
       );
       res.status(502).json({ error: "The fixture could not be resolved right now." });
+    }
+  },
+);
+
+// The combined card: the same board the Inevitability tab reads, settled into
+// every market the board supports, then shaded by the form, table, availability
+// and market readings the other tabs show separately. One profile read, one
+// engine run, so it costs the same as the Inevitability tab and can never
+// disagree with it about the scoreline.
+router.get(
+  "/football/matches/:fixtureId/decision",
+  async (req, res): Promise<void> => {
+    const fixtureId = Number(req.params.fixtureId);
+    if (!Number.isSafeInteger(fixtureId) || fixtureId <= 0) {
+      res.status(400).json({ error: "Choose a valid match ID." });
+      return;
+    }
+
+    try {
+      const profile = await engineProfile(fixtureId);
+      const startedAt = Date.now();
+      const verdict = buildInevitability(profile);
+      const tree = buildDecisionTree(profile, verdict);
+      res.set("Cache-Control", "no-store");
+      res.json({ elapsedMs: Date.now() - startedAt, ...tree });
+    } catch (error) {
+      if (sendUpstreamRateLimit(res, error)) return;
+      if (error instanceof KickoffScoreMatchNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      if (error instanceof InevitabilityUnavailableError) {
+        res.status(422).json({
+          error: "This fixture has no contest to resolve. Its squads have no board to read.",
+        });
+        return;
+      }
+      req.log.error(
+        {
+          errorName: error instanceof Error ? error.name : "UnknownError",
+          errorMessage: error instanceof Error ? error.message : undefined,
+        },
+        "Could not settle the decision tree",
+      );
+      res.status(502).json({ error: "The markets could not be settled right now." });
     }
   },
 );
