@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { settleFromBoard, shiftTier } from "../src/lib/decision-tree.ts";
+import { marketAgreement, settleFromBoard, shiftTier } from "../src/lib/decision-tree.ts";
 
 // The decision tree settles every market at a crossing point, so the crossings
 // are the model. These tests pin them: a tenth of a goal either side of the line
@@ -65,6 +65,50 @@ test("the same facts always settle the same card", () => {
   const first = settleFromBoard(facts(1.62, 1.21, 2, 1));
   const second = settleFromBoard(facts(1.62, 1.21, 2, 1));
   assert.deepEqual(first, second);
+});
+
+// The sheet markets are the one place the board and the card can be talking about
+// different sides, so the pairing is pinned here: a home clean sheet is compared
+// with the board's home clean sheet, and nothing else. Read from the wrong column
+// every sheet line in the app reports the opposite agreement it should.
+const boardWithSheets = (homeCleanSheet, awayCleanSheet) => ({
+  expectations: {
+    source: "odds",
+    totalGoals: 2.4,
+    homeGoals: 1.5,
+    awayGoals: 0.9,
+    over25: 0.45,
+    bothTeamsScore: 0.5,
+    homeCleanSheet,
+    awayCleanSheet,
+    homeCorners: 5,
+    awayCorners: 4,
+  },
+});
+
+test("a clean sheet is compared with the board's reading of the same side", () => {
+  // 1–0: the home side keeps the sheet and the away side does not.
+  const calls = settleFromBoard(facts(1.6, 0.8, 1, 0));
+  assert.equal(calls.homeCleanSheet, "Yes");
+  assert.equal(calls.awayCleanSheet, "No");
+
+  // A board that agrees with both: home likely to keep one, away unlikely.
+  const agreeing = boardWithSheets(0.62, 0.33);
+  assert.equal(marketAgreement(agreeing, "clean-home", { calls }), true);
+  assert.equal(marketAgreement(agreeing, "clean-away", { calls }), true);
+
+  // The same board with the two columns swapped must now disagree on both; if the
+  // pairing were crossed, this is the case that would still read as agreement.
+  const crossed = boardWithSheets(0.33, 0.62);
+  assert.equal(marketAgreement(crossed, "clean-home", { calls }), false);
+  assert.equal(marketAgreement(crossed, "clean-away", { calls }), false);
+});
+
+test("a board with no sheet prices is not an agreement either way", () => {
+  const calls = settleFromBoard(facts(1.6, 0.8, 1, 0));
+  const unspoken = boardWithSheets(null, null);
+  assert.equal(marketAgreement(unspoken, "clean-home", { calls }), null);
+  assert.equal(marketAgreement(unspoken, "clean-away", { calls }), null);
 });
 
 test("a tier moves at most to either end of the ladder", () => {

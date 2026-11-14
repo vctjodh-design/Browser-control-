@@ -368,7 +368,7 @@ function sheetReading(
 }
 
 /** What the market board says about a line, when it prices it at all. */
-function marketAgreement(
+export function marketAgreement(
   profile: SimFormProfile,
   id: string,
   facts: BoardFacts & { calls: BoardCalls },
