@@ -77,6 +77,10 @@ export type DecisionSummary = {
   agreed: number;
   /** Mean of the per-line shares: the card's board agreement in one figure. */
   boardWeight: number | null;
+  /** The board's weight on each call a row prints, so every call carries its own figure. */
+  resultShare: number | null;
+  bttsShare: number | null;
+  goalsShare: number | null;
 };
 
 /**
@@ -103,18 +107,23 @@ export function summarizeDecision(tree: DecisionTree): DecisionSummary {
   const result = callOf(tree, 'result');
   const compared = tree.markets.filter((market) => market.boardShare !== null);
   const weightSum = compared.reduce((sum, market) => sum + (market.boardShare ?? 0), 0);
+  const goals = callOf(tree, 'over-2.5');
+  const btts = callOf(tree, 'btts');
   return {
     scoreline: tree.scoreline,
     result: result?.call ?? 'Not called',
     resultTier: result?.tier ?? 'knife-edge',
-    goals: callOf(tree, 'over-2.5')?.call ?? 'Not called',
-    btts: callOf(tree, 'btts')?.call ?? 'Not called',
+    goals: goals?.call ?? 'Not called',
+    btts: btts?.call ?? 'Not called',
     homeWorth: tree.worth.home,
     awayWorth: tree.worth.away,
     firms: tree.markets.filter((market) => market.tier === 'firm').length,
     compared: compared.length,
     agreed: compared.filter((market) => (market.boardShare ?? 0) > 0.5).length,
     boardWeight: compared.length ? weightSum / compared.length : null,
+    resultShare: result?.boardShare ?? null,
+    bttsShare: btts?.boardShare ?? null,
+    goalsShare: goals?.boardShare ?? null,
   };
 }
 

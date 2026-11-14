@@ -3,7 +3,6 @@ import { CircleSlash, LoaderCircle, Play, Square, TimerReset } from 'lucide-reac
 import { fixtureId, type FixtureOption } from '@/lib/inevitability';
 import {
   DecisionRequestError,
-  boardAgreementPercent,
   loadDecisionTree,
   summarizeDecision,
   type DecisionSummary,
@@ -46,7 +45,7 @@ type RunSnapshot = { version: number; date: string; savedAt: number; rows: Store
 
 // Bumped when a saved row gained fields; a run saved by an older build is dropped
 // rather than rendered with half a card on it.
-const SNAPSHOT_VERSION = 3;
+const SNAPSHOT_VERSION = 4;
 const STOPPED_MID_READ = 'Skipped: stopped mid-read.';
 
 const TIER_STYLE: Record<DecisionTier, string> = {
@@ -150,36 +149,34 @@ function TierChip({ summary }: { summary: DecisionSummary }) {
 }
 
 /**
- * How much of the card the market board is on the same side of. Shown for
- * comparison only: the board is not an input to any call on the card, so this is
- * a second opinion being measured, not the model agreeing with itself.
+ * One call with the board's own weight on it.
+ *
+ * Each prediction on a row carries its own figure, because a single number for the
+ * whole card hid which call the board was actually on: a card can be strong on the
+ * result and against the goals, and one average said neither.
  */
-function BoardChip({ summary }: { summary: DecisionSummary }) {
-  const percent = boardAgreementPercent(summary);
-  if (percent === null) {
-    return (
-      <span
-        className="mono shrink-0 rounded-full border border-[#e0dfd6] bg-[#f4f3ec] px-2 py-0.5 text-[8px] uppercase tracking-[.1em] text-[#a0a29a]"
-        title="The market board priced nothing this card compares to."
-        data-testid={`board-none-${summary.scoreline}`}
-      >
-        board n/a
-      </span>
-    );
-  }
+function CallChip({ label, share, testId }: { label: string; share: number | null; testId?: string }) {
+  const percent = share === null ? null : Math.round(share * 100);
   const tone =
-    percent >= 70
-      ? 'border-[#c6d8c9] bg-[#e6efe4] text-[#41694f]'
-      : percent >= 40
-        ? 'border-[#e2d6bd] bg-[#f6efdf] text-[#8a6a38]'
-        : 'border-[#e0d3cd] bg-[#f7ece7] text-[#9a5c46]';
+    percent === null
+      ? 'border-[#e0dfd6] bg-[#f4f3ec] text-[#a0a29a]'
+      : percent > 50
+        ? 'border-[#cdd9cd] bg-[#eef3ea] text-[#5b7a63]'
+        : 'border-[#e4d2c6] bg-[#f9efea] text-[#a1654e]';
   return (
     <span
-      className={`mono shrink-0 rounded-full border px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-[.1em] ${tone}`}
-      title={`Across the ${summary.compared} lines the board priced, it puts ${percent}% of the weight on the sides the card called, and is on the card's side on ${summary.agreed} of them.`}
-      data-testid={`board-agreement-${summary.scoreline}`}
+      className={`mono inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-[.08em] ${tone}`}
+      title={
+        percent === null
+          ? 'The market board priced nothing to compare this call with.'
+          : `The market board puts ${percent}% of this line's weight on the side the card called, so it ${
+              percent > 50 ? 'agrees' : 'disagrees'
+            }.`
+      }
+      data-testid={testId}
     >
-      board {percent}%
+      <span className="tracking-[.06em]">{label}</span>
+      <span className="text-[#7d8579]">{percent === null ? 'n/a' : `${percent}%`}</span>
     </span>
   );
 }
@@ -572,18 +569,6 @@ export function DecisionBatch({
                     <span className="block truncate text-[11px] font-bold text-[#2b3e49]">
                       {row.fixture.homeTeam} v {row.fixture.awayTeam}
                     </span>
-                    {row.kind === 'resolved' && (
-                      <span
-                        className="mono mt-0.5 block truncate text-[9px] leading-4 text-[#8b8d84]"
-                        data-testid={id === null ? undefined : `text-decision-batch-calls-${id}`}
-                        title={`${row.summary.result} · Both teams to score ${row.summary.btts} · xG ${row.summary.homeWorth.toFixed(
-                          2,
-                        )} – ${row.summary.awayWorth.toFixed(2)} · ${row.summary.goals}`}
-                      >
-                        {row.summary.result} · BTTS {row.summary.btts} · xG {row.summary.homeWorth.toFixed(2)}–
-                        {row.summary.awayWorth.toFixed(2)}
-                      </span>
-                    )}
                   </span>
 
                   {row.kind === 'resolved' ? (
@@ -595,7 +580,6 @@ export function DecisionBatch({
                         {row.summary.scoreline}
                       </span>
                       <TierChip summary={row.summary} />
-                      <BoardChip summary={row.summary} />
                     </span>
                   ) : row.kind === 'running' ? (
                     <span className="mono flex shrink-0 items-center gap-1.5 text-[9px] text-[#8b8d84]">
@@ -611,6 +595,35 @@ export function DecisionBatch({
                     >
                       <CircleSlash size={11} className="mt-0.5 shrink-0" />
                       <span className="min-w-0 whitespace-normal">{row.reason}</span>
+                    </span>
+                  )}
+
+                  {row.kind === 'resolved' && (
+                    <span
+                      className="mt-1 flex w-full flex-wrap items-center gap-1.5"
+                      data-testid={id === null ? undefined : `text-decision-batch-calls-${id}`}
+                    >
+                      <CallChip
+                        label={row.summary.result}
+                        share={row.summary.resultShare}
+                        testId={id === null ? undefined : `board-result-${id}`}
+                      />
+                      <CallChip
+                        label={`BTTS ${row.summary.btts}`}
+                        share={row.summary.bttsShare}
+                        testId={id === null ? undefined : `board-btts-${id}`}
+                      />
+                      <CallChip
+                        label={row.summary.goals}
+                        share={row.summary.goalsShare}
+                        testId={id === null ? undefined : `board-goals-${id}`}
+                      />
+                      <span
+                        className="mono shrink-0 rounded-full border border-[#e0dfd6] bg-[#faf9f4] px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-[.08em] text-[#6b7772]"
+                        title="What each side is worth in goals on the board the card was settled from."
+                      >
+                        xG {row.summary.homeWorth.toFixed(2)}–{row.summary.awayWorth.toFixed(2)}
+                      </span>
                     </span>
                   )}
                 </button>
