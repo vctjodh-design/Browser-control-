@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { fixtureId, loadFixtures, type FixtureOption } from '@/lib/inevitability';
 import { DecisionBatch } from '@/components/decision-batch';
+import { DecisionLedger } from '@/components/decision-ledger';
 import { DecisionTreePanel } from '@/components/decision-tree-panel';
 
 // The whole-date view of the decision tree.
@@ -287,6 +288,8 @@ export default function DecisionPage() {
         </section>
 
         <DecisionBatch date={date} fixtures={fixtures} selected={opened} onSelect={setOpened} query={query} />
+
+        <DecisionLedger />
 
         {opened === null && fixtures.length > 0 && (
           <p className="mb-5 px-1 text-[10px] leading-5 text-[#93958b]" data-testid="hint-open-card">

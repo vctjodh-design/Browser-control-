@@ -34,6 +34,7 @@ import { runDuelSimulation } from "../lib/squad-duel-sim";
 import { buildInevitability, InevitabilityUnavailableError } from "../lib/inevitability-engine";
 import { DECISION_CARD_VERSION, buildDecisionTree, summarizeDecisionTree } from "../lib/decision-tree";
 import { listStoredCards, readStoredCard, writeStoredCard } from "../lib/decision-store";
+import { ledgerStandings, recordCardLines, resolveLedger, unsettledLedgerDates } from "../lib/decision-ledger";
 import {
   loadFixturePlayerForm,
   PlayerFormUnavailableError,
@@ -659,6 +660,40 @@ function writeDecisionMemo(fixtureId: number, tree: ReturnType<typeof buildDecis
   }
 }
 
+async function resolveDateLedger(date: string): Promise<void> {
+  try {
+    const page = await getKickoffScoreFixtures(date);
+    const finished = (page.fixtures ?? []).flatMap((fixture) => {
+      const id = Number(fixture.matchUrl.split("/").filter(Boolean).pop());
+      if (!Number.isSafeInteger(id) || id <= 0) return [];
+      if (fixture.homeScore === null || fixture.awayScore === null) return [];
+      if (!/finished|full.?time|\bft\b/i.test(fixture.status)) return [];
+      return [{ fixtureId: id, home: fixture.homeScore, away: fixture.awayScore }];
+    });
+    if (finished.length) resolveLedger(finished);
+  } catch {
+    // The ledger waits for a round where the feed answers.
+  }
+}
+
+// How every market's calls have held so far, by upset band. This is the bookkeeping
+// that lets the bands mean something later.
+router.get("/football/decisions/ledger", async (req, res): Promise<void> => {
+  try {
+    // The readout is only worth showing marked, so the dates still waiting for a
+    // result are settled before it answers.
+    for (const pending of unsettledLedgerDates()) await resolveDateLedger(pending);
+    res.set("Cache-Control", "no-store");
+    res.json({ standings: ledgerStandings() });
+  } catch (error) {
+    req.log.error(
+      { errorName: error instanceof Error ? error.name : "UnknownError" },
+      "Could not read the upset ledger",
+    );
+    res.status(502).json({ error: "The ledger could not be read." });
+  }
+});
+
 // A board read is seconds of upstream work, and a settled card never changes, so
 // anything that was settled inside the storage window comes back from SQLite. The
 // process memo above is the fast path; this is the one a restart cannot empty.
@@ -678,6 +713,11 @@ router.get("/football/decisions", (req, res): void => {
     res.status(400).json({ error: "Choose a date as YYYY-MM-DD." });
     return;
   }
+  // The date page is the one place that already knows a date, so it is also where
+  // finished fixtures get marked against the lines they were called on. A feed that
+  // refuses costs the ledger a round, not the page.
+  void resolveDateLedger(date);
+
   try {
     res.set("Cache-Control", "no-store");
     res.json({ date, cards: listStoredCards(date) });
@@ -742,6 +782,16 @@ router.get(
         competition: "",
         summary: summarizeDecisionTree(tree),
         payload: { payloadVersion: DECISION_CARD_VERSION, elapsedMs: Date.now() - startedAt, cached: false, ...tree },
+      });
+      // Every line goes into the book with the reading it was given before kick-off,
+      // so the upset bands can be scored once the match is final.
+      recordCardLines({
+        fixtureId,
+        matchDate: String(req.query.date ?? "").trim(),
+        settledAt: Date.now(),
+        markets: tree.markets,
+        homeWorth: tree.worth.home,
+        awayWorth: tree.worth.away,
       });
       res.set("Cache-Control", "private, max-age=600");
       res.set("X-Decision-Cache", "miss");

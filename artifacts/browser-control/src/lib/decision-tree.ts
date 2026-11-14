@@ -180,6 +180,39 @@ export type StoredDecisionCard = {
   summary: DecisionSummary;
 };
 
+/** How one market's calls have actually held, by upset band. */
+export type LedgerStanding = {
+  marketId: string;
+  label: string;
+  upsetLevel: UpsetLevel;
+  held: number;
+  laid: number;
+  rate: number | null;
+};
+
+/**
+ * The upset ledger: every called line that has since been marked at full time.
+ * A rate is only sent where at least one line is marked, so an empty band reads as
+ * unmeasured rather than perfect.
+ */
+export async function loadDecisionLedger(signal?: AbortSignal): Promise<LedgerStanding[]> {
+  const response = await fetch('/api/football/decisions/ledger', {
+    signal,
+    headers: { accept: 'application/json' },
+  });
+  const body = (await response.json().catch(() => null)) as
+    | { standings?: LedgerStanding[]; error?: string }
+    | null;
+  if (!response.ok) {
+    throw new DecisionRequestError(
+      body?.error ?? `The ledger could not be read (${response.status}).`,
+      response.status,
+      retryAfterSecondsOf(response),
+    );
+  }
+  return Array.isArray(body?.standings) ? body.standings : [];
+}
+
 /**
  * What a date has already settled, held in the server's database rather than this
  * browser. Rows come back after a refresh, a cleared cache, a phone swap or a

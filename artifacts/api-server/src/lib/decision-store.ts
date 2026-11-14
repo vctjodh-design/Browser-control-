@@ -40,7 +40,8 @@ export type StoredDecisionCard = {
 let database: DatabaseSync | null = null;
 let unusable = false;
 
-function db(): DatabaseSync | null {
+/** The archive database, shared with the ledger so one file is opened once. */
+export function archiveDatabase(): DatabaseSync | null {
   if (unusable) return null;
   if (database) return database;
   try {
@@ -93,7 +94,7 @@ export function readStoredCard<T>(
   fixtureId: number,
   maxAgeMs = DECISION_STORED_TTL_MS,
 ): { card: T; settledAt: number } | null {
-  const handle = db();
+  const handle = archiveDatabase();
   if (!handle) return null;
   try {
     const row = handle
@@ -118,7 +119,7 @@ export function writeStoredCard(input: {
   payload: unknown;
   settledAt?: number;
 }): void {
-  const handle = db();
+  const handle = archiveDatabase();
   if (!handle) return;
   try {
     handle
@@ -151,7 +152,7 @@ export function writeStoredCard(input: {
 
 /** Every card already settled for a date — what a page needs to come back to. */
 export function listStoredCards(date: string, maxAgeMs = DECISION_STORED_TTL_MS): StoredDecisionCard[] {
-  const handle = db();
+  const handle = archiveDatabase();
   if (!handle) return [];
   try {
     const rows = handle
