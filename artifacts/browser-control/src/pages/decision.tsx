@@ -9,6 +9,7 @@ import {
   LoaderCircle,
   RefreshCw,
   Trophy,
+  X,
 } from 'lucide-react';
 import { fixtureId, loadFixtures, type FixtureOption } from '@/lib/inevitability';
 import { DecisionBatch } from '@/components/decision-batch';
@@ -19,7 +20,10 @@ import { DecisionTreePanel } from '@/components/decision-tree-panel';
 // The match page answers one fixture; this page answers a date. Every fixture is
 // settled by the same tree — one board read, every market called from it — and the
 // run is paced and saved so a date can be worked through in more than one sitting.
-// Selecting a row prints the full card that row was summarized from.
+//
+// The rows are the date; the full card is one fixture. Opening a row raises that
+// card as a sheet over the page, because printed inline it sat below the whole
+// date's list — a report nobody scrolls to is a report nobody reads.
 
 const today = () => new Date().toISOString().slice(0, 10);
 const KEPT_DATE_KEY = 'browser-control:decision-date';
@@ -86,10 +90,30 @@ function Header() {
 export default function DecisionPage() {
   const [date, setDate] = useState(readKeptDate);
   const [fixtures, setFixtures] = useState<FixtureOption[]>([]);
-  const [selected, setSelected] = useState<number | null>(null);
+  // The fixture whose card is open. There is no other reason to select one, so
+  // selecting and opening are the same act: a row or a tile raises the card.
+  const [opened, setOpened] = useState<number | null>(null);
   const [loadingFixtures, setLoadingFixtures] = useState(false);
   const [error, setError] = useState('');
   const [reloadToken, setReloadToken] = useState(0);
+
+  const openedFixture = fixtures.find((fixture) => fixtureId(fixture) === opened) ?? null;
+
+  // A sheet over a scrolling page needs the page behind it to stay put, and
+  // Escape has to close it: on a phone there is no backdrop beside the card.
+  useEffect(() => {
+    if (opened === null) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpened(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [opened]);
 
   useEffect(() => {
     try {
@@ -103,11 +127,10 @@ export default function DecisionPage() {
     const controller = new AbortController();
     setLoadingFixtures(true);
     setError('');
-    setSelected(null);
+    setOpened(null);
     loadFixtures(date, controller.signal)
       .then((rows) => {
         setFixtures(rows);
-        setSelected(rows[0] ? fixtureId(rows[0]) : null);
         if (!rows.length) setError('No fixtures were listed for this date.');
       })
       .catch((cause: unknown) => {
@@ -153,7 +176,7 @@ export default function DecisionPage() {
             <button
               type="button"
               onClick={() => setReloadToken((token) => token + 1)}
-              disabled={selected === null}
+              disabled={opened === null}
               className="grid size-9 place-items-center rounded-lg border border-[#dcd9d0] bg-[#faf9f5] text-[#7d827d] transition hover:bg-white disabled:opacity-40"
               title="Re-read this fixture"
               aria-label="Re-read this fixture"
@@ -186,12 +209,12 @@ export default function DecisionPage() {
             {fixtures.map((fixture) => {
               const id = fixtureId(fixture);
               if (id === null) return null;
-              const active = id === selected;
+              const active = id === opened;
               return (
                 <button
                   key={id}
                   type="button"
-                  onClick={() => setSelected(id)}
+                  onClick={() => setOpened(id)}
                   className={`min-w-[210px] shrink-0 rounded-xl border px-3.5 py-2.5 text-left transition ${
                     active
                       ? 'border-[#253746] bg-[#253746] text-[#f8f2e7]'
@@ -218,15 +241,47 @@ export default function DecisionPage() {
           </div>
         </section>
 
-        <DecisionBatch date={date} fixtures={fixtures} selected={selected} onSelect={setSelected} />
+        <DecisionBatch date={date} fixtures={fixtures} selected={opened} onSelect={setOpened} />
 
-        {selected === null ? (
-          <section className="flex min-h-[200px] items-center justify-center rounded-[17px] border border-dashed border-[#cfcdc2] bg-[#f7f5ef] px-6 text-center">
-            <p className="text-[11px] text-[#8b8d84]">Choose a fixture to read its card.</p>
-          </section>
-        ) : (
-          <div className="animate-rise" data-testid="section-decision-card">
-            <DecisionTreePanel key={`${selected}-${reloadToken}`} fixtureId={selected} />
+        {opened === null && fixtures.length > 0 && (
+          <p className="mb-5 px-1 text-[10px] leading-5 text-[#93958b]" data-testid="hint-open-card">
+            Open a settled row — or any fixture above — to read its full card.
+          </p>
+        )}
+
+        {opened !== null && (
+          <div
+            className="fixed inset-0 z-50 flex items-start justify-center bg-[#1b2730]/45 backdrop-blur-[1px] sm:p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Decision card"
+            onClick={() => setOpened(null)}
+            data-testid="sheet-decision-report"
+          >
+            <div
+              className="h-[100dvh] w-full overflow-y-auto bg-[#f7f5ef] shadow-2xl sm:h-[92dvh] sm:max-w-[900px] sm:rounded-[18px]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-[#e1dfd7] bg-[#f7f5ef]/95 px-4 py-3 backdrop-blur sm:px-5">
+                <div className="min-w-0">
+                  <p className="mono text-[8px] uppercase tracking-[.15em] text-[#9b7160]">Decision card · full report</p>
+                  <p className="truncate text-[12px] font-extrabold text-[#2b3e49]" data-testid="text-sheet-fixture">
+                    {openedFixture ? `${openedFixture.homeTeam} v ${openedFixture.awayTeam}` : `Fixture ${opened}`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOpened(null)}
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-[#dcd9d0] bg-white px-2.5 text-[10px] font-extrabold text-[#5c6f63] transition hover:bg-[#f4f3ec]"
+                  data-testid="button-close-decision-report"
+                >
+                  <X size={13} /> Close
+                </button>
+              </div>
+              <div className="px-3 pb-10 pt-4 sm:px-5">
+                <DecisionTreePanel key={`${opened}-${reloadToken}`} fixtureId={opened} />
+              </div>
+            </div>
           </div>
         )}
 
