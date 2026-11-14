@@ -5,6 +5,7 @@ import {
   CircleAlert,
   Crosshair,
   Database,
+  GitBranch,
   LoaderCircle,
   RefreshCw,
   Trophy,
@@ -81,6 +82,9 @@ function Header() {
           </Link>
           <Link href="/inevitability" aria-current="page" className={activeClass} data-testid="link-inevitability">
             <Crosshair size={13} /> Inevitability
+          </Link>
+          <Link href="/decision" className={idleClass} data-testid="link-decision-from-inevitability">
+            <GitBranch size={13} /> Decision
           </Link>
         </nav>
       </div>

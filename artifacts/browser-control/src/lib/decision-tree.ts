@@ -50,7 +50,39 @@ export type DecisionTree = {
   trace: string[];
   referenceSource: string | null;
   note: string;
+  /** True when the server answered from its short memo instead of reading again. */
+  cached?: boolean;
 };
+
+/**
+ * The calls a date row prints. The full card is re-read when the row is opened,
+ * so a saved run stays small enough to keep a whole date in storage.
+ */
+export type DecisionSummary = {
+  scoreline: string;
+  result: string;
+  resultTier: DecisionTier;
+  goals: string;
+  btts: string;
+  /** How many of the settled lines came back firm — the card's own thermometer. */
+  firms: number;
+};
+
+function callOf(tree: DecisionTree, id: string): DecisionMarket | undefined {
+  return tree.markets.find((market) => market.id === id);
+}
+
+export function summarizeDecision(tree: DecisionTree): DecisionSummary {
+  const result = callOf(tree, 'result');
+  return {
+    scoreline: tree.scoreline,
+    result: result?.call ?? 'Not called',
+    resultTier: result?.tier ?? 'knife-edge',
+    goals: callOf(tree, 'over-2.5')?.call ?? 'Not called',
+    btts: callOf(tree, 'btts')?.call ?? 'Not called',
+    firms: tree.markets.filter((market) => market.tier === 'firm').length,
+  };
+}
 
 function retryAfterSecondsOf(response: Response): number | null {
   const header = response.headers.get('retry-after');

@@ -627,6 +627,37 @@ router.get(
   },
 );
 
+// Settling one fixture costs a real squad read upstream — seconds, not
+// milliseconds — and the same fixture is asked for twice in normal use: once by
+// the match page's tab, once by the date sweep. Nothing in the answer depends on
+// the moment it is asked, so a short memo makes the second ask free and lets a
+// half-finished date run be continued without paying for every fixture again.
+const DECISION_TTL_MS = 10 * 60_000;
+const DECISION_MEMO_LIMIT = 400;
+const decisionMemo = new Map<number, { at: number; tree: ReturnType<typeof buildDecisionTree> }>();
+
+function readDecisionMemo(fixtureId: number): ReturnType<typeof buildDecisionTree> | null {
+  const hit = decisionMemo.get(fixtureId);
+  if (!hit) return null;
+  if (Date.now() - hit.at > DECISION_TTL_MS) {
+    decisionMemo.delete(fixtureId);
+    return null;
+  }
+  // Re-inserting moves it to the end, so the least recently asked goes first.
+  decisionMemo.delete(fixtureId);
+  decisionMemo.set(fixtureId, hit);
+  return hit.tree;
+}
+
+function writeDecisionMemo(fixtureId: number, tree: ReturnType<typeof buildDecisionTree>): void {
+  decisionMemo.set(fixtureId, { at: Date.now(), tree });
+  while (decisionMemo.size > DECISION_MEMO_LIMIT) {
+    const oldest = decisionMemo.keys().next().value;
+    if (oldest === undefined) break;
+    decisionMemo.delete(oldest);
+  }
+}
+
 // The combined card: the same board the Inevitability tab reads, settled into
 // every market the board supports, then shaded by the form, table, availability
 // and market readings the other tabs show separately. One profile read, one
@@ -641,13 +672,25 @@ router.get(
       return;
     }
 
+    const remembered = readDecisionMemo(fixtureId);
+    if (remembered) {
+      // The browser may hold it for the same window the server does; the payload
+      // is derived from the board and does not change inside it.
+      res.set("Cache-Control", "private, max-age=600");
+      res.set("X-Decision-Cache", "hit");
+      res.json({ elapsedMs: 0, cached: true, ...remembered });
+      return;
+    }
+
     try {
       const profile = await engineProfile(fixtureId);
       const startedAt = Date.now();
       const verdict = buildInevitability(profile);
       const tree = buildDecisionTree(profile, verdict);
-      res.set("Cache-Control", "no-store");
-      res.json({ elapsedMs: Date.now() - startedAt, ...tree });
+      writeDecisionMemo(fixtureId, tree);
+      res.set("Cache-Control", "private, max-age=600");
+      res.set("X-Decision-Cache", "miss");
+      res.json({ elapsedMs: Date.now() - startedAt, cached: false, ...tree });
     } catch (error) {
       if (sendUpstreamRateLimit(res, error)) return;
       if (error instanceof KickoffScoreMatchNotFoundError) {

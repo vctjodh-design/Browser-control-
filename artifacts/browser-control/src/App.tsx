@@ -32,6 +32,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   MousePointer2,
+  GitBranch,
   Plus,
   RefreshCw,
   Search,
@@ -52,6 +53,7 @@ import ProcessingPage from '@/pages/processing';
 import DatabasePage, { TesterPage } from '@/pages/database';
 import ModelTrainingPage from '@/pages/model-training';
 import InevitabilityPage from '@/pages/inevitability';
+import DecisionPage from '@/pages/decision';
 
 const queryClient = new QueryClient();
 
@@ -635,6 +637,7 @@ function BrowserConsole() {
               <Link href="/database" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6] hover:text-[#344550]" data-testid="link-database">Database</Link>
               <Link href="/model-training" className="inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6] hover:text-[#344550]" data-testid="link-model-training">Model training</Link>
               <Link href="/inevitability" className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6] hover:text-[#344550]" data-testid="link-inevitability"><Crosshair size={13} /> <span>Inevitability</span></Link>
+              <Link href="/decision" className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-[10px] font-extrabold text-[#64716d] transition hover:bg-[#fbfaf6] hover:text-[#344550]" data-testid="link-decision-nav"><GitBranch size={13} /> <span>Decision</span></Link>
             </nav>
             <span className={`relative flex size-2.5 rounded-full ${health.isError ? 'bg-[#c76c5c]' : health.isLoading ? 'bg-[#d59a42]' : 'bg-[#4d997e]'}`}>
               {health.isLoading && <span className="absolute inset-0 animate-ping rounded-full bg-current opacity-30" />}
@@ -1103,6 +1106,7 @@ function Router() {
         <Route path="/database" component={DatabasePage} />
         <Route path="/model-training" component={ModelTrainingPage} />
         <Route path="/inevitability" component={InevitabilityPage} />
+        <Route path="/decision" component={DecisionPage} />
         <Route path="/tester" component={TesterPage} />
         <Route component={NotFound} />
       </Switch>
