@@ -32,7 +32,8 @@ import { getSimFormProfile } from "../lib/sim-form-profile";
 import { applyPlayerForm } from "../lib/player-form-apply";
 import { runDuelSimulation } from "../lib/squad-duel-sim";
 import { buildInevitability, InevitabilityUnavailableError } from "../lib/inevitability-engine";
-import { buildDecisionTree } from "../lib/decision-tree";
+import { buildDecisionTree, summarizeDecisionTree } from "../lib/decision-tree";
+import { listStoredCards, readStoredCard, writeStoredCard } from "../lib/decision-store";
 import {
   loadFixturePlayerForm,
   PlayerFormUnavailableError,
@@ -658,6 +659,33 @@ function writeDecisionMemo(fixtureId: number, tree: ReturnType<typeof buildDecis
   }
 }
 
+// A board read is seconds of upstream work, and a settled card never changes, so
+// anything that was settled inside the storage window comes back from SQLite. The
+// process memo above is the fast path; this is the one a restart cannot empty.
+function storedCardFor(fixtureId: number) {
+  return readStoredCard<ReturnType<typeof buildDecisionTree>>(fixtureId);
+}
+
+// What a date has already settled, so the page comes back to it instead of
+// starting from nothing after a refresh, a restart or a cleared browser.
+router.get("/football/decisions", (req, res): void => {
+  const date = String(req.query.date ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    res.status(400).json({ error: "Choose a date as YYYY-MM-DD." });
+    return;
+  }
+  try {
+    res.set("Cache-Control", "no-store");
+    res.json({ date, cards: listStoredCards(date) });
+  } catch (error) {
+    req.log.error(
+      { errorName: error instanceof Error ? error.name : "UnknownError" },
+      "Could not list the date's settled cards",
+    );
+    res.status(502).json({ error: "The date's settled cards could not be listed." });
+  }
+});
+
 // The combined card: the same board the Inevitability tab reads, settled into
 // every market the board supports, then shaded by the form, table, availability
 // and market readings the other tabs show separately. One profile read, one
@@ -682,12 +710,35 @@ router.get(
       return;
     }
 
+    // Not in this process's memory, but the archive may already have it: a restart
+    // gives back the cards it settled before the restart, not a bill for reading
+    // every fixture again.
+    const archived = storedCardFor(fixtureId);
+    if (archived) {
+      writeDecisionMemo(fixtureId, archived.card);
+      res.set("Cache-Control", "private, max-age=600");
+      res.set("X-Decision-Cache", "stored");
+      res.json({ elapsedMs: 0, cached: true, settledAt: archived.settledAt, ...archived.card });
+      return;
+    }
+
     try {
       const profile = await engineProfile(fixtureId);
       const startedAt = Date.now();
       const verdict = buildInevitability(profile);
       const tree = buildDecisionTree(profile, verdict);
       writeDecisionMemo(fixtureId, tree);
+      // The date travels with the request when the sweep asks for it, which is how
+      // a card can be listed under its date later.
+      writeStoredCard({
+        fixtureId,
+        matchDate: String(req.query.date ?? "").trim(),
+        homeTeam: tree.teams[0] ?? "",
+        awayTeam: tree.teams[1] ?? "",
+        competition: "",
+        summary: summarizeDecisionTree(tree),
+        payload: { elapsedMs: Date.now() - startedAt, cached: false, ...tree },
+      });
       res.set("Cache-Control", "private, max-age=600");
       res.set("X-Decision-Cache", "miss");
       res.json({ elapsedMs: Date.now() - startedAt, cached: false, ...tree });

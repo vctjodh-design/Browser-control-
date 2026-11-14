@@ -146,11 +146,48 @@ export class DecisionRequestError extends Error {
   }
 }
 
+/** A card the server already settled for a date, in the shape a row prints. */
+export type StoredDecisionCard = {
+  fixtureId: number;
+  matchDate: string;
+  homeTeam: string;
+  awayTeam: string;
+  competition: string;
+  settledAt: number;
+  summary: DecisionSummary;
+};
+
+/**
+ * What a date has already settled, held in the server's database rather than this
+ * browser. Rows come back after a refresh, a cleared cache, a phone swap or a
+ * restart of the app.
+ */
+export async function loadDateDecisions(date: string, signal?: AbortSignal): Promise<StoredDecisionCard[]> {
+  const response = await fetch(`/api/football/decisions?date=${encodeURIComponent(date)}`, {
+    signal,
+    headers: { accept: 'application/json' },
+  });
+  const body = (await response.json().catch(() => null)) as
+    | { cards?: StoredDecisionCard[]; error?: string }
+    | null;
+  if (!response.ok) {
+    throw new DecisionRequestError(
+      body?.error ?? `The date's settled cards could not be loaded (${response.status}).`,
+      response.status,
+      retryAfterSecondsOf(response),
+    );
+  }
+  return Array.isArray(body?.cards) ? body.cards : [];
+}
+
 export async function loadDecisionTree(
   fixtureId: number,
   signal?: AbortSignal,
+  /** The date being worked on, so the server can file the settled card under it. */
+  date?: string,
 ): Promise<DecisionTree> {
-  const response = await fetch(`/api/football/matches/${fixtureId}/decision`, {
+  const query = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? `?date=${encodeURIComponent(date)}` : '';
+  const response = await fetch(`/api/football/matches/${fixtureId}/decision${query}`, {
     signal,
     headers: { accept: 'application/json' },
   });

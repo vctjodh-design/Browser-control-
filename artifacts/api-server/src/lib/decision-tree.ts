@@ -235,6 +235,57 @@ export type DecisionMarket = {
   agrees: boolean | null;
 };
 
+/**
+ * The plan of one card: what the date list prints, and what is kept when a card is
+ * stored, so a row can be shown again without the whole tree.
+ */
+export type DecisionCardSummary = {
+  scoreline: string;
+  result: string;
+  resultTier: DecisionTier;
+  goals: string;
+  btts: string;
+  homeWorth: number;
+  awayWorth: number;
+  firms: number;
+  compared: number;
+  agreed: number;
+  boardWeight: number | null;
+  resultShare: number | null;
+  bttsShare: number | null;
+  goalsShare: number | null;
+};
+
+/** Reads a settled card down to its summary. Pure, so the row and the store agree. */
+export function summarizeDecisionTree(tree: {
+  scoreline: string;
+  worth: { home: number; away: number };
+  markets: DecisionMarket[];
+}): DecisionCardSummary {
+  const find = (id: string) => tree.markets.find((market) => market.id === id);
+  const result = find("result");
+  const btts = find("btts");
+  const goals = find("over-2.5");
+  const compared = tree.markets.filter((market) => market.boardShare !== null);
+  const weightSum = compared.reduce((sum, market) => sum + (market.boardShare ?? 0), 0);
+  return {
+    scoreline: tree.scoreline,
+    result: result?.call ?? "Not called",
+    resultTier: result?.tier ?? "knife-edge",
+    goals: goals?.call ?? "Not called",
+    btts: btts?.call ?? "Not called",
+    homeWorth: tree.worth.home,
+    awayWorth: tree.worth.away,
+    firms: tree.markets.filter((market) => market.tier === "firm").length,
+    compared: compared.length,
+    agreed: compared.filter((market) => (market.boardShare ?? 0) > 0.5).length,
+    boardWeight: compared.length ? weightSum / compared.length : null,
+    resultShare: result?.boardShare ?? null,
+    bttsShare: btts?.boardShare ?? null,
+    goalsShare: goals?.boardShare ?? null,
+  };
+}
+
 export type DecisionWithheld = {
   label: string;
   reason: string;

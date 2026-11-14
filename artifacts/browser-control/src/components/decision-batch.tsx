@@ -3,10 +3,12 @@ import { CircleSlash, LoaderCircle, Play, Square, TimerReset } from 'lucide-reac
 import { fixtureId, type FixtureOption } from '@/lib/inevitability';
 import {
   DecisionRequestError,
+  loadDateDecisions,
   loadDecisionTree,
   summarizeDecision,
   type DecisionSummary,
   type DecisionTier,
+  type StoredDecisionCard,
 } from '@/lib/decision-tree';
 
 // Settling a whole date, one fixture at a time.
@@ -200,6 +202,7 @@ export function DecisionBatch({
   const [cooling, setCooling] = useState<{ until: number; seconds: number } | null>(null);
   const [halted, setHalted] = useState('');
   const [restoredAt, setRestoredAt] = useState<number | null>(null);
+  const [archiveCount, setArchiveCount] = useState(0);
   const [clock, setClock] = useState(() => Date.now());
   const abortRef = useRef<AbortController | null>(null);
   const paceRef = useRef(BASE_PACE_MS);
@@ -244,6 +247,42 @@ export function DecisionBatch({
           ),
     );
     setRestoredAt(stored.savedAt);
+  }, [date, fixtures]);
+
+  // The browser's own save is only as durable as the browser: a cleared cache, a
+  // different phone or a reset app leaves nothing. What the server has settled for
+  // this date is asked for on every load and fills in whatever is missing, so the
+  // date reads back the same after a restart on either end.
+  useEffect(() => {
+    if (!date) return;
+    const controller = new AbortController();
+    setArchiveCount(0);
+    loadDateDecisions(date, controller.signal)
+      .then((cards) => {
+        if (controller.signal.aborted || !cards.length) return;
+        const byId = new Map<number, StoredDecisionCard>(cards.map((card) => [card.fixtureId, card]));
+        setRows((previous) => {
+          const base: BatchRow[] = previous.length
+            ? previous
+            : fixtures.map<BatchRow>((fixture) => ({ kind: 'pending', fixture }));
+          let filled = 0;
+          const merged = base.map<BatchRow>((row) => {
+            if (row.kind === 'resolved') return row;
+            const id = fixtureId(row.fixture);
+            const card = id === null ? undefined : byId.get(id);
+            if (!card) return row;
+            filled += 1;
+            return { kind: 'resolved', fixture: row.fixture, summary: card.summary };
+          });
+          if (filled === 0) return previous;
+          setArchiveCount(filled);
+          return merged;
+        });
+      })
+      .catch(() => {
+        // The saved run in this browser is still there; the archive is a second copy.
+      });
+    return () => controller.abort();
   }, [date, fixtures]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -338,7 +377,7 @@ export function DecisionBatch({
       let transientRetries = 0;
       for (;;) {
         try {
-          return summarizeDecision(await loadDecisionTree(id, controller.signal));
+          return summarizeDecision(await loadDecisionTree(id, controller.signal, date));
         } catch (error) {
           if (controller.signal.aborted) throw error;
 
@@ -516,6 +555,14 @@ export function DecisionBatch({
             >
               kept from the run saved at{' '}
               {new Date(restoredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </p>
+          )}
+          {archiveCount > 0 && !running && (
+            <p
+              className="mono mt-1 text-[8px] uppercase tracking-[.1em] text-[#a0a29a]"
+              data-testid="status-decision-batch-archive"
+            >
+              {archiveCount} more read back from the server's save
             </p>
           )}
           {cooling && (
