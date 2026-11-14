@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CircleAlert, GitBranch, LoaderCircle, MinusCircle } from 'lucide-react';
 import {
   boardAgreementPercent,
+  boardSharePercent,
   loadDecisionTree,
   type DecisionMarket,
   type DecisionNode,
@@ -68,17 +69,19 @@ function MarketRow({ market }: { market: DecisionMarket }) {
             {market.call}
           </p>
           <TierChip tier={market.tier} label={market.tierLabel} />
-          {market.agrees !== null && (
+          {boardSharePercent(market) !== null && (
             <span
-              className={`mono rounded-full border px-1.5 py-0.5 text-[7.5px] uppercase tracking-[.1em] ${
+              className={`mono rounded-full border px-1.5 py-0.5 text-[7.5px] font-extrabold uppercase tracking-[.1em] ${
                 market.agrees
                   ? 'border-[#cdd9cd] bg-[#eef3ea] text-[#5b7a63]'
                   : 'border-[#e4d2c6] bg-[#f9efea] text-[#a1654e]'
               }`}
-              title="What the market board prices. Shown for comparison; it is not an input to the call."
+              title={`The market board puts ${boardSharePercent(market)}% of this line's weight on the side the card called, so it ${
+                market.agrees ? 'agrees' : 'disagrees'
+              }. Shown for comparison; the board is not an input to the call.`}
               data-testid={`agree-${market.id}`}
             >
-              board {market.agrees ? 'agrees' : 'disagrees'}
+              board {boardSharePercent(market)}%
             </span>
           )}
         </div>
@@ -164,9 +167,12 @@ export function DecisionTreePanel({ fixtureId }: { fixtureId: number }) {
   }
 
   const groups: DecisionMarket['group'][] = ['Result', 'Goals', 'Both sides', 'Score'];
-  const compared = tree.markets.filter((market) => market.agrees !== null);
-  const agreed = compared.filter((market) => market.agrees === true).length;
-  const boardPercent = boardAgreementPercent({ agreed, compared: compared.length });
+  const compared = tree.markets.filter((market) => market.boardShare !== null);
+  const agreed = compared.filter((market) => (market.boardShare ?? 0) > 0.5).length;
+  const boardWeight = compared.length
+    ? compared.reduce((sum, market) => sum + (market.boardShare ?? 0), 0) / compared.length
+    : null;
+  const boardPercent = boardAgreementPercent({ boardWeight });
 
   return (
     <section className="space-y-5" data-testid="panel-decision-tree">
@@ -195,10 +201,12 @@ export function DecisionTreePanel({ fixtureId }: { fixtureId: number }) {
             </span>
             <span
               className="mono rounded-lg border border-[#ccd7cb] bg-[#f8faf4] px-2.5 py-1.5 text-[9px] text-[#4d6a55]"
-              title={`The market board prices the same side on ${agreed} of the ${compared.length} lines it could be read against. Shown for comparison; the board is not an input to any call.`}
+              title={`Across the ${compared.length} lines the board priced, it puts ${boardPercent ?? 0}% of the weight on the sides the card called, and is on the card's side on ${agreed} of them. Shown for comparison; the board is not an input to any call.`}
               data-testid="text-decision-board-agreement"
             >
-              {boardPercent === null ? 'board not priced' : `board agrees ${agreed}/${compared.length} · ${boardPercent}%`}
+              {boardPercent === null
+                ? 'board not priced'
+                : `board ${boardPercent}% · ${agreed}/${compared.length} lines`}
             </span>
           </div>
         </div>

@@ -27,6 +27,8 @@ export type DecisionMarket = {
   node: string;
   reads: string;
   why: string;
+  /** The board's weight on the side this line called, 0..1. Null when unpriced. */
+  boardShare: number | null;
   agrees: boolean | null;
 };
 
@@ -73,6 +75,8 @@ export type DecisionSummary = {
   compared: number;
   /** Lines where the board prices the side the card called. */
   agreed: number;
+  /** Mean of the per-line shares: the card's board agreement in one figure. */
+  boardWeight: number | null;
 };
 
 /**
@@ -80,9 +84,15 @@ export type DecisionSummary = {
  * number. Null when the board priced nothing this card compares to — an empty
  * board is not 0% agreement, it is no reading.
  */
-export function boardAgreementPercent(summary: Pick<DecisionSummary, 'agreed' | 'compared'>): number | null {
-  if (summary.compared <= 0) return null;
-  return Math.round((summary.agreed / summary.compared) * 100);
+export function boardAgreementPercent(summary: Pick<DecisionSummary, 'boardWeight'>): number | null {
+  if (summary.boardWeight === null || !Number.isFinite(summary.boardWeight)) return null;
+  return Math.round(summary.boardWeight * 100);
+}
+
+/** One line's share, printed as a whole percentage. */
+export function boardSharePercent(market: Pick<DecisionMarket, 'boardShare'>): number | null {
+  if (market.boardShare === null) return null;
+  return Math.round(market.boardShare * 100);
 }
 
 function callOf(tree: DecisionTree, id: string): DecisionMarket | undefined {
@@ -91,7 +101,8 @@ function callOf(tree: DecisionTree, id: string): DecisionMarket | undefined {
 
 export function summarizeDecision(tree: DecisionTree): DecisionSummary {
   const result = callOf(tree, 'result');
-  const compared = tree.markets.filter((market) => market.agrees !== null);
+  const compared = tree.markets.filter((market) => market.boardShare !== null);
+  const weightSum = compared.reduce((sum, market) => sum + (market.boardShare ?? 0), 0);
   return {
     scoreline: tree.scoreline,
     result: result?.call ?? 'Not called',
@@ -102,7 +113,8 @@ export function summarizeDecision(tree: DecisionTree): DecisionSummary {
     awayWorth: tree.worth.away,
     firms: tree.markets.filter((market) => market.tier === 'firm').length,
     compared: compared.length,
-    agreed: compared.filter((market) => market.agrees === true).length,
+    agreed: compared.filter((market) => (market.boardShare ?? 0) > 0.5).length,
+    boardWeight: compared.length ? weightSum / compared.length : null,
   };
 }
 

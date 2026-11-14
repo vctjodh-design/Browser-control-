@@ -46,7 +46,7 @@ type RunSnapshot = { version: number; date: string; savedAt: number; rows: Store
 
 // Bumped when a saved row gained fields; a run saved by an older build is dropped
 // rather than rendered with half a card on it.
-const SNAPSHOT_VERSION = 2;
+const SNAPSHOT_VERSION = 3;
 const STOPPED_MID_READ = 'Skipped: stopped mid-read.';
 
 const TIER_STYLE: Record<DecisionTier, string> = {
@@ -176,7 +176,7 @@ function BoardChip({ summary }: { summary: DecisionSummary }) {
   return (
     <span
       className={`mono shrink-0 rounded-full border px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-[.1em] ${tone}`}
-      title={`The market board prices the same side on ${summary.agreed} of the ${summary.compared} lines it could be read against.`}
+      title={`Across the ${summary.compared} lines the board priced, it puts ${percent}% of the weight on the sides the card called, and is on the card's side on ${summary.agreed} of them.`}
       data-testid={`board-agreement-${summary.scoreline}`}
     >
       board {percent}%

@@ -225,6 +225,12 @@ export type DecisionMarket = {
   node: string;
   reads: string;
   why: string;
+  /**
+   * How much of the market board's own weight sits on the side this line calls,
+   * between 0 and 1. Half means the board is level on it; above half means the
+   * board leans the same way. Null when the board priced nothing to compare with.
+   */
+  boardShare: number | null;
   /** What the market board says, when it prices this line at all. Null when it does not. */
   agrees: boolean | null;
 };
@@ -368,40 +374,168 @@ function sheetReading(
 }
 
 /** What the market board says about a line, when it prices it at all. */
+/** P(Poisson(mean) = k). */
+function poissonExactly(mean: number, k: number): number {
+  if (!Number.isFinite(mean) || mean <= 0) return k === 0 ? 1 : 0;
+  let term = Math.exp(-mean);
+  for (let index = 1; index <= k; index += 1) term *= mean / index;
+  return term;
+}
+
+/** P(Poisson(mean) >= min). */
+function poissonAtLeast(mean: number, min: number): number {
+  if (!Number.isFinite(mean) || mean <= 0) return min <= 0 ? 1 : 0;
+  let below = 0;
+  let term = Math.exp(-mean);
+  for (let k = 0; k < min; k += 1) {
+    below += term;
+    term *= mean / (k + 1);
+  }
+  return Math.min(1, Math.max(0, 1 - below));
+}
+
+const MAX_GOALS = 12;
+
+/** The board's own 1X2 split, read off the two goal means it carries. */
+function boardOutcomeShares(homeMean: number, awayMean: number): { home: number; draw: number; away: number } {
+  let home = 0;
+  let draw = 0;
+  let away = 0;
+  for (let h = 0; h <= MAX_GOALS; h += 1) {
+    const homeTerm = poissonExactly(homeMean, h);
+    for (let a = 0; a <= MAX_GOALS; a += 1) {
+      const joint = homeTerm * poissonExactly(awayMean, a);
+      if (h > a) home += joint;
+      else if (h === a) draw += joint;
+      else away += joint;
+    }
+  }
+  const total = home + draw + away;
+  if (!(total > 0)) return { home: 1 / 3, draw: 1 / 3, away: 1 / 3 };
+  return { home: home / total, draw: draw / total, away: away / total };
+}
+
+/** A priced yes/no market, read as the board's weight on the side that was called. */
+function yesShare(price: number | null | undefined, call: string): number | null {
+  if (price === null || price === undefined || !Number.isFinite(price)) return null;
+  return call === "Yes" ? price : 1 - price;
+}
+
+/** An over/under line read as the board's weight on the side that was called. */
+function overShare(over: number, call: string, overLabel: string): number {
+  return call === overLabel ? over : 1 - over;
+}
+
+/**
+ * The share of the market board's own weight that sits on the side a line called.
+ *
+ * This is what "board agreement" means per line: above a half the board leans the
+ * same way as the call, below it the board is on the other side. It is a second
+ * opinion being measured — the board is still not an input to any call — and it is
+ * a share of a price, not a probability this app is claiming about the match.
+ *
+ * Where the board prices the line itself that price is used; where it only carries
+ * goal means, the line is read off a Poisson with those means, so a total or an
+ * exact score still gets a figure rather than being left blank.
+ */
+export function boardShareOf(
+  profile: SimFormProfile,
+  id: string,
+  facts: BoardFacts & { calls: BoardCalls },
+): number | null {
+  const reference = profile.expectations;
+  if (!reference) return null;
+  const { calls } = facts;
+  const homeMean = reference.homeGoals;
+  const awayMean = reference.awayGoals;
+  const totalMean = reference.totalGoals > 0 ? reference.totalGoals : homeMean + awayMean;
+  const shares = () => boardOutcomeShares(homeMean, awayMean);
+  const sideOver = (call: string, mean: number) => overShare(poissonAtLeast(mean, 2), call, "Over 1.5");
+  const totalOver = (call: string, min: number) => {
+    const over = poissonAtLeast(totalMean, min);
+    return call.startsWith("Over") ? over : 1 - over;
+  };
+
+  switch (id) {
+    case "result": {
+      const share = shares();
+      if (calls.result === "Draw") return share.draw;
+      if (calls.result === "Home win") return share.home;
+      return share.away;
+    }
+    case "double-chance": {
+      const share = shares();
+      if (calls.doubleChance.includes("1X")) return share.home + share.draw;
+      if (calls.doubleChance.includes("X2")) return share.away + share.draw;
+      return share.home + share.away;
+    }
+    case "draw-no-bet": {
+      const share = shares();
+      const decisive = share.home + share.away;
+      if (!(decisive > 0)) return null;
+      if (calls.drawNoBet === "Home") return share.home / decisive;
+      if (calls.drawNoBet === "Away") return share.away / decisive;
+      return null;
+    }
+    case "handicap": {
+      const favouriteAtHome = homeMean >= awayMean;
+      let byTwo = 0;
+      for (let h = 0; h <= MAX_GOALS; h += 1) {
+        for (let a = 0; a <= MAX_GOALS; a += 1) {
+          const margin = favouriteAtHome ? h - a : a - h;
+          if (margin >= 2) byTwo += poissonExactly(homeMean, h) * poissonExactly(awayMean, a);
+        }
+      }
+      if (calls.handicap === "Favourite −1") return byTwo;
+      if (calls.handicap === "Underdog +1") return 1 - byTwo;
+      return null;
+    }
+    case "win-to-nil": {
+      if (calls.winToNil === "Home to win to nil") {
+        return poissonExactly(awayMean, 0) * (1 - poissonExactly(homeMean, 0));
+      }
+      if (calls.winToNil === "Away to win to nil") {
+        return poissonExactly(homeMean, 0) * (1 - poissonExactly(awayMean, 0));
+      }
+      return null;
+    }
+    case "over-1.5":
+      return totalOver(calls.overOneAndHalf, 2);
+    case "over-2.5": {
+      const priced = reference.over25;
+      const over = priced === null || priced === undefined ? poissonAtLeast(totalMean, 3) : priced;
+      return overShare(over, calls.overTwoAndHalf, "Over 2.5");
+    }
+    case "over-3.5":
+      return totalOver(calls.overThreeAndHalf, 4);
+    case "btts":
+      return yesShare(reference.bothTeamsScore, calls.bothTeamsScore);
+    case "clean-home":
+      return yesShare(reference.homeCleanSheet, calls.homeCleanSheet);
+    case "clean-away":
+      return yesShare(reference.awayCleanSheet, calls.awayCleanSheet);
+    case "team-total-home":
+      return sideOver(calls.homeTeamTotal, homeMean);
+    case "team-total-away":
+      return sideOver(calls.awayTeamTotal, awayMean);
+    case "correct-score": {
+      const [home, away] = calls.correctScore.split("–").map((part) => Number(part.trim()));
+      if (!Number.isInteger(home) || !Number.isInteger(away)) return null;
+      return poissonExactly(homeMean, home) * poissonExactly(awayMean, away);
+    }
+    default:
+      return null;
+  }
+}
+
+/** Whether the board is on the same side of the line as the call. */
 export function marketAgreement(
   profile: SimFormProfile,
   id: string,
   facts: BoardFacts & { calls: BoardCalls },
 ): boolean | null {
-  const reference = profile.expectations;
-  if (!reference) return null;
-  const { calls } = facts;
-  const over = (value: number | null | undefined) => (value === null || value === undefined ? null : value > 0.5);
-  switch (id) {
-    case "result": {
-      const gap = reference.homeGoals - reference.awayGoals;
-      if (!Number.isFinite(gap) || gap === 0) return calls.result === "Draw";
-      return calls.result === (gap > 0 ? "Home win" : "Away win");
-    }
-    case "over-2.5": {
-      const read = over(reference.over25);
-      return read === null ? null : read === (calls.overTwoAndHalf === "Over 2.5");
-    }
-    case "btts": {
-      const read = over(reference.bothTeamsScore);
-      return read === null ? null : read === (calls.bothTeamsScore === "Yes");
-    }
-    case "clean-home": {
-      const read = over(reference.homeCleanSheet);
-      return read === null ? null : read === (calls.homeCleanSheet === "Yes");
-    }
-    case "clean-away": {
-      const read = over(reference.awayCleanSheet);
-      return read === null ? null : read === (calls.awayCleanSheet === "Yes");
-    }
-    default:
-      return null;
-  }
+  const share = boardShareOf(profile, id, facts);
+  return share === null ? null : share > 0.5;
 }
 
 /**
@@ -619,18 +753,24 @@ export function buildDecisionTree(
     node: string,
     reads: string,
     why: string,
-  ): DecisionMarket => ({
-    id,
-    group,
-    label,
-    call,
-    tier,
-    tierLabel: TIER_LABEL[tier],
-    node,
-    reads,
-    why,
-    agrees: marketAgreement(profile, id, { ...facts, calls }),
-  });
+  ): DecisionMarket => {
+    const share = boardShareOf(profile, id, { ...facts, calls });
+    return {
+      id,
+      group,
+      label,
+      call,
+      tier,
+      tierLabel: TIER_LABEL[tier],
+      node,
+      reads,
+      why,
+      // Three decimals is enough to print a whole percentage and keeps the
+      // payload small over a whole date.
+      boardShare: share === null ? null : Math.round(share * 1000) / 1000,
+      agrees: share === null ? null : share > 0.5,
+    };
+  };
 
   const markets: DecisionMarket[] = [
     marketOf(

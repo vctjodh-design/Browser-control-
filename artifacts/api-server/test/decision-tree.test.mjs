@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { marketAgreement, settleFromBoard, shiftTier } from "../src/lib/decision-tree.ts";
+import { boardShareOf, marketAgreement, settleFromBoard, shiftTier } from "../src/lib/decision-tree.ts";
 
 // The decision tree settles every market at a crossing point, so the crossings
 // are the model. These tests pin them: a tenth of a goal either side of the line
@@ -102,6 +102,72 @@ test("a clean sheet is compared with the board's reading of the same side", () =
   const crossed = boardWithSheets(0.33, 0.62);
   assert.equal(marketAgreement(crossed, "clean-home", { calls }), false);
   assert.equal(marketAgreement(crossed, "clean-away", { calls }), false);
+});
+
+// Every line reports the board's own weight on the side the card called, so a card
+// of identical-looking calls gets different figures per line instead of one figure
+// repeated down the whole card.
+const boardPriced = (prices) => ({
+  expectations: {
+    source: "odds",
+    totalGoals: 2.6,
+    homeGoals: 1.8,
+    awayGoals: 0.8,
+    over25: 0.62,
+    bothTeamsScore: 0.58,
+    homeCleanSheet: 0.44,
+    awayCleanSheet: 0.36,
+    homeCorners: 5,
+    awayCorners: 4,
+    ...prices,
+  },
+});
+
+const near = (actual, expected, label) =>
+  assert.ok(Math.abs(actual - expected) < 1e-9, `${label}: expected ${expected}, got ${actual}`);
+
+test("each line reports the board's weight on the side that line called", () => {
+  // 2.8 goals of worth is over the 2.674 crossing, and the scoreline has both sides
+  // scoring, so the card is on the over and the yes.
+  const calls = settleFromBoard(facts(1.9, 0.9, 2, 1));
+  assert.equal(calls.overTwoAndHalf, "Over 2.5");
+  assert.equal(calls.bothTeamsScore, "Yes");
+
+  // The board prices over 2.5 at 62%, so the over line reads 62% and the under
+  // line reads 38% — the same price, taken from the other side.
+  near(boardShareOf(boardPriced({}), "over-2.5", { calls }), 0.62, "over call");
+  const underCalls = settleFromBoard(facts(0.9, 0.7, 1, 0));
+  assert.equal(underCalls.overTwoAndHalf, "Under 2.5");
+  near(boardShareOf(boardPriced({}), "over-2.5", { calls: underCalls }), 0.38, "under call");
+
+  // Both teams to score: the card says yes, the board is 58% on yes.
+  near(boardShareOf(boardPriced({}), "btts", { calls }), 0.58, "btts yes");
+  const noBtts = settleFromBoard(facts(1.9, 0.9, 2, 0));
+  assert.equal(noBtts.bothTeamsScore, "No");
+  near(boardShareOf(boardPriced({}), "btts", { calls: noBtts }), 0.42, "btts no");
+});
+
+test("a line the board only carries goal means for is read off those means", () => {
+  const calls = settleFromBoard(facts(1.8, 0.8, 2, 1));
+  const homeWin = boardShareOf(boardPriced({}), "result", { calls });
+  assert.equal(homeWin > 0.6, true);
+  const awayWin = boardShareOf(boardPriced({}), "result", {
+    calls: { ...calls, result: "Away win" },
+  });
+  assert.equal(awayWin < 0.4, true);
+
+  // An exact score is priced by the two means too, so it gets a small figure rather
+  // than a blank.
+  const exact = boardShareOf(boardPriced({}), "correct-score", { calls });
+  assert.equal(exact > 0, true);
+  assert.equal(exact < 0.2, true);
+});
+
+test("a board that priced nothing leaves every share unset", () => {
+  const calls = settleFromBoard(facts(1.8, 0.8, 2, 1));
+  assert.equal(boardShareOf({ expectations: null }, "result", { calls }), null);
+  assert.equal(boardShareOf({ expectations: null }, "btts", { calls }), null);
+  assert.equal(marketAgreement({ expectations: null }, "btts", { calls }), null);
 });
 
 test("a board with no sheet prices is not an agreement either way", () => {
