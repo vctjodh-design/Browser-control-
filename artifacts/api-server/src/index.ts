@@ -1,5 +1,6 @@
 import app from "./app";
 import { backfillStatus, resumeBackfill } from "./lib/backfill";
+import { dnaStatus, resumeDna } from "./lib/team-dna";
 import { logger } from "./lib/logger";
 
 const rawPort = process.env["PORT"];
@@ -30,5 +31,12 @@ app.listen(port, (err) => {
   const backfill = backfillStatus();
   if (backfill.queued > 0) {
     logger.info({ queued: backfill.queued, done: backfill.done }, "Continuing the decision backfill");
+  }
+
+  // Same for the team dossiers: a restart resumes the reading, it does not lose it.
+  resumeDna();
+  const dna = dnaStatus();
+  if (dna.queued > 0) {
+    logger.info({ queued: dna.queued, teams: dna.teamsStored }, "Continuing team DNA reads");
   }
 });

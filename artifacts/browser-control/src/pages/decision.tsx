@@ -16,6 +16,7 @@ import { fixtureId, loadFixtures, type FixtureOption } from '@/lib/inevitability
 import { DecisionBatch } from '@/components/decision-batch';
 import { DecisionBackfill } from '@/components/decision-backfill';
 import { DecisionLedger } from '@/components/decision-ledger';
+import { TeamDnaSection } from '@/components/team-dna-section';
 import { DecisionTreePanel } from '@/components/decision-tree-panel';
 
 // The whole-date view of the decision tree.
@@ -332,6 +333,9 @@ export default function DecisionPage() {
               </div>
               <div className="px-3 pb-10 pt-4 sm:px-5">
                 <DecisionTreePanel key={`${opened}-${reloadToken}`} fixtureId={opened} />
+                {openedFixture && (
+                  <TeamDnaSection home={openedFixture.homeTeam} away={openedFixture.awayTeam} asOf={date} />
+                )}
               </div>
             </div>
           </div>

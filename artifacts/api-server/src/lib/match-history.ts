@@ -142,13 +142,14 @@ export function historyForTeam(team: string, asOf: string, limit = 60): HistoryM
     const key = normalizeTeamName(team);
     const rows = handle
       .prepare(
-        `SELECT match_date, home_team, away_team, home_score, away_score, competition
+        `SELECT fixture_id, match_date, home_team, away_team, home_score, away_score, competition
          FROM match_history
          WHERE home_key = ? OR away_key = ?
          ORDER BY match_date DESC
          LIMIT ?`,
       )
       .all(key, key, limit) as Array<{
+      fixture_id: number;
       match_date: string;
       home_team: string;
       away_team: string;
@@ -157,6 +158,7 @@ export function historyForTeam(team: string, asOf: string, limit = 60): HistoryM
       competition: string;
     }>;
     return rows.map((row) => ({
+      fixtureId: Number(row.fixture_id),
       date: String(row.match_date),
       homeTeam: String(row.home_team),
       awayTeam: String(row.away_team),

@@ -37,6 +37,7 @@ import { ledgerStandings, resolveLedger, unsettledLedgerDates } from "../lib/dec
 import { engineProfile, settleDecisionCard } from "../lib/decision-card";
 import { backfillStatus, enqueueBackfill, startBackfill, stopBackfill } from "../lib/backfill";
 import { historyCoverage, historyForTeam } from "../lib/match-history";
+import { dnaCoverage, dnaStatus, enqueueTeamDna, startDna, teamDna } from "../lib/team-dna";
 import { summarizeTeamShape } from "../lib/team-shape";
 import {
   loadFixturePlayerForm,
@@ -702,6 +703,42 @@ router.get("/football/teams/:name/shape", (req, res): void => {
   const matches = historyForTeam(name, asOf, 60);
   res.set("Cache-Control", "private, max-age=300");
   res.json({ shape: summarizeTeamShape(name, asOf, matches), matches: matches.length });
+});
+
+// A team's last fifty matches read properly: expected goals, chance quality, when
+// the goals came, whether leads held, what the players were rated.
+router.get("/football/teams/:name/dna", (req, res): void => {
+  const name = decodeURIComponent(String(req.params.name ?? "")).trim();
+  if (name.length < 2 || name.length > 80) {
+    res.status(400).json({ error: "Choose a team name." });
+    return;
+  }
+  const asOf = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.asOf ?? ""))
+    ? String(req.query.asOf)
+    : new Date().toISOString().slice(0, 10);
+  const depth = Math.min(60, Math.max(5, Number(req.query.depth) || 50));
+  res.set("Cache-Control", "no-store");
+  res.json({
+    dna: teamDna(name, asOf, depth),
+    coverage: dnaCoverage(name, asOf, depth),
+    queue: dnaStatus(),
+  });
+});
+
+// Starts (or continues) reading that team's matches. Safe to call again: matches
+// already read are never fetched twice.
+router.post("/football/teams/:name/dna/start", (req, res): void => {
+  const name = decodeURIComponent(String(req.params.name ?? "")).trim();
+  if (name.length < 2 || name.length > 80) {
+    res.status(400).json({ error: "Choose a team name." });
+    return;
+  }
+  const asOf = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.asOf ?? ""))
+    ? String(req.query.asOf)
+    : new Date().toISOString().slice(0, 10);
+  const depth = Math.min(60, Math.max(5, Number(req.query.depth) || 50));
+  const enqueued = enqueueTeamDna([name], asOf, depth);
+  res.json({ enqueued, ...startDna() });
 });
 
 router.get("/football/history", (_req, res): void => {

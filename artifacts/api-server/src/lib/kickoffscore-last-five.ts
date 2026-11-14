@@ -1157,6 +1157,8 @@ export type HistoricalMatchSnapshot = {
   statistics: FootballLastFiveTeamStatistics[];
   lineups: FootballLastFiveLineup[];
   players: FootballLastFivePlayerGroup[];
+  /** The match timeline: goals with minutes, cards, substitutions. */
+  events: FootballLastFiveEvent[];
 };
 
 const historicalSnapshotCache = new Map<
@@ -1194,6 +1196,9 @@ export function getHistoricalMatchSnapshot(
         statistics: parseStatistics(fixture),
         lineups: parseLineups(fixture),
         players: parsePlayers(fixture),
+        // The timeline is what turns a scoreline into a story: when the goals came,
+        // who led first, and whether a side came back.
+        events: parseEvents(fixture),
       };
     })
     .then((data) => {

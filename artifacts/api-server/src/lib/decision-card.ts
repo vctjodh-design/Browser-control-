@@ -3,6 +3,7 @@ import { DECISION_CARD_VERSION, buildDecisionTree, summarizeDecisionTree } from 
 import { readStoredCard, writeStoredCard } from './decision-store';
 import { recordCardLines } from './decision-ledger';
 import { applyPlayerForm } from './player-form-apply';
+import { enqueueTeamDna } from './team-dna';
 import { getSimFormProfile } from './sim-form-profile';
 
 // Settling one card, in one place.
@@ -114,5 +115,9 @@ export async function settleDecisionCard(fixtureId: number, matchDate: string): 
     homeWorth: tree.worth.home,
     awayWorth: tree.worth.away,
   });
+  // Opening a card is also the moment to start the deeper read: both sides' last
+  // fifty matches, queued rather than waited for, so the DNA is ready when asked for.
+  enqueueTeamDna([tree.teams[0] ?? '', tree.teams[1] ?? ''], matchDate || new Date().toISOString().slice(0, 10));
+
   return { tree, source: 'fresh', elapsedMs };
 }

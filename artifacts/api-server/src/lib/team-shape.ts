@@ -13,6 +13,8 @@
  */
 
 export type HistoryMatch = {
+  /** Present when the row came from the history table rather than a caller. */
+  fixtureId?: number;
   date: string;
   homeTeam: string;
   awayTeam: string;

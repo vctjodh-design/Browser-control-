@@ -180,6 +180,66 @@ export type StoredDecisionCard = {
   summary: DecisionSummary;
 };
 
+export type DnaTrait = {
+  label: string;
+  value: number;
+  unit: 'perGame' | 'share' | 'count' | 'rating';
+  note?: string;
+};
+
+export type TeamDna = {
+  team: string;
+  matches: number;
+  from: string | null;
+  to: string | null;
+  record: { wins: number; draws: number; losses: number; goalsFor: number; goalsAgainst: number };
+  identity: DnaTrait[];
+  dynamics: DnaTrait[];
+  pressure: DnaTrait[];
+  mistakes: DnaTrait[];
+  verdict: { scoring: string; control: string; late: string };
+};
+
+export type DnaResponse = {
+  dna: TeamDna;
+  coverage: { expected: number; stored: number };
+  queue: { running: boolean; current: string | null; queued: number; done: number; failed: number; matchesStored: number; teamsStored: number };
+};
+
+/** A side's last matches read properly — xG, chances, phases, ratings. */
+export async function loadTeamDna(team: string, asOf: string, depth = 50): Promise<DnaResponse> {
+  const response = await fetch(
+    `/api/football/teams/${encodeURIComponent(team)}/dna?asOf=${encodeURIComponent(asOf)}&depth=${depth}`,
+    { headers: { accept: 'application/json' } },
+  );
+  const body = (await response.json().catch(() => null)) as (DnaResponse & { error?: string }) | null;
+  if (!response.ok || !body?.dna) {
+    throw new DecisionRequestError(
+      body?.error ?? `This team's DNA could not be read (${response.status}).`,
+      response.status,
+      retryAfterSecondsOf(response),
+    );
+  }
+  return body;
+}
+
+/** Starts reading that team's last fifty matches; safe to call again. */
+export async function startTeamDna(team: string, asOf: string, depth = 50): Promise<{ enqueued: number }> {
+  const response = await fetch(
+    `/api/football/teams/${encodeURIComponent(team)}/dna/start?asOf=${encodeURIComponent(asOf)}&depth=${depth}`,
+    { method: 'POST', headers: { accept: 'application/json' } },
+  );
+  const body = (await response.json().catch(() => null)) as { enqueued?: number; error?: string } | null;
+  if (!response.ok) {
+    throw new DecisionRequestError(
+      body?.error ?? `The read could not be started (${response.status}).`,
+      response.status,
+      retryAfterSecondsOf(response),
+    );
+  }
+  return { enqueued: body?.enqueued ?? 0 };
+}
+
 /** What the paced queue of past fixtures is doing. */
 export type BackfillStatus = {
   running: boolean;
