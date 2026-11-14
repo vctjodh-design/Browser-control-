@@ -20,7 +20,7 @@ export type DecisionUpset = {
 export type DecisionNode = {
   id: string;
   depth: number;
-  branch: 'board' | 'result' | 'goals' | 'scoring' | 'record' | 'availability';
+  branch: 'board' | 'result' | 'goals' | 'scoring' | 'record' | 'availability' | 'window';
   question: string;
   reads: string;
   answer: string;
@@ -42,6 +42,28 @@ export type DecisionMarket = {
   agrees: boolean | null;
   /** How exposed the line is: distance to its crossing, and the board against it. */
   upset: DecisionUpset;
+  /**
+   * The "even if" check: the call asked again at the scoreline the two sides' own
+   * last fifty matches call a normal bad afternoon.
+   */
+  challenge: DecisionChallenge | null;
+};
+
+export type DecisionChallenge = {
+  scoreline: string;
+  holds: boolean;
+  reading: string;
+};
+
+export type DecisionWindow = {
+  team: string;
+  matches: number;
+  reached: number;
+  scoredAtHome: number | null;
+  scoredAway: number | null;
+  concededAtHome: number | null;
+  concededAway: number | null;
+  p80: number | null;
 };
 
 export type DecisionWithheld = {
@@ -63,6 +85,24 @@ export type DecisionTree = {
   withheld: DecisionWithheld[];
   trace: string[];
   referenceSource: string | null;
+  /** The question asked before the card is final, and how many lines survive it. */
+  challenge: {
+    question: string;
+    scenario: string;
+    note: string;
+    holds: number;
+    asked: number;
+    matches: number;
+    vote: boolean;
+    thin: boolean;
+  } | null;
+  dna: {
+    home: DecisionWindow;
+    away: DecisionWindow;
+    note: string;
+    vote: boolean;
+    boardWorth: { home: number; away: number };
+  } | null;
   note: string;
   /** True when the server answered from its short memo instead of reading again. */
   cached?: boolean;

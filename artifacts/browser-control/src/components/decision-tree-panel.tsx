@@ -116,6 +116,17 @@ function MarketRow({ market }: { market: DecisionMarket }) {
             </span>
           )}
         </div>
+        {market.challenge && (
+          <p
+            className={`mono mt-1 text-[8px] uppercase tracking-[.1em] ${
+              market.challenge.holds ? 'text-[#607f66]' : 'text-[#a4513a]'
+            }`}
+            title={market.challenge.reading}
+            data-testid={`evenif-${market.id}`}
+          >
+            even if {market.challenge.scoreline} · {market.challenge.holds ? 'holds' : 'turns over'}
+          </p>
+        )}
       </div>
       <div className="min-w-0">
         <p className="text-[9.5px] leading-[1.65] text-[#6d7873]">{market.why}</p>
@@ -254,8 +265,38 @@ export function DecisionTreePanel({ fixtureId }: { fixtureId: number }) {
             >
               {upsetHigh > 0 ? `${upsetHigh} upset${upsetHigh === 1 ? '' : 's'} to watch` : 'no live upset'}
             </span>
+            {tree.challenge && (
+              <span
+                className={`mono rounded-lg border px-2.5 py-1.5 text-[9px] ${
+                  tree.challenge.holds === tree.challenge.asked
+                    ? 'border-[#ccd7cb] bg-[#f8faf4] text-[#4d6a55]'
+                    : 'border-[#e2d6bd] bg-[#f6efdf] text-[#8a6a38]'
+                }`}
+                title={`${tree.challenge.question} ${tree.challenge.note}`}
+                data-testid="text-decision-evenif"
+              >
+                {tree.challenge.thin
+                  ? `even if · ${tree.challenge.matches} matches read`
+                  : `even if ${tree.challenge.scenario} · ${tree.challenge.holds}/${tree.challenge.asked} hold`}
+              </span>
+            )}
           </div>
         </div>
+        {tree.challenge && (
+          <p
+            className="border-t border-[#dde3d6] px-4 py-2.5 text-[10px] leading-[1.7] text-[#4f6155]"
+            data-testid="text-decision-question"
+          >
+            <span className="mono mr-1.5 text-[8px] uppercase tracking-[.14em] text-[#9b7160]">Before it is final</span>
+            {tree.challenge.question}{' '}
+            <span className="text-[#7d827d]">
+              {tree.challenge.thin
+                ? `Not answered yet: only ${tree.challenge.matches} matches are read for both sides, so the window informs the card without being put to the test. `
+                : `${tree.challenge.holds} of ${tree.challenge.asked} lines still hold. `}
+              {tree.challenge.note}
+            </span>
+          </p>
+        )}
         <p className="border-t border-[#dde3d6] px-4 py-2.5 text-[9px] leading-[1.7] text-[#6f7d71]">{tree.note}</p>
       </header>
 

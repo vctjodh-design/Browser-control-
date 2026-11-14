@@ -2,7 +2,7 @@ import { archiveDatabase } from './decision-store';
 import { getHistoricalMatchSnapshot } from './kickoffscore-last-five';
 import { historyForTeam } from './match-history';
 import { normalizeTeamName } from './team-shape';
-import { summarizeDna, type DnaMatch, type TeamDna } from './team-dna-math';
+import { stressGoals, summarizeDna, type DnaMatch, type TeamDna } from './team-dna-math';
 
 // Reading a team's last fifty matches properly.
 //
@@ -511,6 +511,51 @@ function readDnaMatches(team: string, asOf: string, depth: number): DnaMatch[] {
 
 export function teamDna(team: string, asOf: string, depth = DEFAULT_DEPTH): TeamDna {
   return summarizeDna(team, readDnaMatches(team, asOf, depth));
+}
+
+export type GoalShape = {
+  team: string;
+  matches: number;
+  reached: number;
+  scoredAtHome: number | null;
+  scoredAway: number | null;
+  concededAtHome: number | null;
+  concededAway: number | null;
+  /** Eightieth percentile of the goals this side scored across its window. */
+  p80: number | null;
+};
+
+function average(values: number[]): number | null {
+  if (!values.length) return null;
+  return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100;
+}
+
+/**
+ * The shape the decision card needs: what this side does at each venue, and how
+ * many goals a bad afternoon normally brings.
+ *
+ * The 80th percentile is the stress case — four times in five this side scores at
+ * or below it, so a call that survives it has survived its own history.
+ */
+export function goalShape(team: string, asOf: string, depth = DEFAULT_DEPTH): GoalShape {
+  const rows = readDnaMatches(team, asOf, depth);
+  const raw = stressGoals(rows.map((row) => row.goalsFor));
+  const mean = average(rows.map((row) => row.goalsFor));
+  // A percentile over a short window is the maximum of it, and an eight-goal rout
+  // is not a "bad afternoon" to test a call against. The stress case is capped at a
+  // goal over the side's own average, so one freak result cannot invent a scoreline
+  // the card was never about.
+  const p80 = raw === null ? null : mean === null ? raw : Math.min(raw, Math.ceil(mean + 1));
+  return {
+    team,
+    matches: rows.length,
+    reached: historyForTeam(team, asOf, depth).length,
+    scoredAtHome: average(rows.filter((row) => row.venue === 'home').map((row) => row.goalsFor)),
+    scoredAway: average(rows.filter((row) => row.venue === 'away').map((row) => row.goalsFor)),
+    concededAtHome: average(rows.filter((row) => row.venue === 'home').map((row) => row.goalsAgainst)),
+    concededAway: average(rows.filter((row) => row.venue === 'away').map((row) => row.goalsAgainst)),
+    p80,
+  };
 }
 
 function enqueueTeam(team: string, asOf: string, depth: number): boolean {

@@ -3,7 +3,7 @@ import { DECISION_CARD_VERSION, buildDecisionTree, summarizeDecisionTree } from 
 import { readStoredCard, writeStoredCard } from './decision-store';
 import { recordCardLines } from './decision-ledger';
 import { applyPlayerForm } from './player-form-apply';
-import { enqueueTeamDna } from './team-dna';
+import { enqueueTeamDna, goalShape } from './team-dna';
 import { getSimFormProfile } from './sim-form-profile';
 
 // Settling one card, in one place.
@@ -93,7 +93,37 @@ export async function settleDecisionCard(fixtureId: number, matchDate: string): 
   const profile = await engineProfile(fixtureId);
   const startedAt = Date.now();
   const verdict = buildInevitability(profile);
-  const tree = buildDecisionTree(profile, verdict);
+  // The two sides' own last matches are read before the card settles, so the
+  // "even if" question is answered from evidence rather than from the board alone.
+  const asOf = matchDate || new Date().toISOString().slice(0, 10);
+  const homeShape = goalShape(profile.teams[0]?.name ?? '', asOf);
+  const awayShape = goalShape(profile.teams[1]?.name ?? '', asOf);
+  const dna =
+    homeShape.matches || awayShape.matches
+      ? {
+          home: {
+            team: homeShape.team,
+            matches: homeShape.matches,
+            reached: homeShape.reached,
+            scoredAtHome: homeShape.scoredAtHome,
+            scoredAway: homeShape.scoredAway,
+            concededAtHome: homeShape.concededAtHome,
+            concededAway: homeShape.concededAway,
+            p80: homeShape.p80,
+          },
+          away: {
+            team: awayShape.team,
+            matches: awayShape.matches,
+            reached: awayShape.reached,
+            scoredAtHome: awayShape.scoredAtHome,
+            scoredAway: awayShape.scoredAway,
+            concededAtHome: awayShape.concededAtHome,
+            concededAway: awayShape.concededAway,
+            p80: awayShape.p80,
+          },
+        }
+      : null;
+  const tree = buildDecisionTree(profile, verdict, dna);
   const elapsedMs = Date.now() - startedAt;
   writeDecisionMemo(fixtureId, tree);
   writeStoredCard({

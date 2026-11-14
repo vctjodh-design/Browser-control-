@@ -75,6 +75,19 @@ export function phaseLabel(index: number): string {
   return PHASE_LABELS[index] ?? `${index * 15}+`;
 }
 
+/**
+ * The goals a side reaches on a good day: its 80th percentile across the window.
+ *
+ * Four times in five it scores at or below this, which is what makes it the right
+ * stress case for a call — a line that survives it has survived the side's own
+ * history, not a hypothetical.
+ */
+export function stressGoals(goals: number[]): number | null {
+  if (!goals.length) return null;
+  const sorted = [...goals].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.8))];
+}
+
 function mean(values: Array<number | null>): number | null {
   const real = values.filter((value): value is number => value !== null && Number.isFinite(value));
   if (!real.length) return null;

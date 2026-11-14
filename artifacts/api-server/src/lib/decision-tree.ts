@@ -220,7 +220,7 @@ export type DecisionNode = {
   id: string;
   /** 0 is the root; each step down is one question deeper. */
   depth: number;
-  branch: "board" | "result" | "goals" | "scoring" | "record" | "availability";
+  branch: "board" | "result" | "goals" | "scoring" | "record" | "availability" | "window";
   question: string;
   reads: string;
   answer: string;
@@ -249,6 +249,39 @@ export type DecisionMarket = {
   agrees: boolean | null;
   /** How easily this line turns over: distance to its crossing, and the board against it. */
   upset: { level: UpsetLevel; flipDistance: number | null; basis: string };
+  /**
+   * The "even if" check: the same call asked again against the worst afternoon the
+   * two sides' own last fifty matches say is normal. Null where the question cannot
+   * be put honestly (an exact score, or a window nobody has read).
+   */
+  challenge: DnaChallenge | null;
+};
+
+export type DnaChallenge = {
+  /** The scoreline the call is tested against. */
+  scoreline: string;
+  holds: boolean;
+  reading: string;
+};
+
+/** One side's window, reduced to what a challenge needs. */
+export type DnaSide = {
+  team: string;
+  /** Matches read. */
+  matches: number;
+  /** Matches that exist to be read — the ask, not the answer. */
+  reached: number;
+  scoredAtHome: number | null;
+  scoredAway: number | null;
+  concededAtHome: number | null;
+  concededAway: number | null;
+  /** Eightieth percentile of the goals this side scored across its window. */
+  p80: number | null;
+};
+
+export type DnaReading = {
+  home: DnaSide;
+  away: DnaSide;
 };
 
 /**
@@ -259,7 +292,7 @@ export type DecisionMarket = {
  * Bumped whenever a settled card gains a field. Saved cards carry it, so a card
  * written by an older build is re-read rather than served half-filled.
  */
-export const DECISION_CARD_VERSION = 2;
+export const DECISION_CARD_VERSION = 4;
 
 export type DecisionCardSummary = {
   version: number;
@@ -283,6 +316,13 @@ export type DecisionCardSummary = {
   resultUpset: UpsetLevel | null;
   bttsUpset: UpsetLevel | null;
   goalsUpset: UpsetLevel | null;
+  /** Lines that survive their own worst case, out of the lines that were asked. */
+  holdsUnderStress: number;
+  challenged: number;
+  /** Matches behind the fifty-match reading, or 0 when none had been read. */
+  dnaMatches: number;
+  /** Whether the last fifty moved the settled worth at all. */
+  dnaVote: boolean;
 };
 
 /** Reads a settled card down to its summary. Pure, so the row and the store agree. */
@@ -290,6 +330,7 @@ export function summarizeDecisionTree(tree: {
   scoreline: string;
   worth: { home: number; away: number };
   markets: DecisionMarket[];
+  challenge?: DecisionTree["challenge"];
 }): DecisionCardSummary {
   const upsetOfCall = (market: DecisionMarket | undefined) => market?.upset.level ?? null;
   const find = (id: string) => tree.markets.find((market) => market.id === id);
@@ -318,6 +359,10 @@ export function summarizeDecisionTree(tree: {
     resultUpset: upsetOfCall(result),
     bttsUpset: upsetOfCall(btts),
     goalsUpset: upsetOfCall(goals),
+    holdsUnderStress: tree.challenge?.holds ?? 0,
+    challenged: tree.challenge?.asked ?? 0,
+    dnaMatches: tree.challenge?.matches ?? 0,
+    dnaVote: tree.challenge?.vote ?? false,
   };
 }
 
@@ -341,6 +386,29 @@ export type DecisionTree = {
   trace: string[];
   /** Where the market board came from, when there was one to compare against. */
   referenceSource: string | null;
+  /**
+   * The "even if" question the card answers before it is final: the call asked
+   * again against the worst normal afternoon the two windows allow.
+   */
+  challenge: {
+    question: string;
+    scenario: string;
+    note: string;
+    holds: number;
+    asked: number;
+    matches: number;
+    vote: boolean;
+    /** True when neither window is deep enough to answer the question honestly. */
+    thin: boolean;
+  } | null;
+  /** The two windows behind the challenge, and whether they were allowed a vote. */
+  dna: {
+    home: DnaSide;
+    away: DnaSide;
+    note: string;
+    vote: boolean;
+    boardWorth: { home: number; away: number };
+  } | null;
   note: string;
 };
 
@@ -762,13 +830,170 @@ export function marketAgreement(
  * reference) and `verdict` supplies the board: the two worths, the scoreline and
  * the separation the other tabs already show. Nothing here re-runs the engine.
  */
+/**
+ * Whether the call would still hold at one given scoreline.
+ *
+ * The same question the ledger asks at full time, asked before kick-off against a
+ * scoreline the two sides' own matches say is a normal bad day.
+ */
+export function holdsAt(id: string, call: string, favourite: "home" | "away" | null, h: number, a: number): boolean | null {
+  const total = h + a;
+  switch (id) {
+    case "result":
+      return call === "Home win" ? h > a : call === "Away win" ? a > h : call === "Draw" ? h === a : null;
+    case "double-chance":
+      if (/1X/.test(call)) return h >= a;
+      if (/X2/.test(call)) return a >= h;
+      if (/12/.test(call)) return h !== a;
+      return null;
+    case "draw-no-bet":
+      return call === "Home" ? h > a : call === "Away" ? a > h : call.startsWith("No side") ? h === a : null;
+    case "handicap": {
+      if (!favourite) return null;
+      const margin = favourite === "home" ? h - a : a - h;
+      return call === "Favourite −1" ? margin >= 2 : call === "Underdog +1" ? margin <= 1 : null;
+    }
+    case "win-to-nil": {
+      const homeToNil = h > a && a === 0;
+      const awayToNil = a > h && h === 0;
+      return call === "Home to win to nil" ? homeToNil : call === "Away to win to nil" ? awayToNil : call === "No" ? !homeToNil && !awayToNil : null;
+    }
+    case "over-1.5":
+      return /over/i.test(call) ? total > 1.5 : total <= 1.5;
+    case "over-2.5":
+      return /over/i.test(call) ? total > 2.5 : total <= 2.5;
+    case "over-3.5":
+      return /over/i.test(call) ? total > 3.5 : total <= 3.5;
+    case "btts":
+      return call === "Yes" ? h > 0 && a > 0 : call === "No" ? !(h > 0 && a > 0) : null;
+    case "clean-home":
+      return call === "Yes" ? a === 0 : call === "No" ? a > 0 : null;
+    case "clean-away":
+      return call === "Yes" ? h === 0 : call === "No" ? h > 0 : null;
+    case "team-total-home":
+    case "team-total-away": {
+      const side = id === "team-total-home" ? h : a;
+      const match = /^(over|under)\s*([\d.]+)$/i.exec(call.trim());
+      if (!match) return null;
+      const line = Number(match[2]);
+      if (!Number.isFinite(line)) return null;
+      return match[1].toLowerCase() === "over" ? side > line : side <= line;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * What the last fifty matches say the fixture is worth, and whether that is far
+ * enough from the board to be allowed a vote.
+ *
+ * The estimate is the plain matching of what each side does with what its opponent
+ * allows: the home side's scoring at home against the away side's conceding on the
+ * road, and the other way round. It only votes when both windows are real — twelve
+ * matches a side — and when the two readings differ by more than a rounding of the
+ * same total, because a window that agrees with the board should change nothing.
+ */
+export function dnaVoteOf(
+  dna: DnaReading | null,
+  boardHome: number,
+  boardAway: number,
+): { active: boolean; home: number; away: number; note: string } {
+  const stand = (note: string) => ({ active: false, home: boardHome, away: boardAway, note });
+  if (!dna) return stand("No fifty-match read is stored for this fixture, so the board stands unopposed.");
+  const { home, away } = dna;
+  const leastRead = Math.min(home.matches, away.matches);
+  if (leastRead < 12) {
+    return stand(
+      `Only ${leastRead} of the last fifty matches have been read for both sides, so the window informs the card but is not allowed to move it.`,
+    );
+  }
+  if (home.scoredAtHome === null || away.concededAway === null || away.scoredAway === null || home.concededAtHome === null) {
+    return stand("The window has no venue split to pair, so the board stands.");
+  }
+  const expectedHome = (home.scoredAtHome + away.concededAway) / 2;
+  const expectedAway = (away.scoredAway + home.concededAtHome) / 2;
+  const dnaTotal = round2(expectedHome + expectedAway);
+  const boardTotal = round2(boardHome + boardAway);
+  if (!boardTotal) return stand("The board prices no total, so there is nothing for the window to argue with.");
+  const gap = round2(dnaTotal - boardTotal);
+  if (Math.abs(gap) < 0.45) {
+    return stand(
+      `The last ${leastRead} matches price ${dnaTotal} goals, within a rounding of the board's ${boardTotal}; the board stands.`,
+    );
+  }
+  const scale = dnaTotal / boardTotal;
+  return {
+    active: true,
+    home: round2(boardHome * scale),
+    away: round2(boardAway * scale),
+    note: `The last ${leastRead} matches price ${dnaTotal} goals against the board's ${boardTotal}: the card is settled at ${dnaTotal}, with the same separation between the sides.`,
+  };
+}
+
+/**
+ * The "even if" test for one line.
+ *
+ * Before a call is final it is asked again against the worst normal afternoon the
+ * two windows allow: each side scoring at its own 80th percentile. A call that holds
+ * there has survived the fixture's own history; one that turns over is a call the
+ * window is warning about, whatever the board and the tier say.
+ */
+/** A window this thin cannot answer "even if" without inventing a scoreline. */
+export const CHALLENGE_MIN_MATCHES = 8;
+
+export function challengeOf(
+  id: string,
+  call: string,
+  worth: { homeWorth: number; awayWorth: number },
+  dna: DnaReading | null,
+  short: [string, string],
+): DnaChallenge | null {
+  if (!dna || id === "correct-score") return null;
+  if (Math.min(dna.home.matches, dna.away.matches) < CHALLENGE_MIN_MATCHES) return null;
+  const homeP80 = dna.home.p80;
+  const awayP80 = dna.away.p80;
+  if (homeP80 === null || awayP80 === null) return null;
+  const h = Math.max(0, Math.round(homeP80));
+  const a = Math.max(0, Math.round(awayP80));
+  if (h + a === 0) return null;
+  const favourite =
+    worth.homeWorth === worth.awayWorth ? null : worth.homeWorth > worth.awayWorth ? "home" : "away";
+  const holds = holdsAt(id, call, favourite, h, a);
+  if (holds === null) return null;
+  const scoreline = `${short[0]} ${h}–${a} ${short[1]}`;
+  const matched = Math.min(dna.home.matches, dna.away.matches);
+  return {
+    scoreline: `${h}–${a}`,
+    holds,
+    reading: holds
+      ? `Even if this finished ${scoreline} — both sides scoring at their 80th percentile across the last ${matched} matches — ${call.toLowerCase()} still holds.`
+      : `Even if this finished ${scoreline} — both sides scoring at their 80th percentile across the last ${matched} matches — ${call.toLowerCase()} turns over.`,
+  };
+}
+
+/**
+ * The card for one fixture.
+ *
+ * `profile` supplies the combined readings (record, table, availability, market
+ * reference) and `verdict` supplies the board: the two worths, the scoreline and
+ * the separation the other tabs already show. `dna` is the two sides' own last
+ * matches, and it is the only input allowed to move the settled worth — once both
+ * windows are deep enough to have earned it.
+ */
 export function buildDecisionTree(
   profile: SimFormProfile,
   verdict: InevitabilityVerdict,
+  dna: DnaReading | null = null,
 ): DecisionTree {
   const [home, away] = profile.teams;
-  const homeWorth = round2(verdict.expectedGoals.home);
-  const awayWorth = round2(verdict.expectedGoals.away);
+  const boardWorth = {
+    home: round2(verdict.expectedGoals.home),
+    away: round2(verdict.expectedGoals.away),
+  };
+  const vote = dnaVoteOf(dna, boardWorth.home, boardWorth.away);
+  const homeWorth = vote.home;
+  const awayWorth = vote.away;
   const facts: BoardFacts = {
     homeWorth,
     awayWorth,
@@ -987,6 +1212,7 @@ export function buildDecisionTree(
       boardShare: share === null ? null : Math.round(share * 1000) / 1000,
       agrees: share === null ? null : share > 0.5,
       upset: upsetReading(id, facts, calls, share),
+      challenge: challengeOf(id, call, { homeWorth, awayWorth }, dna, [home.short, away.short]),
     };
   };
 
@@ -1153,6 +1379,40 @@ export function buildDecisionTree(
     ),
   ];
 
+  const challenged = markets.filter((market) => market.challenge !== null);
+  const held = challenged.filter((market) => market.challenge?.holds).length;
+  const stressHome = dna?.home.p80 === null || dna?.home.p80 === undefined ? null : Math.max(0, Math.round(dna.home.p80));
+  const stressAway = dna?.away.p80 === null || dna?.away.p80 === undefined ? null : Math.max(0, Math.round(dna.away.p80));
+  const challenge =
+    dna && stressHome !== null && stressAway !== null
+      ? {
+          question: `Even if this finished ${home.short} ${stressHome}–${stressAway} ${away.short}, would the card still read the same?`,
+          scenario: `${stressHome}–${stressAway}`,
+          note: vote.note,
+          holds: held,
+          asked: challenged.length,
+          matches: Math.min(dna.home.matches, dna.away.matches),
+          vote: vote.active,
+          thin: Math.min(dna.home.matches, dna.away.matches) < CHALLENGE_MIN_MATCHES,
+        }
+      : null;
+
+  // The question asked before any of this is final: would the card still read the
+  // same if the fixture ran to the worst afternoon its own history calls normal?
+  if (challenge) {
+    nodes.push({
+      id: "fifty",
+      depth: 3,
+      branch: "window",
+      question: challenge.question,
+      reads: challenge.note,
+      answer: challenge.thin
+        ? `Not answered yet: only ${challenge.matches} matches are read for both sides. The question is kept on the card until the windows are deep enough to put it honestly.`
+        : `${challenge.holds} of ${challenge.asked} lines survive ${challenge.scenario}. The rest turn over if both sides score at their 80th percentile across the last ${challenge.matches} matches.`,
+      settles: [],
+    });
+  }
+
   // Lines the board cannot settle. Listed rather than quietly dropped: a reader
   // counting the card should see why these are not on it.
   withheld.push(
@@ -1175,7 +1435,9 @@ export function buildDecisionTree(
   );
 
   const trace = [
-    `Board: ${home.short} ${homeWorth.toFixed(2)} – ${away.short} ${awayWorth.toFixed(2)} (${separation.toFixed(2)} apart, ${verdict.confidence.tier}).`,
+    `Board: ${home.short} ${boardWorth.home.toFixed(2)} – ${away.short} ${boardWorth.away.toFixed(2)} (${separation.toFixed(2)} apart, ${verdict.confidence.tier}).`,
+    ...(vote.active ? [`Last fifty matches: ${vote.note}`] : []),
+    ...(challenge ? [`Even if: ${challenge.question} ${held} of ${challenged.length} lines survive it.`] : []),
     `Scoreline: ${verdict.scoreline}.`,
     ...nodes
       .filter((node) => node.settles.length > 0 || node.id === "record" || node.id === "availability" || node.id === "season-total" || node.id === "sheet-record")
@@ -1196,6 +1458,10 @@ export function buildDecisionTree(
     withheld,
     trace,
     referenceSource: profile.expectations?.source ?? null,
+    challenge,
+    dna: dna
+      ? { home: dna.home, away: dna.away, note: vote.note, vote: vote.active, boardWorth }
+      : null,
     note:
       "The board settles every line; form, table, availability and the market board only move how firmly it is held. No line on this card is a price, and none of them is a percentage.",
   };
