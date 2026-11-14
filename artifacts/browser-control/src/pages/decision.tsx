@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { fixtureId, loadFixtures, type FixtureOption } from '@/lib/inevitability';
 import { DecisionBatch } from '@/components/decision-batch';
+import { DecisionBackfill } from '@/components/decision-backfill';
 import { DecisionLedger } from '@/components/decision-ledger';
 import { DecisionTreePanel } from '@/components/decision-tree-panel';
 
@@ -98,6 +99,8 @@ export default function DecisionPage() {
   const [loadingFixtures, setLoadingFixtures] = useState(false);
   const [error, setError] = useState('');
   const [reloadToken, setReloadToken] = useState(0);
+  // Bumped when the backfill marks new lines, so the ledger readout above follows it.
+  const [ledgerKey, setLedgerKey] = useState(0);
   // A search narrows what is listed — the strip and the rows. It deliberately
   // does not narrow the run: a date is settled whole, and hiding a fixture from
   // the list should not quietly leave it out of the date.
@@ -289,7 +292,8 @@ export default function DecisionPage() {
 
         <DecisionBatch date={date} fixtures={fixtures} selected={opened} onSelect={setOpened} query={query} />
 
-        <DecisionLedger />
+        <DecisionBackfill onSettled={() => setLedgerKey((key) => key + 1)} />
+        <DecisionLedger refreshKey={ledgerKey} />
 
         {opened === null && fixtures.length > 0 && (
           <p className="mb-5 px-1 text-[10px] leading-5 text-[#93958b]" data-testid="hint-open-card">

@@ -180,6 +180,55 @@ export type StoredDecisionCard = {
   summary: DecisionSummary;
 };
 
+/** What the paced queue of past fixtures is doing. */
+export type BackfillStatus = {
+  running: boolean;
+  working: boolean;
+  current: number | null;
+  gapMs: number;
+  queued: number;
+  done: number;
+  skipped: number;
+  failed: number;
+  lastNote: string | null;
+  firstDate: string | null;
+  lastDate: string | null;
+  history?: { matches: number; teams: number; firstDate: string | null; lastDate: string | null };
+  enqueued?: { dates: number; discovered: number; queued: number; failedDates: string[] };
+};
+
+async function backfillRequest(path: string, init?: RequestInit): Promise<BackfillStatus> {
+  const response = await fetch(`/api/football/backfill${path}`, {
+    ...init,
+    headers: { accept: 'application/json', ...(init?.body ? { 'content-type': 'application/json' } : {}) },
+  });
+  const body = (await response.json().catch(() => null)) as (BackfillStatus & { error?: string }) | null;
+  if (!response.ok) {
+    throw new DecisionRequestError(
+      body?.error ?? `The backfill could not be read (${response.status}).`,
+      response.status,
+      retryAfterSecondsOf(response),
+    );
+  }
+  return body ?? { running: false, working: false, current: null, gapMs: 0, queued: 0, done: 0, skipped: 0, failed: 0, lastNote: null, firstDate: null, lastDate: null };
+}
+
+export function loadBackfillStatus(signal?: AbortSignal): Promise<BackfillStatus> {
+  return backfillRequest('', { signal });
+}
+
+export function startBackfillRange(
+  from: string,
+  to: string,
+  options: { cards?: boolean; cardLimit?: number } = {},
+): Promise<BackfillStatus> {
+  return backfillRequest('/start', { method: 'POST', body: JSON.stringify({ from, to, ...options }) });
+}
+
+export function pauseBackfillRun(): Promise<BackfillStatus> {
+  return backfillRequest('/pause', { method: 'POST' });
+}
+
 /** How one market's calls have actually held, by upset band. */
 export type LedgerStanding = {
   marketId: string;

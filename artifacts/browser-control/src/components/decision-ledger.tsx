@@ -17,7 +17,7 @@ const BAND_TONE: Record<UpsetLevel, string> = {
   low: 'text-[#5b7a63]',
 };
 
-export function DecisionLedger() {
+export function DecisionLedger({ refreshKey = 0 }: { refreshKey?: number }) {
   const [standings, setStandings] = useState<LedgerStanding[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -38,7 +38,7 @@ export function DecisionLedger() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [token]);
+  }, [token, refreshKey]);
 
   const byMarket = useMemo(() => {
     const grouped = new Map<string, { label: string; bands: Map<UpsetLevel, LedgerStanding> }>();

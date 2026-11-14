@@ -32,9 +32,12 @@ import { getSimFormProfile } from "../lib/sim-form-profile";
 import { applyPlayerForm } from "../lib/player-form-apply";
 import { runDuelSimulation } from "../lib/squad-duel-sim";
 import { buildInevitability, InevitabilityUnavailableError } from "../lib/inevitability-engine";
-import { DECISION_CARD_VERSION, buildDecisionTree, summarizeDecisionTree } from "../lib/decision-tree";
-import { listStoredCards, readStoredCard, writeStoredCard } from "../lib/decision-store";
-import { ledgerStandings, recordCardLines, resolveLedger, unsettledLedgerDates } from "../lib/decision-ledger";
+import { listStoredCards } from "../lib/decision-store";
+import { ledgerStandings, resolveLedger, unsettledLedgerDates } from "../lib/decision-ledger";
+import { engineProfile, settleDecisionCard } from "../lib/decision-card";
+import { backfillStatus, enqueueBackfill, startBackfill, stopBackfill } from "../lib/backfill";
+import { historyCoverage, historyForTeam } from "../lib/match-history";
+import { summarizeTeamShape } from "../lib/team-shape";
 import {
   loadFixturePlayerForm,
   PlayerFormUnavailableError,
@@ -386,17 +389,6 @@ router.get(
 // One match, played by the Open Football engine instead of the app's own
 // simulation. The recording is what the pitch replays; the scores are the
 // engine's, not a restatement of the odds.
-/**
- * The profile the engine plays: the predicted elevens with the unavailable
- * players replaced and every player carrying the weights his own matches
- * argue for. The page keeps reading the plain profile, so ratings data being
- * down never blanks the match.
- */
-async function engineProfile(fixtureId: number) {
-  const profile = await getSimFormProfile(fixtureId);
-  const applied = await applyPlayerForm(profile);
-  return applied.profile;
-}
 
 // Everything the performance feed has on this fixture's players: the rating
 // and full stat block of each man, his shot map, his heat map, the weights his
@@ -629,37 +621,6 @@ router.get(
   },
 );
 
-// Settling one fixture costs a real squad read upstream — seconds, not
-// milliseconds — and the same fixture is asked for twice in normal use: once by
-// the match page's tab, once by the date sweep. Nothing in the answer depends on
-// the moment it is asked, so a short memo makes the second ask free and lets a
-// half-finished date run be continued without paying for every fixture again.
-const DECISION_TTL_MS = 10 * 60_000;
-const DECISION_MEMO_LIMIT = 400;
-const decisionMemo = new Map<number, { at: number; tree: ReturnType<typeof buildDecisionTree> }>();
-
-function readDecisionMemo(fixtureId: number): ReturnType<typeof buildDecisionTree> | null {
-  const hit = decisionMemo.get(fixtureId);
-  if (!hit) return null;
-  if (Date.now() - hit.at > DECISION_TTL_MS) {
-    decisionMemo.delete(fixtureId);
-    return null;
-  }
-  // Re-inserting moves it to the end, so the least recently asked goes first.
-  decisionMemo.delete(fixtureId);
-  decisionMemo.set(fixtureId, hit);
-  return hit.tree;
-}
-
-function writeDecisionMemo(fixtureId: number, tree: ReturnType<typeof buildDecisionTree>): void {
-  decisionMemo.set(fixtureId, { at: Date.now(), tree });
-  while (decisionMemo.size > DECISION_MEMO_LIMIT) {
-    const oldest = decisionMemo.keys().next().value;
-    if (oldest === undefined) break;
-    decisionMemo.delete(oldest);
-  }
-}
-
 async function resolveDateLedger(date: string): Promise<void> {
   try {
     const page = await getKickoffScoreFixtures(date);
@@ -694,16 +655,59 @@ router.get("/football/decisions/ledger", async (req, res): Promise<void> => {
   }
 });
 
-// A board read is seconds of upstream work, and a settled card never changes, so
-// anything that was settled inside the storage window comes back from SQLite. The
-// process memo above is the fast path; this is the one a restart cannot empty.
-function storedCardFor(fixtureId: number) {
-  const stored = readStoredCard<ReturnType<typeof buildDecisionTree> & { payloadVersion?: number }>(fixtureId);
-  // A card written before this build has none of the newer readings on it, so it
-  // is treated as absent and settled again rather than served half-filled.
-  if (!stored || stored.card.payloadVersion !== DECISION_CARD_VERSION) return null;
-  return stored as { card: ReturnType<typeof buildDecisionTree>; settledAt: number };
-}
+// Reading the past back in. A finished fixture still has its board, so settling it
+// now answers what the app would have asked before kick-off; the queue keeps that
+// work resumable across restarts instead of a single long request.
+router.post("/football/backfill/start", async (req, res): Promise<void> => {
+  try {
+    const result = await enqueueBackfill(req.body?.from, req.body?.to, {
+      cards: req.body?.cards === true,
+      cardLimit: req.body?.cardLimit,
+    });
+    // Results alone are already in the table; only a card range needs the queue to
+    // start turning.
+    const status = result.queued > 0 ? startBackfill(req.body?.gapMs) : stopBackfill();
+    res.json({ ...status, enqueued: result, history: historyCoverage() });
+  } catch (error) {
+    req.log.error(
+      { errorName: error instanceof Error ? error.name : "UnknownError" },
+      "Could not queue a backfill",
+    );
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "That date range could not be read.",
+    });
+  }
+});
+
+router.post("/football/backfill/pause", (_req, res): void => {
+  res.json({ ...stopBackfill(), history: historyCoverage() });
+});
+
+router.get("/football/backfill", (_req, res): void => {
+  res.json({ ...backfillStatus(), history: historyCoverage() });
+});
+
+// One team's own matches, cut into the windows a shape is read from. Every match
+// counted is one played before `asOf`, so asking about a past fixture gives the
+// answer that was available then.
+router.get("/football/teams/:name/shape", (req, res): void => {
+  const name = decodeURIComponent(String(req.params.name ?? "")).trim();
+  if (name.length < 2 || name.length > 80) {
+    res.status(400).json({ error: "Choose a team name." });
+    return;
+  }
+  const asOf = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.asOf ?? ""))
+    ? String(req.query.asOf)
+    : new Date().toISOString().slice(0, 10);
+  const matches = historyForTeam(name, asOf, 60);
+  res.set("Cache-Control", "private, max-age=300");
+  res.json({ shape: summarizeTeamShape(name, asOf, matches), matches: matches.length });
+});
+
+router.get("/football/history", (_req, res): void => {
+  res.set("Cache-Control", "no-store");
+  res.json(historyCoverage());
+});
 
 // What a date has already settled, so the page comes back to it instead of
 // starting from nothing after a refresh, a restart or a cleared browser.
@@ -744,58 +748,27 @@ router.get(
       return;
     }
 
-    const remembered = readDecisionMemo(fixtureId);
-    if (remembered) {
-      // The browser may hold it for the same window the server does; the payload
-      // is derived from the board and does not change inside it.
-      res.set("Cache-Control", "private, max-age=600");
-      res.set("X-Decision-Cache", "hit");
-      res.json({ elapsedMs: 0, cached: true, ...remembered });
-      return;
-    }
-
-    // Not in this process's memory, but the archive may already have it: a restart
-    // gives back the cards it settled before the restart, not a bill for reading
-    // every fixture again.
-    const archived = storedCardFor(fixtureId);
-    if (archived) {
-      writeDecisionMemo(fixtureId, archived.card);
-      res.set("Cache-Control", "private, max-age=600");
-      res.set("X-Decision-Cache", "stored");
-      res.json({ elapsedMs: 0, cached: true, settledAt: archived.settledAt, ...archived.card });
-      return;
-    }
-
     try {
-      const profile = await engineProfile(fixtureId);
-      const startedAt = Date.now();
-      const verdict = buildInevitability(profile);
-      const tree = buildDecisionTree(profile, verdict);
-      writeDecisionMemo(fixtureId, tree);
-      // The date travels with the request when the sweep asks for it, which is how
-      // a card can be listed under its date later.
-      writeStoredCard({
-        fixtureId,
-        matchDate: String(req.query.date ?? "").trim(),
-        homeTeam: tree.teams[0] ?? "",
-        awayTeam: tree.teams[1] ?? "",
-        competition: "",
-        summary: summarizeDecisionTree(tree),
-        payload: { payloadVersion: DECISION_CARD_VERSION, elapsedMs: Date.now() - startedAt, cached: false, ...tree },
-      });
-      // Every line goes into the book with the reading it was given before kick-off,
-      // so the upset bands can be scored once the match is final.
-      recordCardLines({
-        fixtureId,
-        matchDate: String(req.query.date ?? "").trim(),
-        settledAt: Date.now(),
-        markets: tree.markets,
-        homeWorth: tree.worth.home,
-        awayWorth: tree.worth.away,
-      });
+      // The date travels with the request when the sweep asks for it, which is how a
+      // card can be listed under its date later and marked at full time.
+      const matchDate = String(req.query.date ?? "").trim();
+      const settled = await settleDecisionCard(fixtureId, matchDate);
+      if (settled.source !== "fresh") {
+        // The browser may hold it for the same window the server does; the payload
+        // is derived from the board and does not change inside it.
+        res.set("Cache-Control", "private, max-age=600");
+        res.set("X-Decision-Cache", settled.source === "memo" ? "hit" : "stored");
+        res.json({
+          elapsedMs: 0,
+          cached: true,
+          ...(settled.settledAt ? { settledAt: settled.settledAt } : {}),
+          ...settled.tree,
+        });
+        return;
+      }
       res.set("Cache-Control", "private, max-age=600");
       res.set("X-Decision-Cache", "miss");
-      res.json({ elapsedMs: Date.now() - startedAt, cached: false, ...tree });
+      res.json({ elapsedMs: settled.elapsedMs, cached: false, ...settled.tree });
     } catch (error) {
       if (sendUpstreamRateLimit(res, error)) return;
       if (error instanceof KickoffScoreMatchNotFoundError) {

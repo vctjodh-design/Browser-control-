@@ -1,4 +1,5 @@
 import app from "./app";
+import { backfillStatus, resumeBackfill } from "./lib/backfill";
 import { logger } from "./lib/logger";
 
 const rawPort = process.env["PORT"];
@@ -22,4 +23,12 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // A backfill left with work in it picks up where it stopped: the queue is in
+  // SQLite, so a restart costs the fixture in flight and nothing else.
+  resumeBackfill();
+  const backfill = backfillStatus();
+  if (backfill.queued > 0) {
+    logger.info({ queued: backfill.queued, done: backfill.done }, "Continuing the decision backfill");
+  }
 });
