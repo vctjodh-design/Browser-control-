@@ -64,9 +64,26 @@ export type DecisionSummary = {
   resultTier: DecisionTier;
   goals: string;
   btts: string;
+  /** What the board is worth for each side, in goals — the card's xG reading. */
+  homeWorth: number;
+  awayWorth: number;
   /** How many of the settled lines came back firm — the card's own thermometer. */
   firms: number;
+  /** Lines the market board could be read on at all. */
+  compared: number;
+  /** Lines where the board prices the side the card called. */
+  agreed: number;
 };
+
+/**
+ * How much of the card the market board is on the same side of, as a whole
+ * number. Null when the board priced nothing this card compares to — an empty
+ * board is not 0% agreement, it is no reading.
+ */
+export function boardAgreementPercent(summary: Pick<DecisionSummary, 'agreed' | 'compared'>): number | null {
+  if (summary.compared <= 0) return null;
+  return Math.round((summary.agreed / summary.compared) * 100);
+}
 
 function callOf(tree: DecisionTree, id: string): DecisionMarket | undefined {
   return tree.markets.find((market) => market.id === id);
@@ -74,13 +91,18 @@ function callOf(tree: DecisionTree, id: string): DecisionMarket | undefined {
 
 export function summarizeDecision(tree: DecisionTree): DecisionSummary {
   const result = callOf(tree, 'result');
+  const compared = tree.markets.filter((market) => market.agrees !== null);
   return {
     scoreline: tree.scoreline,
     result: result?.call ?? 'Not called',
     resultTier: result?.tier ?? 'knife-edge',
     goals: callOf(tree, 'over-2.5')?.call ?? 'Not called',
     btts: callOf(tree, 'btts')?.call ?? 'Not called',
+    homeWorth: tree.worth.home,
+    awayWorth: tree.worth.away,
     firms: tree.markets.filter((market) => market.tier === 'firm').length,
+    compared: compared.length,
+    agreed: compared.filter((market) => market.agrees === true).length,
   };
 }
 

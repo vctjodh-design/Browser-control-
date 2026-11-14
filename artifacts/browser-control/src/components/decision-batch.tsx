@@ -3,6 +3,7 @@ import { CircleSlash, LoaderCircle, Play, Square, TimerReset } from 'lucide-reac
 import { fixtureId, type FixtureOption } from '@/lib/inevitability';
 import {
   DecisionRequestError,
+  boardAgreementPercent,
   loadDecisionTree,
   summarizeDecision,
   type DecisionSummary,
@@ -43,7 +44,9 @@ type StoredRow =
 
 type RunSnapshot = { version: number; date: string; savedAt: number; rows: StoredRow[] };
 
-const SNAPSHOT_VERSION = 1;
+// Bumped when a saved row gained fields; a run saved by an older build is dropped
+// rather than rendered with half a card on it.
+const SNAPSHOT_VERSION = 2;
 const STOPPED_MID_READ = 'Skipped: stopped mid-read.';
 
 const TIER_STYLE: Record<DecisionTier, string> = {
@@ -146,16 +149,54 @@ function TierChip({ summary }: { summary: DecisionSummary }) {
   );
 }
 
+/**
+ * How much of the card the market board is on the same side of. Shown for
+ * comparison only: the board is not an input to any call on the card, so this is
+ * a second opinion being measured, not the model agreeing with itself.
+ */
+function BoardChip({ summary }: { summary: DecisionSummary }) {
+  const percent = boardAgreementPercent(summary);
+  if (percent === null) {
+    return (
+      <span
+        className="mono shrink-0 rounded-full border border-[#e0dfd6] bg-[#f4f3ec] px-2 py-0.5 text-[8px] uppercase tracking-[.1em] text-[#a0a29a]"
+        title="The market board priced nothing this card compares to."
+        data-testid={`board-none-${summary.scoreline}`}
+      >
+        board n/a
+      </span>
+    );
+  }
+  const tone =
+    percent >= 70
+      ? 'border-[#c6d8c9] bg-[#e6efe4] text-[#41694f]'
+      : percent >= 40
+        ? 'border-[#e2d6bd] bg-[#f6efdf] text-[#8a6a38]'
+        : 'border-[#e0d3cd] bg-[#f7ece7] text-[#9a5c46]';
+  return (
+    <span
+      className={`mono shrink-0 rounded-full border px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-[.1em] ${tone}`}
+      title={`The market board prices the same side on ${summary.agreed} of the ${summary.compared} lines it could be read against.`}
+      data-testid={`board-agreement-${summary.scoreline}`}
+    >
+      board {percent}%
+    </span>
+  );
+}
+
 export function DecisionBatch({
   date,
   fixtures,
   selected,
   onSelect,
+  query = '',
 }: {
   date: string;
   fixtures: FixtureOption[];
   selected: number | null;
   onSelect: (fixtureId: number) => void;
+  /** A search that narrows what the list shows. The run still covers the date. */
+  query?: string;
 }) {
   const [rows, setRows] = useState<BatchRow[]>([]);
   const [running, setRunning] = useState(false);
@@ -225,6 +266,15 @@ export function DecisionBatch({
     return () => clearTimeout(timer);
   }, [date, rows]);
 
+  const search = query.trim().toLowerCase();
+  const visibleRows = search
+    ? rows.filter((row) =>
+        [row.fixture.competition, row.fixture.homeTeam, row.fixture.awayTeam]
+          .join(' ')
+          .toLowerCase()
+          .includes(search),
+      )
+    : rows;
   const resolved = rows.filter((row) => row.kind === 'resolved');
   const skipped = rows.filter((row) => row.kind === 'skipped');
   const settled = resolved.length + skipped.length;
@@ -453,6 +503,7 @@ export function DecisionBatch({
             </p>
             <p className="mono text-[8px] uppercase tracking-[.14em] text-[#9a8c80]" data-testid="text-decision-batch-summary">
               {resolved.length} carded · {skipped.length} skipped
+              {search ? ` · ${visibleRows.length} shown` : ''}
             </p>
           </div>
           <div className="mt-2 h-1 overflow-hidden rounded-full bg-[#e4e2d9]">
@@ -490,9 +541,15 @@ export function DecisionBatch({
         </div>
       )}
 
-      {rows.length > 0 && (
+      {visibleRows.length === 0 && search && (
+        <p className="px-4 py-4 text-[10px] text-[#93958b] sm:px-6" data-testid="text-decision-no-match">
+          No fixture on this date matches “{query.trim()}”.
+        </p>
+      )}
+
+      {visibleRows.length > 0 && (
         <ul className="divide-y divide-[#e8e6dd]" data-testid="list-decision-rows">
-          {rows.map((row) => {
+          {visibleRows.map((row) => {
             const id = fixtureId(row.fixture);
             const active = id !== null && id === selected;
             return (
@@ -515,13 +572,22 @@ export function DecisionBatch({
                     <span className="block truncate text-[11px] font-bold text-[#2b3e49]">
                       {row.fixture.homeTeam} v {row.fixture.awayTeam}
                     </span>
+                    {row.kind === 'resolved' && (
+                      <span
+                        className="mono mt-0.5 block truncate text-[9px] leading-4 text-[#8b8d84]"
+                        data-testid={id === null ? undefined : `text-decision-batch-calls-${id}`}
+                        title={`${row.summary.result} · Both teams to score ${row.summary.btts} · xG ${row.summary.homeWorth.toFixed(
+                          2,
+                        )} – ${row.summary.awayWorth.toFixed(2)} · ${row.summary.goals}`}
+                      >
+                        {row.summary.result} · BTTS {row.summary.btts} · xG {row.summary.homeWorth.toFixed(2)}–
+                        {row.summary.awayWorth.toFixed(2)}
+                      </span>
+                    )}
                   </span>
 
                   {row.kind === 'resolved' ? (
                     <span className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
-                      <span className="mono max-w-[150px] truncate text-[9px] text-[#7d8579]" title={row.summary.goals}>
-                        {row.summary.result} · {row.summary.goals}
-                      </span>
                       <span
                         className="mono text-[13px] font-extrabold tracking-[-.02em] text-[#2b3e49]"
                         data-testid={id === null ? undefined : `text-decision-batch-scoreline-${id}`}
@@ -529,6 +595,7 @@ export function DecisionBatch({
                         {row.summary.scoreline}
                       </span>
                       <TierChip summary={row.summary} />
+                      <BoardChip summary={row.summary} />
                     </span>
                   ) : row.kind === 'running' ? (
                     <span className="mono flex shrink-0 items-center gap-1.5 text-[9px] text-[#8b8d84]">

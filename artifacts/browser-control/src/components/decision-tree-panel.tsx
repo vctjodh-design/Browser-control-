@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CircleAlert, GitBranch, LoaderCircle, MinusCircle } from 'lucide-react';
 import {
+  boardAgreementPercent,
   loadDecisionTree,
   type DecisionMarket,
   type DecisionNode,
@@ -163,6 +164,9 @@ export function DecisionTreePanel({ fixtureId }: { fixtureId: number }) {
   }
 
   const groups: DecisionMarket['group'][] = ['Result', 'Goals', 'Both sides', 'Score'];
+  const compared = tree.markets.filter((market) => market.agrees !== null);
+  const agreed = compared.filter((market) => market.agrees === true).length;
+  const boardPercent = boardAgreementPercent({ agreed, compared: compared.length });
 
   return (
     <section className="space-y-5" data-testid="panel-decision-tree">
@@ -188,6 +192,13 @@ export function DecisionTreePanel({ fixtureId }: { fixtureId: number }) {
             </span>
             <span className="mono rounded-lg border border-[#ccd7cb] bg-[#f8faf4] px-2.5 py-1.5 text-[9px] text-[#4d6a55]">
               {tree.separation.toFixed(2)} apart
+            </span>
+            <span
+              className="mono rounded-lg border border-[#ccd7cb] bg-[#f8faf4] px-2.5 py-1.5 text-[9px] text-[#4d6a55]"
+              title={`The market board prices the same side on ${agreed} of the ${compared.length} lines it could be read against. Shown for comparison; the board is not an input to any call.`}
+              data-testid="text-decision-board-agreement"
+            >
+              {boardPercent === null ? 'board not priced' : `board agrees ${agreed}/${compared.length} · ${boardPercent}%`}
             </span>
           </div>
         </div>

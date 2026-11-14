@@ -8,6 +8,7 @@ import {
   GitBranch,
   LoaderCircle,
   RefreshCw,
+  Search,
   Trophy,
   X,
 } from 'lucide-react';
@@ -96,8 +97,18 @@ export default function DecisionPage() {
   const [loadingFixtures, setLoadingFixtures] = useState(false);
   const [error, setError] = useState('');
   const [reloadToken, setReloadToken] = useState(0);
+  // A search narrows what is listed — the strip and the rows. It deliberately
+  // does not narrow the run: a date is settled whole, and hiding a fixture from
+  // the list should not quietly leave it out of the date.
+  const [query, setQuery] = useState('');
 
   const openedFixture = fixtures.find((fixture) => fixtureId(fixture) === opened) ?? null;
+  const search = query.trim().toLowerCase();
+  const visibleFixtures = search
+    ? fixtures.filter((fixture) =>
+        [fixture.competition, fixture.homeTeam, fixture.awayTeam].join(' ').toLowerCase().includes(search),
+      )
+    : fixtures;
 
   // A sheet over a scrolling page needs the page behind it to stay put, and
   // Escape has to close it: on a phone there is no backdrop beside the card.
@@ -199,14 +210,48 @@ export default function DecisionPage() {
         )}
 
         <section className="mb-5" data-testid="section-decision-picker">
-          <div className="mb-2 flex items-baseline justify-between gap-3">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <p className="mono text-[8px] uppercase tracking-[.16em] text-[#9a8c80]">
-              {loadingFixtures ? 'Loading fixtures' : `${fixtures.length} fixtures`}
+              {loadingFixtures
+                ? 'Loading fixtures'
+                : search
+                  ? `${visibleFixtures.length} of ${fixtures.length} fixtures`
+                  : `${fixtures.length} fixtures`}
             </p>
-            {loadingFixtures && <LoaderCircle size={13} className="animate-spin text-[#b09a8c]" />}
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1.5 rounded-lg border border-[#dcd9d0] bg-[#faf9f5] px-2.5 py-1.5">
+                <Search size={12} className="text-[#9a9c93]" />
+                <span className="sr-only">Search this date</span>
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Team or competition"
+                  className="w-[150px] bg-transparent text-[10px] text-[#4c5a58] outline-none placeholder:text-[#a9aba2] sm:w-[190px]"
+                  data-testid="input-decision-search"
+                />
+                {query && (
+                  <button
+                    type="button"
+                    onClick={() => setQuery('')}
+                    className="text-[#a9aba2] transition hover:text-[#6b7772]"
+                    aria-label="Clear search"
+                    data-testid="button-clear-decision-search"
+                  >
+                    <X size={11} />
+                  </button>
+                )}
+              </label>
+              {loadingFixtures && <LoaderCircle size={13} className="animate-spin text-[#b09a8c]" />}
+            </div>
           </div>
+          {search && visibleFixtures.length === 0 && (
+            <p className="mb-1 text-[10px] text-[#93958b]" data-testid="text-decision-picker-empty">
+              No fixture on this date matches “{query.trim()}”.
+            </p>
+          )}
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {fixtures.map((fixture) => {
+            {visibleFixtures.map((fixture) => {
               const id = fixtureId(fixture);
               if (id === null) return null;
               const active = id === opened;
@@ -241,7 +286,7 @@ export default function DecisionPage() {
           </div>
         </section>
 
-        <DecisionBatch date={date} fixtures={fixtures} selected={opened} onSelect={setOpened} />
+        <DecisionBatch date={date} fixtures={fixtures} selected={opened} onSelect={setOpened} query={query} />
 
         {opened === null && fixtures.length > 0 && (
           <p className="mb-5 px-1 text-[10px] leading-5 text-[#93958b]" data-testid="hint-open-card">
