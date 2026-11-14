@@ -292,7 +292,7 @@ export type DnaReading = {
  * Bumped whenever a settled card gains a field. Saved cards carry it, so a card
  * written by an older build is re-read rather than served half-filled.
  */
-export const DECISION_CARD_VERSION = 4;
+export const DECISION_CARD_VERSION = 5;
 
 export type DecisionCardSummary = {
   version: number;
@@ -919,7 +919,7 @@ export function dnaVoteOf(
   const gap = round2(dnaTotal - boardTotal);
   if (Math.abs(gap) < 0.45) {
     return stand(
-      `The last ${leastRead} matches price ${dnaTotal} goals, within a rounding of the board's ${boardTotal}; the board stands.`,
+      `The last ${leastRead} matches, weighted to the recent side, price ${dnaTotal} goals — within a rounding of the board's ${boardTotal}; the board stands.`,
     );
   }
   const scale = dnaTotal / boardTotal;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { summarizeDna } from "../src/lib/team-dna-math.ts";
+import { ageInDays, summarizeDna, weightOf } from "../src/lib/team-dna-math.ts";
 
 // A team's DNA is arithmetic over its own matches, so these pin the arithmetic: the
 // averages, the phase split, whether a lead was held, and — most importantly — where
@@ -41,7 +41,7 @@ const row = (overrides) => ({
 });
 
 test("averages are per match, and the record is the window's", () => {
-  const dna = summarizeDna("FCF", [
+  const dna = summarizeDna("FCF", "2026-11-05", [
     row({ fixtureId: 1, goalsFor: 2, goalsAgainst: 0, xgFor: 1.5, xgAgainst: 0.5 }),
     row({ fixtureId: 2, goalsFor: 0, goalsAgainst: 1, xgFor: 1.0, xgAgainst: 1.4, venue: "away" }),
     row({ fixtureId: 3, goalsFor: 3, goalsAgainst: 3, xgFor: 2.0, xgAgainst: 2.5 }),
@@ -55,7 +55,7 @@ test("averages are per match, and the record is the window's", () => {
 });
 
 test("finishing is read against the chances, and the sign matters", () => {
-  const wasteful = summarizeDna("FCF", [
+  const wasteful = summarizeDna("FCF", "2026-11-05", [
     row({ goalsFor: 0, xgFor: 2.4, fixtureId: 1 }),
     row({ goalsFor: 0, xgFor: 2.0, fixtureId: 2 }),
   ]);
@@ -63,7 +63,7 @@ test("finishing is read against the chances, and the sign matters", () => {
   assert.ok(finishing.value < -1.5);
   assert.match(wasteful.verdict.scoring, /more than it scores/i);
 
-  const clinical = summarizeDna("FCF", [
+  const clinical = summarizeDna("FCF", "2026-11-05", [
     row({ goalsFor: 3, xgFor: 1.2, fixtureId: 1 }),
     row({ goalsFor: 2, xgFor: 1.0, fixtureId: 2 }),
   ]);
@@ -73,7 +73,7 @@ test("finishing is read against the chances, and the sign matters", () => {
 });
 
 test("the phase split says when the goals arrive", () => {
-  const dna = summarizeDna("FCF", [
+  const dna = summarizeDna("FCF", "2026-11-05", [
     row({ scoredPhases: [0, 0, 0, 0, 0, 3], concededPhases: [1, 0, 0, 0, 0, 0], fixtureId: 1 }),
   ]);
   const late = dna.dynamics.find((trait) => trait.label === "Scored after 75′");
@@ -86,7 +86,7 @@ test("the phase split says when the goals arrive", () => {
 });
 
 test("a lead held and a deficit rescued are counted, not assumed", () => {
-  const dna = summarizeDna("FCF", [
+  const dna = summarizeDna("FCF", "2026-11-05", [
     row({ ledAtSomePoint: true, goalsFor: 2, goalsAgainst: 0, fixtureId: 1 }),
     row({ ledAtSomePoint: true, goalsFor: 1, goalsAgainst: 2, fixtureId: 2 }),
     row({ trailedAtSomePoint: true, goalsFor: 2, goalsAgainst: 2, fixtureId: 3 }),
@@ -94,13 +94,13 @@ test("a lead held and a deficit rescued are counted, not assumed", () => {
   ]);
   const held = dna.pressure.find((trait) => trait.label === "Held a lead");
   assert.equal(held.value, 50);
-  assert.equal(held.note, "1 of 2 leads turned into wins");
+  assert.match(held.note, /leads held, weighted/);
   const rescued = dna.pressure.find((trait) => trait.label === "Unbeaten behind");
   assert.equal(rescued.value, 50);
 });
 
 test("home and away are kept apart in the scoring line", () => {
-  const dna = summarizeDna("FCF", [
+  const dna = summarizeDna("FCF", "2026-11-05", [
     row({ venue: "home", goalsFor: 3, goalsAgainst: 0, fixtureId: 1 }),
     row({ venue: "away", goalsFor: 0, goalsAgainst: 2, fixtureId: 2 }),
   ]);
@@ -110,7 +110,7 @@ test("home and away are kept apart in the scoring line", () => {
 });
 
 test("missing numbers are left out rather than counted as zero", () => {
-  const dna = summarizeDna("FCF", [
+  const dna = summarizeDna("FCF", "2026-11-05", [
     row({ xgFor: null, possessionFor: null, fixtureId: 1 }),
     row({ xgFor: null, possessionFor: null, fixtureId: 2 }),
   ]);
@@ -120,8 +120,40 @@ test("missing numbers are left out rather than counted as zero", () => {
 });
 
 test("an empty window says nothing rather than scoring zero", () => {
-  const dna = summarizeDna("Nobody", []);
+  const dna = summarizeDna("Nobody", "2026-11-05", []);
   assert.equal(dna.matches, 0);
   assert.equal(dna.from, null);
   assert.equal(dna.record.goalsFor, 0);
+});
+
+test("a match ages: half at ninety days, a tenth after ten months", () => {
+  const asOf = "2026-11-05";
+  assert.equal(ageInDays("2026-11-05", asOf), 0);
+  assert.equal(ageInDays("2026-10-06", asOf), 30);
+  assert.equal(weightOf("2026-11-05", asOf), 1);
+  // Ninety days back is exactly half.
+  assert.equal(weightOf("2026-08-07", asOf), 0.5);
+  // Ten months back still counts, but only just.
+  assert.ok(weightOf("2026-01-05", asOf) < 0.12 && weightOf("2026-01-05", asOf) >= 0.02);
+});
+
+test("recent matches outweigh old ones instead of every match counting the same", () => {
+  const asOf = "2026-11-05";
+  // Two old matches scoring nothing, one recent match scoring four times.
+  const recentForm = summarizeDna("FCF", asOf, [
+    row({ date: "2026-11-01", goalsFor: 4, goalsAgainst: 0, fixtureId: 1 }),
+    row({ date: "2026-03-01", goalsFor: 0, goalsAgainst: 0, fixtureId: 2 }),
+    row({ date: "2026-02-01", goalsFor: 0, goalsAgainst: 0, fixtureId: 3 }),
+  ]);
+  // Two recent matches scoring nothing, one old match scoring four times.
+  const oldForm = summarizeDna("FCF", asOf, [
+    row({ date: "2026-11-01", goalsFor: 0, goalsAgainst: 0, fixtureId: 1 }),
+    row({ date: "2026-10-25", goalsFor: 0, goalsAgainst: 0, fixtureId: 2 }),
+    row({ date: "2026-02-01", goalsFor: 4, goalsAgainst: 0, fixtureId: 3 }),
+  ]);
+  const recentGoals = recentForm.identity.find((trait) => trait.label === "Goals scored").value;
+  const oldGoals = oldForm.identity.find((trait) => trait.label === "Goals scored").value;
+  // Both windows have four goals in them; the current side is the one scoring now.
+  assert.ok(recentGoals > oldGoals + 1);
+  assert.ok(recentGoals > 1.5);
 });

@@ -2,16 +2,18 @@
  * Team DNA: what a side actually is, read from its own matches rather than from a
  * league average.
  *
- * Each match contributes numbers the scoreline cannot show — expected goals against
- * actual goals, big chances taken and missed, where on the pitch the work happened,
- * when the goals arrived, whether a lead was held or a deficit was overturned, what
- * the players were rated. Fifty of those read together say more about a team than
- * fifty results, and the window is always the fifty before the kickoff being asked
- * about.
+ * Two things make the reading honest. The window is strictly the matches before the
+ * kickoff being asked about, and the matches are not weighted equally: a side's last
+ * three games say more about the side that will play than its first three of the
+ * season, so every average here is weighted by age, halving every ninety days. That
+ * is what stops a team being underrated because it changed manager in July, or
+ * overrated because it won 4–0 in August.
  *
- * Everything here is arithmetic over stored rows. No model, no guessing: if a field
- * is missing for a match, the average is taken over the matches that have it, and
- * the coverage says how many that was.
+ * Each match contributes numbers the scoreline cannot show — expected goals against
+ * actual goals, big chances taken and missed, where the work happened, when the
+ * goals arrived, whether a lead was held or a deficit overturned, what the players
+ * were rated. Everything here is arithmetic over stored rows: no model, no guessing,
+ * and a field the feed did not have is left out rather than counted as zero.
  */
 
 export type DnaMatch = {
@@ -67,25 +69,62 @@ export type TeamDna = {
   mistakes: DnaTrait[];
   /** Where the results and the underlying numbers disagree. */
   verdict: { scoring: string; control: string; late: string };
+  /** How fast a match stops counting: its weight halves over this many days. */
+  halfLifeDays: number;
 };
 
 const PHASE_LABELS = ['0–15', '16–30', '31–45', '46–60', '61–75', '76–90'];
+
+/**
+ * The ageing of a match. Ninety days is a season quarter: a match from before the
+ * last international break counts about half of one from last week, and a match from
+ * the opening weekend about a tenth. Short enough that a changed side stops being
+ * described by its old self, long enough that one bad afternoon does not become the
+ * team's identity.
+ */
+export const DNA_HALF_LIFE_DAYS = 90;
+
+/** No match is ever discarded entirely: a real result still says something. */
+const MIN_WEIGHT = 0.02;
 
 export function phaseLabel(index: number): string {
   return PHASE_LABELS[index] ?? `${index * 15}+`;
 }
 
+export function ageInDays(date: string, asOf: string): number {
+  const then = Date.parse(`${date}T00:00:00Z`);
+  const now = Date.parse(`${asOf}T00:00:00Z`);
+  if (!Number.isFinite(then) || !Number.isFinite(now)) return 0;
+  return Math.max(0, Math.round((now - then) / 86_400_000));
+}
+
+/** A match's weight: one for today, a half at ninety days, a tenth after ten months. */
+export function weightOf(date: string, asOf: string): number {
+  const weight = 0.5 ** (ageInDays(date, asOf) / DNA_HALF_LIFE_DAYS);
+  return Math.max(MIN_WEIGHT, Math.round(weight * 1000) / 1000);
+}
+
 /**
- * The goals a side reaches on a good day: its 80th percentile across the window.
- *
- * Four times in five it scores at or below this, which is what makes it the right
- * stress case for a call — a line that survives it has survived the side's own
- * history, not a hypothetical.
+ * The goals a side reaches on a good day: its 80th percentile across the window,
+ * taken over the weights rather than the raw list, so a hot August does not become
+ * the bad afternoon a call has to survive in November.
  */
-export function stressGoals(goals: number[]): number | null {
+export function stressGoals(goals: number[], weights?: number[]): number | null {
   if (!goals.length) return null;
-  const sorted = [...goals].sort((a, b) => a - b);
-  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.8))];
+  const pairs = goals
+    .map((goals, index) => ({ goals, weight: Math.max(MIN_WEIGHT, weights?.[index] ?? 1) }))
+    .sort((a, b) => a.goals - b.goals);
+  const total = pairs.reduce((sum, pair) => sum + pair.weight, 0);
+  let running = 0;
+  for (const pair of pairs) {
+    running += pair.weight;
+    if (running / total >= 0.8) return pair.goals;
+  }
+  return pairs[pairs.length - 1].goals;
+}
+
+function round(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 function mean(values: Array<number | null>): number | null {
@@ -94,18 +133,32 @@ function mean(values: Array<number | null>): number | null {
   return round(real.reduce((sum, value) => sum + value, 0) / real.length);
 }
 
+/** Weighted average: recent matches move it, old ones only nudge it. */
+function wmean(pairs: Array<[number | null, number]>): number | null {
+  let total = 0;
+  let weight = 0;
+  for (const [value, w] of pairs) {
+    if (value === null || !Number.isFinite(value)) continue;
+    total += value * w;
+    weight += w;
+  }
+  return weight > 0 ? round(total / weight) : null;
+}
+
+/** Weighted share of matches where something happened. */
+function wshare(pairs: Array<[boolean | null, number]>): number | null {
+  let hits = 0;
+  let weight = 0;
+  for (const [hit, w] of pairs) {
+    if (hit === null) continue;
+    if (hit) hits += w;
+    weight += w;
+  }
+  return weight > 0 ? round(hits / weight) : null;
+}
+
 function sum(values: Array<number | null>): number {
   return values.reduce<number>((total, value) => total + (value ?? 0), 0);
-}
-
-function share(values: Array<number | null>): number | null {
-  const real = values.filter((value): value is number => value !== null);
-  if (!real.length) return null;
-  return round(sum(real) / real.length);
-}
-
-function round(value: number): number {
-  return Math.round(value * 100) / 100;
 }
 
 function sd(values: number[]): number | null {
@@ -116,93 +169,102 @@ function sd(values: number[]): number | null {
 }
 
 /**
- * The DNA of one team over the matches given, newest first.
+ * The DNA of one team over the matches given.
+ *
+ * `asOf` is the kickoff being asked about: it is what makes a match old, so a card
+ * settled for a fixture in September and the same card re-read in March read the
+ * same side differently, because the side's evidence really is different.
  *
  * The verdict lines are deliberately comparative rather than predictive: they say
  * where the finishing and the chance creation disagree, which is the thing a
  * scoreline hides and the thing that makes a run look better or worse than it is.
  */
-export function summarizeDna(team: string, matches: DnaMatch[]): TeamDna {
+export function summarizeDna(team: string, asOf: string, matches: DnaMatch[]): TeamDna {
   const played = matches.length;
   const ordered = [...matches].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  const weights = ordered.map((match) => weightOf(match.date, asOf));
+  const weighted = <T>(value: (match: DnaMatch) => T) => ordered.map((match, index) => [value(match), weights[index]] as [T, number]);
+
   const goalsFor = sum(ordered.map((m) => m.goalsFor));
   const goalsAgainst = sum(ordered.map((m) => m.goalsAgainst));
   const wins = ordered.filter((m) => m.goalsFor > m.goalsAgainst).length;
   const draws = ordered.filter((m) => m.goalsFor === m.goalsAgainst).length;
   const losses = ordered.filter((m) => m.goalsFor < m.goalsAgainst).length;
 
-  const perGame = (total: number) => (played ? round(total / played) : 0);
+  const weightedGoalsFor = wmean(weighted((m) => m.goalsFor));
+  const weightedGoalsAgainst = wmean(weighted((m) => m.goalsAgainst));
 
-  const xgFor = mean(ordered.map((m) => m.xgFor));
-  const xgAgainst = mean(ordered.map((m) => m.xgAgainst));
-  const shotsFor = mean(ordered.map((m) => m.shotsFor));
-  const shotsOnTarget = mean(ordered.map((m) => m.shotsOnTargetFor));
-  const bigChances = mean(ordered.map((m) => m.bigChancesFor));
-  const bigMissed = mean(ordered.map((m) => m.bigChancesMissedFor));
-  const possession = mean(ordered.map((m) => m.possessionFor));
-  const passAccuracy = mean(ordered.map((m) => m.passAccuracyFor));
-  const corners = mean(ordered.map((m) => m.cornersFor));
+  const xgFor = wmean(weighted((m) => m.xgFor)) ?? mean(ordered.map((m) => m.xgFor));
+  const shotsFor = wmean(weighted((m) => m.shotsFor));
+  const shotsOnTarget = wmean(weighted((m) => m.shotsOnTargetFor));
+  const bigChances = wmean(weighted((m) => m.bigChancesFor));
+  const bigMissed = wmean(weighted((m) => m.bigChancesMissedFor));
+  const possession = wmean(weighted((m) => m.possessionFor));
+  const passAccuracy = wmean(weighted((m) => m.passAccuracyFor));
+  const corners = wmean(weighted((m) => m.cornersFor));
 
-  const homeMatches = ordered.filter((m) => m.venue === 'home');
-  const awayMatches = ordered.filter((m) => m.venue === 'away');
-  const homeFor = homeMatches.length ? round(sum(homeMatches.map((m) => m.goalsFor)) / homeMatches.length) : null;
-  const awayFor = awayMatches.length ? round(sum(awayMatches.map((m) => m.goalsFor)) / awayMatches.length) : null;
-  const homeAgainst = homeMatches.length
-    ? round(sum(homeMatches.map((m) => m.goalsAgainst)) / homeMatches.length)
-    : null;
-  const awayAgainst = awayMatches.length
-    ? round(sum(awayMatches.map((m) => m.goalsAgainst)) / awayMatches.length)
-    : null;
+  const home = ordered.flatMap((match, index) => (match.venue === 'home' ? [{ match, weight: weights[index] }] : []));
+  const away = ordered.flatMap((match, index) => (match.venue === 'away' ? [{ match, weight: weights[index] }] : []));
+  const homeFor = home.length ? wmean(home.map((row) => [row.match.goalsFor, row.weight])) : null;
+  const awayFor = away.length ? wmean(away.map((row) => [row.match.goalsFor, row.weight])) : null;
+  const homeAgainst = home.length ? wmean(home.map((row) => [row.match.goalsAgainst, row.weight])) : null;
+  const awayAgainst = away.length ? wmean(away.map((row) => [row.match.goalsAgainst, row.weight])) : null;
 
+  // Phases are counted in weighted goals, so "when it scores" follows the side it is
+  // now rather than the whole season.
   const scoredPhases = Array.from({ length: PHASE_LABELS.length }, (_, index) =>
-    sum(ordered.map((m) => m.scoredPhases[index] ?? 0)),
+    round(ordered.reduce((total, match, position) => total + (match.scoredPhases[index] ?? 0) * weights[position], 0)),
   );
   const concededPhases = Array.from({ length: PHASE_LABELS.length }, (_, index) =>
-    sum(ordered.map((m) => m.concededPhases[index] ?? 0)),
+    round(ordered.reduce((total, match, position) => total + (match.concededPhases[index] ?? 0) * weights[position], 0)),
   );
   const totalScored = scoredPhases.reduce((total, value) => total + value, 0);
   const totalConceded = concededPhases.reduce((total, value) => total + value, 0);
   const lateScored = scoredPhases[5] ?? 0;
   const lateConceded = concededPhases[5] ?? 0;
   const firstHalfScored = (scoredPhases[0] ?? 0) + (scoredPhases[1] ?? 0) + (scoredPhases[2] ?? 0);
-  const firstHalfConceded = (concededPhases[0] ?? 0) + (concededPhases[1] ?? 0) + (concededPhases[2] ?? 0);
 
-  const led = ordered.filter((m) => m.ledAtSomePoint === true).length;
-  const trailed = ordered.filter((m) => m.trailedAtSomePoint === true).length;
-  const ledAndWon = ordered.filter(
-    (m) => m.ledAtSomePoint === true && m.goalsFor > m.goalsAgainst,
-  ).length;
-  const trailedUnbeaten = ordered.filter(
-    (m) => m.trailedAtSomePoint === true && m.goalsFor >= m.goalsAgainst,
-  ).length;
-  const failedToScore = ordered.filter((m) => m.goalsFor === 0).length;
-  const cleanSheets = ordered.filter((m) => m.goalsAgainst === 0).length;
-  const bothScored = ordered.filter((m) => m.goalsFor > 0 && m.goalsAgainst > 0).length;
+  const led = wshare(weighted((m) => m.ledAtSomePoint));
+  const trailed = wshare(weighted((m) => m.trailedAtSomePoint));
+  // Both shares are read among the matches where the situation happened: a side
+  // that never led has no lead to have held, so it belongs in neither count.
+  const ledAndWon = wshare(weighted((m) => (m.ledAtSomePoint ? m.goalsFor > m.goalsAgainst : null)));
+  const trailedUnbeaten = wshare(weighted((m) => (m.trailedAtSomePoint ? m.goalsFor >= m.goalsAgainst : null)));
+  const failedToScore = wshare(weighted((m) => m.goalsFor === 0));
+  const cleanSheets = wshare(weighted((m) => m.goalsAgainst === 0));
+  const bothScored = wshare(weighted((m) => m.goalsFor > 0 && m.goalsAgainst > 0));
 
   const ratings = ordered.map((m) => m.rating);
   const recentRatings = mean(ratings.slice(0, 5));
-  const overallRating = mean(ratings);
-  const ratingTrend =
-    recentRatings !== null && overallRating !== null ? round(recentRatings - overallRating) : null;
+  const overallRating = wmean(weighted((m) => m.rating));
+  const ratingTrend = recentRatings !== null && overallRating !== null ? round(recentRatings - overallRating) : null;
 
-  const startersKept = mean(ordered.map((m) => m.startersKept));
-
+  const startersKept = wmean(weighted((m) => m.startersKept));
   const goalForSd = sd(ordered.map((m) => m.goalsFor));
   const goalAgainstSd = sd(ordered.map((m) => m.goalsAgainst));
-  const finishing = xgFor !== null && played ? round(perGame(goalsFor) - xgFor) : null;
+  const finishing =
+    xgFor !== null && weightedGoalsFor !== null ? round(weightedGoalsFor - xgFor) : null;
 
   const identity: DnaTrait[] = [
-    { label: 'Goals scored', value: perGame(goalsFor), unit: 'perGame' },
-    { label: 'Goals conceded', value: perGame(goalsAgainst), unit: 'perGame' },
+    { label: 'Goals scored', value: weightedGoalsFor ?? 0, unit: 'perGame', note: 'weighted to the recent side' },
+    { label: 'Goals conceded', value: weightedGoalsAgainst ?? 0, unit: 'perGame', note: 'weighted to the recent side' },
   ];
   if (xgFor !== null) identity.push({ label: 'xG created', value: xgFor, unit: 'perGame' });
-  if (xgAgainst !== null) identity.push({ label: 'xG conceded', value: xgAgainst, unit: 'perGame' });
+  if (xgFor !== null) {
+    const xgAgainst = wmean(weighted((m) => m.xgAgainst));
+    if (xgAgainst !== null) identity.push({ label: 'xG conceded', value: xgAgainst, unit: 'perGame' });
+  }
   if (finishing !== null) {
     identity.push({
       label: 'Goals vs xG',
       value: finishing,
       unit: 'perGame',
-      note: finishing > 0 ? 'finishing above the chances made' : finishing < 0 ? 'chances going unconverted' : 'level with the chances made',
+      note:
+        finishing > 0
+          ? 'finishing above the chances made'
+          : finishing < 0
+            ? 'chances going unconverted'
+            : 'level with the chances made',
     });
   }
   if (shotsFor !== null) identity.push({ label: 'Shots', value: shotsFor, unit: 'perGame' });
@@ -215,9 +277,9 @@ export function summarizeDna(team: string, matches: DnaMatch[]): TeamDna {
     { label: 'Scored in 1st half', value: totalScored ? round((firstHalfScored / totalScored) * 100) : 0, unit: 'share' },
     { label: 'Scored after 75′', value: totalScored ? round((lateScored / totalScored) * 100) : 0, unit: 'share' },
     { label: 'Conceded after 75′', value: totalConceded ? round((lateConceded / totalConceded) * 100) : 0, unit: 'share' },
-    { label: 'Failed to score', value: played ? round((failedToScore / played) * 100) : 0, unit: 'share' },
-    { label: 'Both teams scored', value: played ? round((bothScored / played) * 100) : 0, unit: 'share' },
-    { label: 'Clean sheets', value: played ? round((cleanSheets / played) * 100) : 0, unit: 'share' },
+    { label: 'Failed to score', value: failedToScore === null ? 0 : round(failedToScore * 100), unit: 'share' },
+    { label: 'Both teams scored', value: bothScored === null ? 0 : round(bothScored * 100), unit: 'share' },
+    { label: 'Clean sheets', value: cleanSheets === null ? 0 : round(cleanSheets * 100), unit: 'share' },
   ];
   if (homeFor !== null || awayFor !== null) {
     dynamics.push({
@@ -231,19 +293,19 @@ export function summarizeDna(team: string, matches: DnaMatch[]): TeamDna {
   if (goalAgainstSd !== null) dynamics.push({ label: 'Leak spread (sd)', value: goalAgainstSd, unit: 'perGame' });
 
   const pressure: DnaTrait[] = [
-    { label: 'Took the lead', value: played ? round((led / played) * 100) : 0, unit: 'share' },
+    { label: 'Took the lead', value: led === null ? 0 : round(led * 100), unit: 'share' },
     {
       label: 'Held a lead',
-      value: led ? round((ledAndWon / led) * 100) : 0,
+      value: ledAndWon === null ? 0 : round(ledAndWon * 100),
       unit: 'share',
-      note: `${ledAndWon} of ${led} leads turned into wins`,
+      note: ledAndWon === null ? undefined : `${Math.round(ledAndWon * 100)}% of leads held, weighted`,
     },
-    { label: 'Went behind', value: played ? round((trailed / played) * 100) : 0, unit: 'share' },
+    { label: 'Went behind', value: trailed === null ? 0 : round(trailed * 100), unit: 'share' },
     {
       label: 'Unbeaten behind',
-      value: trailed ? round((trailedUnbeaten / trailed) * 100) : 0,
+      value: trailedUnbeaten === null ? 0 : round(trailedUnbeaten * 100),
       unit: 'share',
-      note: `${trailedUnbeaten} of ${trailed} deficits rescued`,
+      note: trailedUnbeaten === null ? undefined : `${Math.round(trailedUnbeaten * 100)}% of deficits rescued, weighted`,
     },
   ];
 
@@ -257,13 +319,13 @@ export function summarizeDna(team: string, matches: DnaMatch[]): TeamDna {
       note: bigChances ? `${Math.round((bigMissed / bigChances) * 100)}% of them` : undefined,
     });
   }
-  const yellows = mean(ordered.map((m) => m.yellowFor));
-  const reds = mean(ordered.map((m) => m.redFor));
-  const fouls = mean(ordered.map((m) => m.foulsFor));
+  const yellows = wmean(weighted((m) => m.yellowFor));
+  const reds = wmean(weighted((m) => m.redFor));
+  const fouls = wmean(weighted((m) => m.foulsFor));
   if (yellows !== null) mistakes.push({ label: 'Yellows', value: yellows, unit: 'perGame' });
   if (reds !== null && reds > 0) mistakes.push({ label: 'Reds', value: reds, unit: 'perGame' });
   if (fouls !== null) mistakes.push({ label: 'Fouls', value: fouls, unit: 'perGame' });
-  const saves = mean(ordered.map((m) => m.savesFor));
+  const saves = wmean(weighted((m) => m.savesFor));
   if (saves !== null) mistakes.push({ label: 'Saves', value: saves, unit: 'perGame' });
   if (overallRating !== null) mistakes.push({ label: 'Team rating', value: overallRating, unit: 'rating' });
   if (ratingTrend !== null) {
@@ -299,6 +361,9 @@ export function summarizeDna(team: string, matches: DnaMatch[]): TeamDna {
       : lateShare <= 0.1
         ? 'Almost nothing after 75′ — what it builds early is what it keeps.'
         : 'Goals spread through the match.';
+  const agedRead = played
+    ? `Weighted to the recent side: a match is worth half after ${DNA_HALF_LIFE_DAYS} days.`
+    : 'No matches read.';
 
   return {
     team,
@@ -309,7 +374,10 @@ export function summarizeDna(team: string, matches: DnaMatch[]): TeamDna {
     identity,
     dynamics,
     pressure,
-    mistakes,
+    mistakes: [...mistakes, { label: 'Window', value: played, unit: 'count', note: agedRead }],
     verdict: { scoring: scoringRead, control: controlRead, late: lateRead },
+    halfLifeDays: DNA_HALF_LIFE_DAYS,
   };
 }
+
+export type DnaVerdict = TeamDna['verdict'];

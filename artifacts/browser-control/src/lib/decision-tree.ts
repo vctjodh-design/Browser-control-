@@ -238,6 +238,8 @@ export type TeamDna = {
   pressure: DnaTrait[];
   mistakes: DnaTrait[];
   verdict: { scoring: string; control: string; late: string };
+  /** A match's weight halves over this many days; older evidence only nudges. */
+  halfLifeDays?: number;
 };
 
 export type DnaResponse = {

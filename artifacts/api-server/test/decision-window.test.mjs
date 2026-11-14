@@ -83,7 +83,12 @@ test("the even-if test judges the call at the stress scoreline", () => {
 test("the stress case is the 80th percentile, not the average", () => {
   // Ten matches, one of them a four: the average is low but a good day is not.
   const goals = [0, 0, 1, 1, 1, 2, 2, 2, 3, 4];
-  assert.equal(stressGoals(goals), 3);
+  assert.equal(stressGoals(goals), 2);
   assert.equal(stressGoals([]), null);
   assert.equal(stressGoals([1]), 1);
+
+  // A four from last season does not set the bad afternoon in November: with the
+  // old match weighted to almost nothing, the stress case falls to the recent run.
+  const weights = [0.05, 1, 1, 1];
+  assert.equal(stressGoals([4, 0, 1, 1], weights), 1);
 });

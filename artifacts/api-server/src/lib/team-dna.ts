@@ -2,7 +2,7 @@ import { archiveDatabase } from './decision-store';
 import { getHistoricalMatchSnapshot } from './kickoffscore-last-five';
 import { historyForTeam } from './match-history';
 import { normalizeTeamName } from './team-shape';
-import { stressGoals, summarizeDna, type DnaMatch, type TeamDna } from './team-dna-math';
+import { stressGoals, summarizeDna, weightOf, type DnaMatch, type TeamDna } from './team-dna-math';
 
 // Reading a team's last fifty matches properly.
 //
@@ -510,7 +510,7 @@ function readDnaMatches(team: string, asOf: string, depth: number): DnaMatch[] {
 }
 
 export function teamDna(team: string, asOf: string, depth = DEFAULT_DEPTH): TeamDna {
-  return summarizeDna(team, readDnaMatches(team, asOf, depth));
+  return summarizeDna(team, asOf, readDnaMatches(team, asOf, depth));
 }
 
 export type GoalShape = {
@@ -525,9 +525,17 @@ export type GoalShape = {
   p80: number | null;
 };
 
-function average(values: number[]): number | null {
-  if (!values.length) return null;
-  return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100;
+/** Weighted average of the goals in these matches, ageing them by the kickoff. */
+function agedMean(rows: DnaMatch[], asOf: string, pick: (row: DnaMatch) => number): number | null {
+  if (!rows.length) return null;
+  let total = 0;
+  let weight = 0;
+  for (const row of rows) {
+    const w = weightOf(row.date, asOf);
+    total += pick(row) * w;
+    weight += w;
+  }
+  return weight > 0 ? Math.round((total / weight) * 100) / 100 : null;
 }
 
 /**
@@ -539,8 +547,11 @@ function average(values: number[]): number | null {
  */
 export function goalShape(team: string, asOf: string, depth = DEFAULT_DEPTH): GoalShape {
   const rows = readDnaMatches(team, asOf, depth);
-  const raw = stressGoals(rows.map((row) => row.goalsFor));
-  const mean = average(rows.map((row) => row.goalsFor));
+  const raw = stressGoals(
+    rows.map((row) => row.goalsFor),
+    rows.map((row) => weightOf(row.date, asOf)),
+  );
+  const mean = agedMean(rows, asOf, (row) => row.goalsFor);
   // A percentile over a short window is the maximum of it, and an eight-goal rout
   // is not a "bad afternoon" to test a call against. The stress case is capped at a
   // goal over the side's own average, so one freak result cannot invent a scoreline
@@ -550,10 +561,10 @@ export function goalShape(team: string, asOf: string, depth = DEFAULT_DEPTH): Go
     team,
     matches: rows.length,
     reached: historyForTeam(team, asOf, depth).length,
-    scoredAtHome: average(rows.filter((row) => row.venue === 'home').map((row) => row.goalsFor)),
-    scoredAway: average(rows.filter((row) => row.venue === 'away').map((row) => row.goalsFor)),
-    concededAtHome: average(rows.filter((row) => row.venue === 'home').map((row) => row.goalsAgainst)),
-    concededAway: average(rows.filter((row) => row.venue === 'away').map((row) => row.goalsAgainst)),
+    scoredAtHome: agedMean(rows.filter((row) => row.venue === 'home'), asOf, (row) => row.goalsFor),
+    scoredAway: agedMean(rows.filter((row) => row.venue === 'away'), asOf, (row) => row.goalsFor),
+    concededAtHome: agedMean(rows.filter((row) => row.venue === 'home'), asOf, (row) => row.goalsAgainst),
+    concededAway: agedMean(rows.filter((row) => row.venue === 'away'), asOf, (row) => row.goalsAgainst),
     p80,
   };
 }

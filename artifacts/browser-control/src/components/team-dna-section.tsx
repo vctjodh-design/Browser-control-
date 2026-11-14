@@ -45,6 +45,9 @@ function DnaColumn({ data }: { data: DnaResponse }) {
         {dna.matches} in window · {dna.record.wins}W {dna.record.draws}D {dna.record.losses}L ·{' '}
         {dna.record.goalsFor}–{dna.record.goalsAgainst}
       </p>
+      <p className="mono mt-0.5 text-[8px] uppercase tracking-[.1em] text-[#a39b8e]" data-testid="text-dna-ageing">
+        weighted to the recent side · half after {dna.halfLifeDays ?? 90} days
+      </p>
 
       {dna.matches === 0 ? (
         <p className="mt-2 text-[10px] leading-5 text-[#93958b]" data-testid="status-dna-empty">
