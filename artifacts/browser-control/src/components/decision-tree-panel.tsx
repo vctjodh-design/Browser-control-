@@ -8,6 +8,8 @@ import {
   type DecisionNode,
   type DecisionTier,
   type DecisionTree,
+  type DecisionUpset,
+  type UpsetLevel,
 } from '@/lib/decision-tree';
 
 // The match page's Decision tree tab. Every other tab answers one question; this
@@ -19,6 +21,34 @@ const TIER_STYLE: Record<DecisionTier, string> = {
   leaning: 'border-[#e2d6bd] bg-[#f6efdf] text-[#8a6a38]',
   'knife-edge': 'border-[#e0d3cd] bg-[#f7ece7] text-[#9a5c46]',
 };
+
+const UPSET_STYLE: Record<UpsetLevel, string> = {
+  low: 'border-[#cdd9cd] bg-[#eef3ea] text-[#5b7a63]',
+  live: 'border-[#e2d6bd] bg-[#f6efdf] text-[#8a6a38]',
+  high: 'border-[#e4c4b8] bg-[#fbeee8] text-[#a4513a]',
+};
+
+/**
+ * How easily this line turns over. Sits beside the call because a firm call close
+ * to its crossing is a different bet from a firm call four goals clear of it.
+ */
+function UpsetChip({ upset }: { upset: DecisionUpset }) {
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-1.5" data-testid={`upset-${upset.level}`}>
+      <span
+        className={`mono shrink-0 rounded-full border px-1.5 py-0.5 text-[7.5px] font-extrabold uppercase tracking-[.1em] ${UPSET_STYLE[upset.level]}`}
+        title={upset.basis}
+      >
+        upset {upset.level}
+      </span>
+      {upset.flipDistance !== null && (
+        <span className="mono shrink-0 text-[8px] leading-4 text-[#9a9c93]" title={upset.basis}>
+          {upset.flipDistance.toFixed(2)} from flipping
+        </span>
+      )}
+    </span>
+  );
+}
 
 function TierChip({ tier, label }: { tier: DecisionTier; label: string }) {
   return (
@@ -69,6 +99,7 @@ function MarketRow({ market }: { market: DecisionMarket }) {
             {market.call}
           </p>
           <TierChip tier={market.tier} label={market.tierLabel} />
+          <UpsetChip upset={market.upset} />
           {boardSharePercent(market) !== null && (
             <span
               className={`mono rounded-full border px-1.5 py-0.5 text-[7.5px] font-extrabold uppercase tracking-[.1em] ${
@@ -173,6 +204,8 @@ export function DecisionTreePanel({ fixtureId }: { fixtureId: number }) {
     ? compared.reduce((sum, market) => sum + (market.boardShare ?? 0), 0) / compared.length
     : null;
   const boardPercent = boardAgreementPercent({ boardWeight });
+  const upsetHigh = tree.markets.filter((market) => market.upset.level === 'high').length;
+  const upsetWorst = tree.markets.filter((market) => market.upset.level === 'high').slice(0, 3);
 
   return (
     <section className="space-y-5" data-testid="panel-decision-tree">
@@ -207,6 +240,19 @@ export function DecisionTreePanel({ fixtureId }: { fixtureId: number }) {
               {boardPercent === null
                 ? 'board not priced'
                 : `board ${boardPercent}% · ${agreed}/${compared.length} lines`}
+            </span>
+            <span
+              className={`mono rounded-lg border px-2.5 py-1.5 text-[9px] ${
+                upsetHigh > 0 ? 'border-[#e4c4b8] bg-[#fbeee8] text-[#a4513a]' : 'border-[#ccd7cb] bg-[#f8faf4] text-[#4d6a55]'
+              }`}
+              title={
+                upsetHigh > 0
+                  ? `Close to turning over: ${upsetWorst.map((market) => market.label).join(', ')}. Open a line to read how far it is from its crossing.`
+                  : 'No line on this card is within a bad afternoon of its crossing.'
+              }
+              data-testid="text-decision-upset-count"
+            >
+              {upsetHigh > 0 ? `${upsetHigh} upset${upsetHigh === 1 ? '' : 's'} to watch` : 'no live upset'}
             </span>
           </div>
         </div>

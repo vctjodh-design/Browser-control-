@@ -47,7 +47,7 @@ type RunSnapshot = { version: number; date: string; savedAt: number; rows: Store
 
 // Bumped when a saved row gained fields; a run saved by an older build is dropped
 // rather than rendered with half a card on it.
-const SNAPSHOT_VERSION = 4;
+const SNAPSHOT_VERSION = 5;
 const STOPPED_MID_READ = 'Skipped: stopped mid-read.';
 
 const TIER_STYLE: Record<DecisionTier, string> = {
@@ -627,6 +627,17 @@ export function DecisionBatch({
                         {row.summary.scoreline}
                       </span>
                       <TierChip summary={row.summary} />
+                      {row.summary.upsetHigh > 0 && (
+                        <span
+                          className="mono shrink-0 rounded-full border border-[#e4c4b8] bg-[#fbeee8] px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-[.12em] text-[#a4513a]"
+                          title={`${row.summary.upsetHigh} line${
+                            row.summary.upsetHigh === 1 ? ' is' : 's are'
+                          } within a bad afternoon of turning over. Open the card to see which, and how far each is from its crossing.`}
+                          data-testid={id === null ? undefined : `text-decision-batch-upset-${id}`}
+                        >
+                          {row.summary.upsetHigh} upset
+                        </span>
+                      )}
                     </span>
                   ) : row.kind === 'running' ? (
                     <span className="mono flex shrink-0 items-center gap-1.5 text-[9px] text-[#8b8d84]">

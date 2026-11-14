@@ -7,6 +7,16 @@
 export type DecisionSide = 'home' | 'away';
 export type DecisionTier = 'firm' | 'leaning' | 'knife-edge';
 
+/** How easily a line turns over. */
+export type UpsetLevel = 'low' | 'live' | 'high';
+
+export type DecisionUpset = {
+  level: UpsetLevel;
+  /** Goals between the reading and the point where the call flips. */
+  flipDistance: number | null;
+  basis: string;
+};
+
 export type DecisionNode = {
   id: string;
   depth: number;
@@ -30,6 +40,8 @@ export type DecisionMarket = {
   /** The board's weight on the side this line called, 0..1. Null when unpriced. */
   boardShare: number | null;
   agrees: boolean | null;
+  /** How exposed the line is: distance to its crossing, and the board against it. */
+  upset: DecisionUpset;
 };
 
 export type DecisionWithheld = {
@@ -61,6 +73,8 @@ export type DecisionTree = {
  * so a saved run stays small enough to keep a whole date in storage.
  */
 export type DecisionSummary = {
+  /** Which shape of summary this is; older saved rows are dropped rather than printed blank. */
+  version?: number;
   scoreline: string;
   result: string;
   resultTier: DecisionTier;
@@ -81,6 +95,11 @@ export type DecisionSummary = {
   resultShare: number | null;
   bttsShare: number | null;
   goalsShare: number | null;
+  /** Lines on this card that are one bad afternoon from turning over. */
+  upsetHigh: number;
+  resultUpset: UpsetLevel | null;
+  bttsUpset: UpsetLevel | null;
+  goalsUpset: UpsetLevel | null;
 };
 
 /**
@@ -124,6 +143,10 @@ export function summarizeDecision(tree: DecisionTree): DecisionSummary {
     resultShare: result?.boardShare ?? null,
     bttsShare: btts?.boardShare ?? null,
     goalsShare: goals?.boardShare ?? null,
+    upsetHigh: tree.markets.filter((market) => market.upset.level === 'high').length,
+    resultUpset: result?.upset.level ?? null,
+    bttsUpset: btts?.upset.level ?? null,
+    goalsUpset: goals?.upset.level ?? null,
   };
 }
 

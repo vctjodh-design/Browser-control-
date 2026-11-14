@@ -32,7 +32,7 @@ import { getSimFormProfile } from "../lib/sim-form-profile";
 import { applyPlayerForm } from "../lib/player-form-apply";
 import { runDuelSimulation } from "../lib/squad-duel-sim";
 import { buildInevitability, InevitabilityUnavailableError } from "../lib/inevitability-engine";
-import { buildDecisionTree, summarizeDecisionTree } from "../lib/decision-tree";
+import { DECISION_CARD_VERSION, buildDecisionTree, summarizeDecisionTree } from "../lib/decision-tree";
 import { listStoredCards, readStoredCard, writeStoredCard } from "../lib/decision-store";
 import {
   loadFixturePlayerForm,
@@ -663,7 +663,11 @@ function writeDecisionMemo(fixtureId: number, tree: ReturnType<typeof buildDecis
 // anything that was settled inside the storage window comes back from SQLite. The
 // process memo above is the fast path; this is the one a restart cannot empty.
 function storedCardFor(fixtureId: number) {
-  return readStoredCard<ReturnType<typeof buildDecisionTree>>(fixtureId);
+  const stored = readStoredCard<ReturnType<typeof buildDecisionTree> & { payloadVersion?: number }>(fixtureId);
+  // A card written before this build has none of the newer readings on it, so it
+  // is treated as absent and settled again rather than served half-filled.
+  if (!stored || stored.card.payloadVersion !== DECISION_CARD_VERSION) return null;
+  return stored as { card: ReturnType<typeof buildDecisionTree>; settledAt: number };
 }
 
 // What a date has already settled, so the page comes back to it instead of
@@ -737,7 +741,7 @@ router.get(
         awayTeam: tree.teams[1] ?? "",
         competition: "",
         summary: summarizeDecisionTree(tree),
-        payload: { elapsedMs: Date.now() - startedAt, cached: false, ...tree },
+        payload: { payloadVersion: DECISION_CARD_VERSION, elapsedMs: Date.now() - startedAt, cached: false, ...tree },
       });
       res.set("Cache-Control", "private, max-age=600");
       res.set("X-Decision-Cache", "miss");

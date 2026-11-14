@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { boardShareOf, marketAgreement, settleFromBoard, shiftTier } from "../src/lib/decision-tree.ts";
+import {
+  boardShareOf,
+  marketAgreement,
+  settleFromBoard,
+  shiftTier,
+  upsetReading,
+} from "../src/lib/decision-tree.ts";
 
 // The decision tree settles every market at a crossing point, so the crossings
 // are the model. These tests pin them: a tenth of a goal either side of the line
@@ -175,6 +181,56 @@ test("a board with no sheet prices is not an agreement either way", () => {
   const unspoken = boardWithSheets(null, null);
   assert.equal(marketAgreement(unspoken, "clean-home", { calls }), null);
   assert.equal(marketAgreement(unspoken, "clean-away", { calls }), null);
+});
+
+// Upset potential is the question a tier cannot answer: two firm lines are not
+// equally safe if one sits a hundredth of a goal from its crossing and the other
+// sits four goals clear of it.
+test("a line sitting on its crossing is an upset, however firm the call", () => {
+  // 2.66 of worth against the 2.674 line the under is called on.
+  const calls = settleFromBoard(facts(1.4, 1.26, 1, 1));
+  assert.equal(calls.overTwoAndHalf, "Under 2.5");
+  const reading = upsetReading("over-2.5", facts(1.4, 1.26, 1, 1), calls, 0.5);
+  assert.equal(reading.level, "high");
+  assert.equal(reading.flipDistance <= 0.02, true);
+
+  // The same call with the total four goals clear of the line is not an upset.
+  const safeFacts = facts(1.0, 0.4, 1, 0);
+  const safeCalls = settleFromBoard(safeFacts);
+  const safe = upsetReading("over-2.5", safeFacts, safeCalls, 0.5);
+  assert.equal(safe.level, "low");
+  assert.equal(safe.flipDistance > 1, true);
+});
+
+test("a board on the other side lifts an upset the reading would call safe", () => {
+  const onFacts = facts(1.0, 0.4, 1, 0);
+  const calls = settleFromBoard(onFacts);
+  // Called on a comfortable reading, then read again with the board 70% against.
+  assert.equal(upsetReading("over-2.5", onFacts, calls, 0.5).level, "low");
+  assert.equal(upsetReading("over-2.5", onFacts, calls, 0.3).level, "high");
+});
+
+test("the result line measures an upset against the draw gap", () => {
+  // The engine's own tie-break is 0.25 of a goal: two worths that close are one
+  // reading away from the draw. The scoreline still gives the home side the win.
+  const closeFacts = facts(1.3, 1.06, 2, 1);
+  const closeCalls = settleFromBoard(closeFacts);
+  assert.equal(closeCalls.result, "Home win");
+  const reading = upsetReading("result", closeFacts, closeCalls, 0.55);
+  assert.equal(reading.flipDistance <= 0.02, true);
+  assert.equal(reading.level, "high");
+});
+
+test("an exact score has no flip point to measure", () => {
+  const onFacts = facts(1.6, 0.8, 2, 1);
+  const calls = settleFromBoard(onFacts);
+  // Nothing to measure a flip against, so an unpriced exact score sits in the
+  // middle of the ladder rather than being called safe.
+  assert.equal(upsetReading("correct-score", onFacts, calls, null).flipDistance, null);
+  assert.equal(upsetReading("correct-score", onFacts, calls, null).level, "live");
+  // With the board almost entirely elsewhere it is still an upset, whatever the
+  // reading says.
+  assert.equal(upsetReading("correct-score", onFacts, calls, 0.15).level, "high");
 });
 
 test("a tier moves at most to either end of the ladder", () => {

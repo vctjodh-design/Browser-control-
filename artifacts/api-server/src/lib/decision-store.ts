@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import type { DecisionCardSummary } from "./decision-tree";
+import { DECISION_CARD_VERSION, type DecisionCardSummary } from "./decision-tree";
 
 // Settled cards, kept where a restart cannot reach them.
 //
@@ -162,6 +162,10 @@ export function listStoredCards(date: string, maxAgeMs = DECISION_STORED_TTL_MS)
       .all(date, Date.now() - maxAgeMs) as StoredRow[];
     return rows.flatMap<StoredDecisionCard>((row) => {
       try {
+        const summary = JSON.parse(text(row.summary)) as StoredDecisionSummary;
+        // Summaries from an older build do not carry the newer readings; the row
+        // would print blanks, so the card is left to be settled again.
+        if (summary?.version !== DECISION_CARD_VERSION) return [];
         return [
           {
             fixtureId: number(row.fixture_id),
@@ -170,7 +174,7 @@ export function listStoredCards(date: string, maxAgeMs = DECISION_STORED_TTL_MS)
             awayTeam: text(row.away_team),
             competition: text(row.competition),
             settledAt: number(row.settled_at),
-            summary: JSON.parse(text(row.summary)) as StoredDecisionSummary,
+            summary,
           },
         ];
       } catch {

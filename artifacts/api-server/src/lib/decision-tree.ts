@@ -57,6 +57,20 @@ const FOUR_GOALS = 3.672;
  */
 const HANDICAP_GAP = 0.85;
 
+/**
+ * The gap at which a level board stops being a draw — the engine's own tie-break.
+ * A result call sits that far from flipping, so it is the distance an upset has to
+ * travel rather than anything this module decides for itself.
+ */
+const DRAW_GAP = 0.25;
+
+/**
+ * How far a line has to sit from its crossing before an upset is worth naming, and
+ * how far before it is the first thing to say about the line.
+ */
+const UPSET_HIGH_GOALS = 0.12;
+const UPSET_LIVE_GOALS = 0.35;
+
 const TIER_ORDER: DecisionTier[] = ["knife-edge", "leaning", "firm"];
 
 /** Move a tier one step, never past either end. */
@@ -233,13 +247,22 @@ export type DecisionMarket = {
   boardShare: number | null;
   /** What the market board says, when it prices this line at all. Null when it does not. */
   agrees: boolean | null;
+  /** How easily this line turns over: distance to its crossing, and the board against it. */
+  upset: { level: UpsetLevel; flipDistance: number | null; basis: string };
 };
 
 /**
  * The plan of one card: what the date list prints, and what is kept when a card is
  * stored, so a row can be shown again without the whole tree.
  */
+/**
+ * Bumped whenever a settled card gains a field. Saved cards carry it, so a card
+ * written by an older build is re-read rather than served half-filled.
+ */
+export const DECISION_CARD_VERSION = 2;
+
 export type DecisionCardSummary = {
+  version: number;
   scoreline: string;
   result: string;
   resultTier: DecisionTier;
@@ -254,6 +277,12 @@ export type DecisionCardSummary = {
   resultShare: number | null;
   bttsShare: number | null;
   goalsShare: number | null;
+  /** Lines on this card that are one bad afternoon from turning over. */
+  upsetHigh: number;
+  /** The three calls the date row prints, and how exposed each one is. */
+  resultUpset: UpsetLevel | null;
+  bttsUpset: UpsetLevel | null;
+  goalsUpset: UpsetLevel | null;
 };
 
 /** Reads a settled card down to its summary. Pure, so the row and the store agree. */
@@ -262,6 +291,7 @@ export function summarizeDecisionTree(tree: {
   worth: { home: number; away: number };
   markets: DecisionMarket[];
 }): DecisionCardSummary {
+  const upsetOfCall = (market: DecisionMarket | undefined) => market?.upset.level ?? null;
   const find = (id: string) => tree.markets.find((market) => market.id === id);
   const result = find("result");
   const btts = find("btts");
@@ -269,6 +299,7 @@ export function summarizeDecisionTree(tree: {
   const compared = tree.markets.filter((market) => market.boardShare !== null);
   const weightSum = compared.reduce((sum, market) => sum + (market.boardShare ?? 0), 0);
   return {
+    version: DECISION_CARD_VERSION,
     scoreline: tree.scoreline,
     result: result?.call ?? "Not called",
     resultTier: result?.tier ?? "knife-edge",
@@ -283,6 +314,10 @@ export function summarizeDecisionTree(tree: {
     resultShare: result?.boardShare ?? null,
     bttsShare: btts?.boardShare ?? null,
     goalsShare: goals?.boardShare ?? null,
+    upsetHigh: tree.markets.filter((market) => market.upset.level === "high").length,
+    resultUpset: upsetOfCall(result),
+    bttsUpset: upsetOfCall(btts),
+    goalsUpset: upsetOfCall(goals),
   };
 }
 
@@ -579,6 +614,137 @@ export function boardShareOf(
   }
 }
 
+export type UpsetLevel = "low" | "live" | "high";
+
+/**
+ * How easily a line turns over.
+ *
+ * A call is not equally safe for being firm: an underside sitting four goals clear
+ * of its crossing survives a bad afternoon, while one sitting a hundredth of a goal
+ * under it does not. This is the missing question the card answered only by saying
+ * a tier — how far the reading is from the point where it flips, and how much of the
+ * board is already on the other side of it.
+ *
+ * Both signals are read and the worse one wins: a line close to its crossing is an
+ * upset risk even where the board is quiet, and a line the board mostly disagrees
+ * with is an upset risk even where the reading looks comfortable.
+ */
+export function upsetReading(
+  id: string,
+  facts: BoardFacts,
+  calls: BoardCalls,
+  boardShare: number | null,
+): { level: UpsetLevel; flipDistance: number | null; basis: string } {
+  const { homeWorth, awayWorth } = facts;
+  const total = round2(homeWorth + awayWorth);
+  const gap = Math.abs(homeWorth - awayWorth);
+  const distance = (value: number, crossing: number) => round2(Math.abs(value - crossing));
+  const against = boardShare === null ? null : 1 - boardShare;
+
+  let flip: number | null = null;
+  let basis: string;
+
+  switch (id) {
+    case "result":
+    case "double-chance":
+    case "draw-no-bet": {
+      flip = distance(gap, DRAW_GAP);
+      basis = `The sides are ${gap.toFixed(2)} goals apart, and ${DRAW_GAP.toFixed(2)} is where a level read takes the win away.`;
+      break;
+    }
+    case "handicap": {
+      const favouriteWorth = Math.max(homeWorth, awayWorth);
+      flip = Math.min(distance(gap, HANDICAP_GAP), distance(favouriteWorth, TWO_GOALS));
+      basis = `Covering −1 needs ${HANDICAP_GAP.toFixed(2)} of separation and a favourite worth ${TWO_GOALS.toFixed(
+        2,
+      )}; it is ${flip.toFixed(2)} from losing one of them.`;
+      break;
+    }
+    case "win-to-nil": {
+      flip = Math.min(distance(homeWorth, ONE_GOAL), distance(awayWorth, ONE_GOAL));
+      basis = `Winning to nil needs the opponent held under ${ONE_GOAL.toFixed(3)}; the nearer side is ${flip.toFixed(2)} from it.`;
+      break;
+    }
+    case "over-1.5": {
+      flip = distance(total, TWO_GOALS);
+      basis = `The total is ${total.toFixed(2)}, ${flip.toFixed(2)} from the ${TWO_GOALS.toFixed(3)} line it is called on.`;
+      break;
+    }
+    case "over-2.5": {
+      flip = distance(total, THREE_GOALS);
+      basis = `The total is ${total.toFixed(2)}, ${flip.toFixed(2)} from the ${THREE_GOALS.toFixed(3)} line it is called on.`;
+      break;
+    }
+    case "over-3.5": {
+      flip = distance(total, FOUR_GOALS);
+      basis = `The total is ${total.toFixed(2)}, ${flip.toFixed(2)} from the ${FOUR_GOALS.toFixed(3)} line it is called on.`;
+      break;
+    }
+    case "btts": {
+      flip = Math.min(distance(homeWorth, ONE_GOAL), distance(awayWorth, ONE_GOAL));
+      basis = `Both scoring turns on the ${ONE_GOAL.toFixed(
+        3,
+      )} crossing; the side nearest to it is ${flip.toFixed(2)} away.`;
+      break;
+    }
+    case "clean-home": {
+      flip = distance(awayWorth, ONE_GOAL);
+      basis = `The sheet survives while the opponent's worth stays under ${ONE_GOAL.toFixed(
+        3,
+      )}; it is ${distance(awayWorth, ONE_GOAL).toFixed(2)} from that line.`;
+      break;
+    }
+    case "clean-away": {
+      flip = distance(homeWorth, ONE_GOAL);
+      basis = `The sheet survives while the opponent's worth stays under ${ONE_GOAL.toFixed(
+        3,
+      )}; it is ${distance(homeWorth, ONE_GOAL).toFixed(2)} from that line.`;
+      break;
+    }
+    case "team-total-home": {
+      flip = distance(homeWorth, TWO_GOALS);
+      basis = `Two goals is the even read at ${TWO_GOALS.toFixed(3)}; the home worth is ${flip.toFixed(2)} from it.`;
+      break;
+    }
+    case "team-total-away": {
+      flip = distance(awayWorth, TWO_GOALS);
+      basis = `Two goals is the even read at ${TWO_GOALS.toFixed(3)}; the away worth is ${flip.toFixed(2)} from it.`;
+      break;
+    }
+    default:
+      flip = null;
+      basis = "An exact score has no single flip point — the next scoreline along is a different call, not a reversal of this one.";
+      break;
+  }
+
+  let level: UpsetLevel =
+    flip === null
+      ? "live"
+      : flip <= UPSET_HIGH_GOALS
+        ? "high"
+        : flip <= UPSET_LIVE_GOALS
+          ? "live"
+          : "low";
+
+  // The board is the second opinion on the same question, so it can raise an upset
+  // the reading alone would call safe. It never lowers one.
+  if (against !== null) {
+    if (against >= 0.6) level = "high";
+    else if (against >= 0.55 && level === "low") level = "live";
+    basis += ` The board has ${Math.round(against * 100)}% of this line on the other side.`;
+  } else {
+    basis += " No price is up on this line, so the upset is read from the board's goal means alone.";
+  }
+
+  // A line the card called but the board mostly opposes is the plainest upset there
+  // is, so it is named even when the reading looks comfortable.
+  if (against !== null && against >= 0.55 && flip !== null) {
+    basis += ` ${level === "high" ? "That is the upset to watch here." : "Worth watching."}`;
+  }
+
+  return { level, flipDistance: flip, basis };
+}
+
 /** Whether the board is on the same side of the line as the call. */
 export function marketAgreement(
   profile: SimFormProfile,
@@ -820,6 +986,7 @@ export function buildDecisionTree(
       // payload small over a whole date.
       boardShare: share === null ? null : Math.round(share * 1000) / 1000,
       agrees: share === null ? null : share > 0.5,
+      upset: upsetReading(id, facts, calls, share),
     };
   };
 
