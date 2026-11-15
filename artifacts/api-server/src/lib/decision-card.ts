@@ -3,7 +3,8 @@ import { DECISION_CARD_VERSION, buildDecisionTree, summarizeDecisionTree } from 
 import { readStoredCard, writeStoredCard } from './decision-store';
 import { recordCardLines } from './decision-ledger';
 import { applyPlayerForm } from './player-form-apply';
-import { enqueueTeamDna, goalShape } from './team-dna';
+import { dnaMatchesWithOpponents, enqueueTeamDna, goalShape } from './team-dna';
+import { buildScenarios } from './scenario-math';
 import { prepareTeamWindows } from './team-results';
 import { getSimFormProfile } from './sim-form-profile';
 
@@ -124,7 +125,33 @@ export async function settleDecisionCard(fixtureId: number, matchDate: string): 
           },
         }
       : null;
-  const tree = buildDecisionTree(profile, verdict, dna);
+  // The two engines: what happens if the match enters a state the call does not
+  // assume, and whether the call survives it. Both read the same stored matches as
+  // the window, but as behaviour in states rather than as season averages.
+  const homeName = profile.teams[0]?.name ?? '';
+  const awayName = profile.teams[1]?.name ?? '';
+  const homeShort = profile.teams[0]?.short ?? '';
+  const awayShort = profile.teams[1]?.short ?? '';
+  let scenarios = null;
+  try {
+    scenarios = buildScenarios({
+      home: { team: homeName, short: homeShort, matches: dnaMatchesWithOpponents(homeName, asOf) },
+      away: { team: awayName, short: awayShort, matches: dnaMatchesWithOpponents(awayName, asOf) },
+      call: {
+        winner:
+          verdict.verdict.home === verdict.verdict.away
+            ? null
+            : verdict.verdict.home > verdict.verdict.away
+              ? 'home'
+              : 'away',
+        line: verdict.scoreline,
+      },
+    });
+  } catch {
+    // A card without the scenario block is still a card; never fail the settle on it.
+    scenarios = null;
+  }
+  const tree = buildDecisionTree(profile, verdict, dna, scenarios);
   const elapsedMs = Date.now() - startedAt;
   writeDecisionMemo(fixtureId, tree);
   writeStoredCard({

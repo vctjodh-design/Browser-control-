@@ -21,6 +21,7 @@
 // check them.
 
 import type { InevitabilityVerdict } from "./inevitability-engine";
+import type { ScenarioRead } from "./scenario-math";
 import type { SimFormProfile } from "./sim-form-profile";
 
 export type Side = "home" | "away";
@@ -255,6 +256,8 @@ export type DecisionMarket = {
    * be put honestly (an exact score, or a window nobody has read).
    */
   challenge: DnaChallenge | null;
+  /** How much this line matters to the card, used to weight the even-if count. */
+  importance?: number;
 };
 
 export type DnaChallenge = {
@@ -292,7 +295,7 @@ export type DnaReading = {
  * Bumped whenever a settled card gains a field. Saved cards carry it, so a card
  * written by an older build is re-read rather than served half-filled.
  */
-export const DECISION_CARD_VERSION = 6;
+export const DECISION_CARD_VERSION = 9;
 
 export type DecisionCardSummary = {
   version: number;
@@ -323,6 +326,9 @@ export type DecisionCardSummary = {
   dnaMatches: number;
   /** Whether the last fifty moved the settled worth at all. */
   dnaVote: boolean;
+  /** The same hold count weighted by how much each line matters. */
+  holdWeight: number;
+  holdWeightOf: number;
 };
 
 /** Reads a settled card down to its summary. Pure, so the row and the store agree. */
@@ -363,6 +369,8 @@ export function summarizeDecisionTree(tree: {
     challenged: tree.challenge?.asked ?? 0,
     dnaMatches: tree.challenge?.matches ?? 0,
     dnaVote: tree.challenge?.vote ?? false,
+    holdWeight: tree.challenge?.weightHeld ?? 0,
+    holdWeightOf: tree.challenge?.weightAsked ?? 0,
   };
 }
 
@@ -400,7 +408,12 @@ export type DecisionTree = {
     vote: boolean;
     /** True when neither window is deep enough to answer the question honestly. */
     thin: boolean;
+    /** Importance-weighted version of the same count, so the winner is not outvoted. */
+    weightHeld?: number;
+    weightAsked?: number;
   } | null;
+  /** The what-if scenarios, the resistance reading and where the structure breaks. */
+  scenarios: ScenarioRead | null;
   /** The two windows behind the challenge, and whether they were allowed a vote. */
   dna: {
     home: DnaSide;
@@ -973,18 +986,49 @@ export function challengeOf(
 }
 
 /**
+ * How much a line matters to the call.
+ *
+ * Counting holds as "6 of 13" treats the winner and a clean-sheet side market as
+ * equally informative, which they are not: a card can keep six tangential lines and
+ * be wrong about the match. The result family carries the call; the lines that
+ * follow from it carry most of the rest; the derivative lines are worth least.
+ */
+export function lineImportance(id: string): number {
+  switch (id) {
+    case 'result':
+      return 3;
+    case 'over-2.5':
+    case 'btts':
+    case 'double-chance':
+    case 'draw-no-bet':
+    case 'handicap':
+      return 2;
+    case 'over-1.5':
+    case 'over-3.5':
+    case 'win-to-nil':
+    case 'team-total-home':
+    case 'team-total-away':
+      return 1;
+    default:
+      return 0.5;
+  }
+}
+
+/**
  * The card for one fixture.
  *
  * `profile` supplies the combined readings (record, table, availability, market
  * reference) and `verdict` supplies the board: the two worths, the scoreline and
  * the separation the other tabs already show. `dna` is the two sides' own last
  * matches, and it is the only input allowed to move the settled worth — once both
- * windows are deep enough to have earned it.
+ * windows are deep enough to have earned it. `scenarios` are the what-if and even-if
+ * reads, built from the same windows states-first rather than as averages.
  */
 export function buildDecisionTree(
   profile: SimFormProfile,
   verdict: InevitabilityVerdict,
   dna: DnaReading | null = null,
+  scenarios: ScenarioRead | null = null,
 ): DecisionTree {
   const [home, away] = profile.teams;
   const boardWorth = {
@@ -1379,8 +1423,15 @@ export function buildDecisionTree(
     ),
   ];
 
+  // Every line carries its weight, so "how much of the card survived" cannot be
+  // carried by a handful of derivative lines while the result itself turns over.
+  for (const market of markets) market.importance = lineImportance(market.id);
   const challenged = markets.filter((market) => market.challenge !== null);
   const held = challenged.filter((market) => market.challenge?.holds).length;
+  const weightHeld = challenged
+    .filter((market) => market.challenge?.holds)
+    .reduce((sum, market) => sum + (market.importance ?? 1), 0);
+  const weightAsked = challenged.reduce((sum, market) => sum + (market.importance ?? 1), 0);
   const stressHome = dna?.home.p80 === null || dna?.home.p80 === undefined ? null : Math.max(0, Math.round(dna.home.p80));
   const stressAway = dna?.away.p80 === null || dna?.away.p80 === undefined ? null : Math.max(0, Math.round(dna.away.p80));
   const challenge =
@@ -1394,6 +1445,8 @@ export function buildDecisionTree(
           matches: Math.min(dna.home.matches, dna.away.matches),
           vote: vote.active,
           thin: Math.min(dna.home.matches, dna.away.matches) < CHALLENGE_MIN_MATCHES,
+          weightHeld: round2(weightHeld),
+          weightAsked: round2(weightAsked),
         }
       : null;
 
@@ -1408,7 +1461,11 @@ export function buildDecisionTree(
       reads: challenge.note,
       answer: challenge.thin
         ? `Not answered yet: only ${challenge.matches} matches are read for both sides. The question is kept on the card until the windows are deep enough to put it honestly.`
-        : `${challenge.holds} of ${challenge.asked} lines survive ${challenge.scenario}. The rest turn over if both sides score at their 80th percentile across the last ${challenge.matches} matches.`,
+        : `${challenge.holds} of ${challenge.asked} lines survive ${challenge.scenario}${
+            challenge.weightAsked
+              ? ` — and by the weight of what matters, ${challenge.weightHeld} of ${challenge.weightAsked}`
+              : ''
+          }. The rest turn over if both sides score at their 80th percentile across the last ${challenge.matches} matches.`,
       settles: [],
     });
   }
@@ -1459,6 +1516,7 @@ export function buildDecisionTree(
     trace,
     referenceSource: profile.expectations?.source ?? null,
     challenge,
+    scenarios,
     dna: dna
       ? { home: dna.home, away: dna.away, note: vote.note, vote: vote.active, boardWorth }
       : null,

@@ -55,6 +55,30 @@ export type DecisionChallenge = {
   reading: string;
 };
 
+/** One state put to the card: what happens if the match enters it. */
+export type DecisionScenario = {
+  id: 'score-first' | 'two-down' | 'deep-block';
+  question: string;
+  evidence: string[];
+  answer: string;
+  depth: 'read' | 'thin' | 'none';
+};
+
+export type DecisionResistanceLine = {
+  label: string;
+  value: number;
+  unit: 'perGame' | 'share' | 'multiple';
+  reading: string;
+};
+
+/** The two engines behind a settled card, plus where the structure breaks. */
+export type DecisionScenarios = {
+  whatIf: DecisionScenario[];
+  evenIf: { statement: string; resistance: DecisionResistanceLine[] } | null;
+  structure: { side: string; mechanism: string; detail: string } | null;
+  depth: { home: number; away: number };
+};
+
 export type DecisionWindow = {
   team: string;
   matches: number;
@@ -85,6 +109,8 @@ export type DecisionTree = {
   withheld: DecisionWithheld[];
   trace: string[];
   referenceSource: string | null;
+  /** What-if and even-if, read from the sides' own matches as behaviour in states. */
+  scenarios?: DecisionScenarios | null;
   /** The question asked before the card is final, and how many lines survive it. */
   challenge: {
     question: string;
@@ -95,6 +121,9 @@ export type DecisionTree = {
     matches: number;
     vote: boolean;
     thin: boolean;
+    /** The same holds, weighted by how much each line matters to the call. */
+    weightHeld?: number;
+    weightAsked?: number;
   } | null;
   dna: {
     home: DecisionWindow;

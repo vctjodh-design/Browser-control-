@@ -277,7 +277,11 @@ export function DecisionTreePanel({ fixtureId }: { fixtureId: number }) {
               >
                 {tree.challenge.thin
                   ? `even if · ${tree.challenge.matches} matches read`
-                  : `even if ${tree.challenge.scenario} · ${tree.challenge.holds}/${tree.challenge.asked} hold`}
+                  : `even if ${tree.challenge.scenario} · ${tree.challenge.holds}/${tree.challenge.asked} hold${
+                      tree.challenge.weightAsked
+                        ? ` · ${Math.round(((tree.challenge.weightHeld ?? 0) / tree.challenge.weightAsked) * 100)}% by weight`
+                        : ''
+                    }`}
               </span>
             )}
           </div>
@@ -292,13 +296,74 @@ export function DecisionTreePanel({ fixtureId }: { fixtureId: number }) {
             <span className="text-[#7d827d]">
               {tree.challenge.thin
                 ? `Not answered yet: only ${tree.challenge.matches} matches are read for both sides, so the window informs the card without being put to the test. `
-                : `${tree.challenge.holds} of ${tree.challenge.asked} lines still hold. `}
+                : `${tree.challenge.holds} of ${tree.challenge.asked} lines still hold${
+                    tree.challenge.weightAsked
+                      ? `, ${Math.round(((tree.challenge.weightHeld ?? 0) / tree.challenge.weightAsked) * 100)}% once each line is weighted by how much it matters`
+                      : ''
+                  }. `}
               {tree.challenge.note}
             </span>
           </p>
         )}
         <p className="border-t border-[#dde3d6] px-4 py-2.5 text-[9px] leading-[1.7] text-[#6f7d71]">{tree.note}</p>
       </header>
+
+      {tree.scenarios && tree.scenarios.whatIf.length > 0 && (
+        <section className="space-y-2.5" data-testid="scenarios-whatif">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-[11px] font-extrabold uppercase tracking-[.12em] text-[#4a5c5e]">What if</h3>
+            <p className="text-[9px] text-[#9a9d94]">
+              the match put into a state the call does not assume · {tree.scenarios.depth.home}/{tree.scenarios.depth.away} matches read
+            </p>
+          </div>
+          {tree.scenarios.whatIf.map((scenario) => (
+            <div
+              key={scenario.id}
+              className="rounded-xl border border-[#e0ded5] bg-white/70 px-3.5 py-3"
+              data-testid={`scenario-${scenario.id}`}
+            >
+              <p className="text-[11px] font-extrabold leading-5 text-[#2b3e49]">{scenario.question}</p>
+              <ul className="mt-1.5 space-y-1">
+                {scenario.evidence.map((line) => (
+                  <li key={line} className="flex gap-1.5 text-[9.5px] leading-[1.65] text-[#5c6f63]">
+                    <span className="mt-[6px] h-1 w-1 shrink-0 rounded-full bg-[#c3c8bb]" />
+                    <span>{line}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 border-t border-[#ecebe3] pt-1.5 text-[10px] leading-[1.65] text-[#40544a]">{scenario.answer}</p>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {tree.scenarios?.evenIf && (
+        <section className="space-y-2 rounded-xl border border-[#e5dbcf] bg-[#fbf7ef] px-3.5 py-3" data-testid="scenarios-evenif">
+          <h3 className="text-[11px] font-extrabold uppercase tracking-[.12em] text-[#7b6247]">Even if</h3>
+          <p className="text-[10.5px] leading-[1.7] text-[#4f4436]">{tree.scenarios.evenIf.statement}</p>
+          {tree.scenarios.evenIf.resistance.length > 0 && (
+            <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1.5">
+              {tree.scenarios.evenIf.resistance.map((line) => (
+                <div key={line.label} className="min-w-0">
+                  <dt className="mono text-[8px] uppercase tracking-[.1em] text-[#a08b72]">{line.label}</dt>
+                  <dd className="text-[12px] font-extrabold text-[#40372c]" title={line.reading}>
+                    {line.unit === 'share' ? `${Math.round(line.value * 100)}%` : line.unit === 'multiple' ? `${line.value.toFixed(2)}×` : line.value.toFixed(2)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          {tree.scenarios.structure && (
+            <p className="border-t border-[#e8dcc9] pt-1.5 text-[9.5px] leading-[1.65] text-[#6b5a44]" data-testid="scenarios-structure">
+              <span className="mono mr-1.5 text-[8px] uppercase tracking-[.12em]">Where it breaks</span>
+              {tree.scenarios.structure.side}: {tree.scenarios.structure.mechanism} — {tree.scenarios.structure.detail}
+            </p>
+          )}
+          <p className="text-[8.5px] leading-[1.6] text-[#9b8b76]">
+            Read from the sides&apos; own matches: frequencies in that state, not a forecast. A block&apos;s shape needs tracking data the feed does not carry.
+          </p>
+        </section>
+      )}
 
       <section>
         <div className="mb-2.5 flex items-center gap-2">

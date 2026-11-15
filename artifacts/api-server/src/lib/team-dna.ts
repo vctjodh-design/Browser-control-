@@ -491,6 +491,50 @@ export function dnaCoverage(
   }
 }
 
+/**
+ * The rows behind a reading, with each match's opponent joined in.
+ *
+ * The scenario engine has to tell a defence that leaks from a defence that simply
+ * met good attacks, which needs the opponent's own numbers for the same fixture —
+ * both sides of every match are stored, so this is a join and not a second read.
+ */
+export function dnaMatchesWithOpponents(
+  team: string,
+  asOf: string,
+  depth = DEFAULT_DEPTH,
+): Array<DnaMatch & { opponentXgFor: number | null; opponentXgAgainst: number | null; opponentBigChances: number | null }> {
+  const rows = readDnaMatches(team, asOf, depth);
+  const handle = archiveDatabase();
+  if (!handle || !rows.length) {
+    return rows.map((row) => ({ ...row, opponentXgFor: null, opponentXgAgainst: null, opponentBigChances: null }));
+  }
+  schema();
+  try {
+    const statement = handle.prepare(
+      `SELECT xg_for, xg_against, big_chances_for FROM team_match_detail
+       WHERE fixture_id = ? AND team_key != ? LIMIT 1`,
+    );
+    const key = normalizeTeamName(team);
+    return rows.map((row) => {
+      const opponent = statement.get(row.fixtureId, key) as
+        | { xg_for: number | null; xg_against: number | null; big_chances_for: number | null }
+        | undefined;
+      return {
+        ...row,
+        opponentXgFor: opponent?.xg_for === null || opponent?.xg_for === undefined ? null : Number(opponent.xg_for),
+        opponentXgAgainst:
+          opponent?.xg_against === null || opponent?.xg_against === undefined ? null : Number(opponent.xg_against),
+        opponentBigChances:
+          opponent?.big_chances_for === null || opponent?.big_chances_for === undefined
+            ? null
+            : Number(opponent.big_chances_for),
+      };
+    });
+  } catch {
+    return rows.map((row) => ({ ...row, opponentXgFor: null, opponentXgAgainst: null, opponentBigChances: null }));
+  }
+}
+
 function readDnaMatches(team: string, asOf: string, depth: number): DnaMatch[] {
   const handle = archiveDatabase();
   if (!handle) return [];
