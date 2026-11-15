@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'wouter';
 import FairAiForensicsPanel from '@/components/fair-ai-forensics-panel';
@@ -153,6 +153,13 @@ export default function ModelTrainingPage() {
   const [sequenceLength, setSequenceLength] = useState(5);
   const [hiddenUnits, setHiddenUnits] = useState(32);
   const [activeRunId, setActiveRunId] = useState('');
+  // One button, every architecture. The runs still go one at a time — the server
+  // trains a single model at once and two at once would compete for the same CPU —
+  // but the reader no longer has to sit here and press start seven times.
+  const [queue, setQueue] = useState<FootballModelType[]>([]);
+  const [finished, setFinished] = useState<FootballModelType[]>([]);
+  const [queueErrors, setQueueErrors] = useState<Array<{ model: FootballModelType; error: string }>>([]);
+  const queueRunId = useRef('');
   const runId = activeRunId || dashboard?.runs[0]?.id || '';
   const runQuery = useGetFootballModelTrainingRun(runId, {
     query: {
@@ -173,6 +180,73 @@ export default function ModelTrainingPage() {
   const progress = run && run.epochs > 0 ? Math.min(100, (run.completedEpochs / run.epochs) * 100) : 0;
   const verifiedOdds = dashboard?.verifiedOddsFixtureCount ?? 0;
   const missingOdds = dashboard ? Math.max(0, dashboard.matchCount - verifiedOdds) : 0;
+
+  const settingsFor = (type: FootballModelType) => ({
+    modelType: type,
+    epochs,
+    sequenceLength,
+    hiddenUnits: type === 'catboost' || type === 'xgboost' ? 16 : hiddenUnits,
+  });
+
+  const startAll = () => {
+    if (!canTrain) return;
+    setFinished([]);
+    setQueueErrors([]);
+    queueRunId.current = '';
+    setQueue(MODELS.map((model) => model.id));
+  };
+
+  const stopAll = () => {
+    setQueue([]);
+    queueRunId.current = '';
+  };
+
+  // Start the next model when nothing is running. The queue only advances on a
+  // settled run, so a slow epoch can never stack two runs behind one another.
+  useEffect(() => {
+    if (!queue.length || !canTrain) return;
+    if (startTraining.isPending) return;
+    // A run that is genuinely still moving blocks the queue. The dashboard row for the
+    // run we just watched settle is stale more often than not, and treating it as live
+    // stopped the queue dead after the first architecture.
+    if (activeTraining && activeTraining.id !== run?.id) return;
+    if (run && (run.status === 'queued' || run.status === 'training')) return;
+    const next = queue[0];
+    startTraining.mutate(
+      { data: settingsFor(next) },
+      {
+        onSuccess: (created) => {
+          queueRunId.current = created.id;
+          setActiveRunId(created.id);
+          client.setQueryData(getGetFootballModelTrainingRunQueryKey(created.id), created);
+          void client.invalidateQueries({ queryKey: getGetFootballModelTrainingDashboardQueryKey() });
+        },
+        onError: (error) => {
+          setQueueErrors((previous) => [...previous, { model: next, error: errorText(error) }]);
+          setQueue((previous) => previous.slice(1));
+        },
+      },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue, activeTraining, run?.status, startTraining.isPending, canTrain]);
+
+  // A finished run hands the queue on, whether it succeeded or not.
+  useEffect(() => {
+    if (!queue.length || !run || run.id !== queueRunId.current) return;
+    if (run.status !== 'completed' && run.status !== 'failed') return;
+    const done = queue[0];
+    // A failed run is not a trained model: it goes in the error list, never in the
+    // list of what trained.
+    if (run.status === 'completed') {
+      setFinished((previous) => [...previous, done]);
+    } else {
+      setQueueErrors((previous) => [...previous, { model: done, error: run.error ?? 'The run failed.' }]);
+    }
+    queueRunId.current = '';
+    setQueue((previous) => previous.slice(1));
+    void client.invalidateQueries({ queryKey: getGetFootballModelTrainingDashboardQueryKey() });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run?.id, run?.status, queue]);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -345,6 +419,51 @@ export default function ModelTrainingPage() {
                   {startTraining.isPending ? <><RefreshCw size={14} className="animate-spin" /> Queueing training</> : activeTraining ? <><Activity size={14} className="animate-pulse" /> A run is in progress</> : <><Sparkles size={14} /> Start training run</>}
               </button>
               {startTraining.isError && <p className="mt-3 flex items-start gap-2 rounded-lg border border-[#e3c3b6] bg-[#fff6f0] px-3 py-2.5 text-[9px] leading-4 text-[#8c6b5e]" role="alert" data-testid="status-training-start-error"><CircleAlert size={13} className="mt-0.5 shrink-0" />{errorText(startTraining.error)}</p>}
+
+              <div className="mt-3 rounded-lg border border-[#d9d7cd] bg-[#f7f6f0] px-3 py-2.5" data-testid="section-train-all">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[9px] font-extrabold text-[#4f5f5b]">All {MODELS.length} architectures, one press</p>
+                  <span className="mono text-[8px] text-[#92948b]" data-testid="status-train-all-count">
+                    {queue.length || finished.length || queueErrors.length
+                      ? `${finished.length + queueErrors.length} of ${MODELS.length} finished${queue.length ? ` · ${MODELS.find((m) => m.id === queue[0])?.name ?? queue[0]} next` : ''}`
+                      : 'nothing queued'}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={startAll}
+                    disabled={!canTrain || dashboardQuery.isLoading || dashboardQuery.isError || queue.length > 0}
+                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[#a9c6b3] bg-[#e8f0e6] px-3 text-[9.5px] font-extrabold text-[#41654f] transition hover:bg-[#dceadd] disabled:cursor-not-allowed disabled:opacity-45"
+                    data-testid="button-start-all-training"
+                  >
+                    <Layers3 size={13} /> Train all {MODELS.length} models
+                  </button>
+                  {(queue.length > 0 || finished.length > 0) && (
+                    <button
+                      type="button"
+                      onClick={stopAll}
+                      className="inline-flex h-9 items-center justify-center rounded-lg border border-[#dcd9d0] bg-white px-3 text-[9.5px] font-extrabold text-[#6b7570] transition hover:bg-[#f2f1ea]"
+                      data-testid="button-stop-all-training"
+                    >
+                      {queue.length ? 'Stop after this run' : 'Clear'}
+                    </button>
+                  )}
+                </div>
+                {finished.length > 0 && (
+                  <p className="mt-1.5 text-[8.5px] leading-4 text-[#6d7a72]" data-testid="status-train-all-done">
+                    Trained: {finished.map((id) => MODELS.find((model) => model.id === id)?.name ?? id).join(', ')}
+                  </p>
+                )}
+                {queueErrors.map((entry) => (
+                  <p key={`${entry.model}-${entry.error}`} className="mt-1 text-[8.5px] leading-4 text-[#9a5c46]" data-testid={`status-train-all-error-${entry.model}`}>
+                    {MODELS.find((model) => model.id === entry.model)?.name ?? entry.model} did not train: {entry.error}
+                  </p>
+                ))}
+                <p className="mt-1.5 text-[8px] leading-4 text-[#92948b]">
+                  One at a time, automatically: each architecture trains on the same settings above and writes its own run, so the queue cannot put two trainings on one machine at once.
+                </p>
+              </div>
             </form>
           </section>
 
