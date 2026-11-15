@@ -244,7 +244,8 @@ export type TeamDna = {
 
 export type DnaResponse = {
   dna: TeamDna;
-  coverage: { expected: number; stored: number };
+  /** expected: matches in the window; stored: read; empty: the feed has no detail. */
+  coverage: { expected: number; stored: number; empty?: number };
   queue: { running: boolean; current: string | null; queued: number; done: number; failed: number; matchesStored: number; teamsStored: number };
 };
 

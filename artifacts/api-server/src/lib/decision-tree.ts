@@ -292,7 +292,7 @@ export type DnaReading = {
  * Bumped whenever a settled card gains a field. Saved cards carry it, so a card
  * written by an older build is re-read rather than served half-filled.
  */
-export const DECISION_CARD_VERSION = 5;
+export const DECISION_CARD_VERSION = 6;
 
 export type DecisionCardSummary = {
   version: number;

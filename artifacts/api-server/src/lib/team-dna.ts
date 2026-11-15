@@ -102,6 +102,17 @@ function schema(): void {
         PRIMARY KEY (fixture_id, team_key)
       );
       CREATE INDEX IF NOT EXISTS team_match_detail_team ON team_match_detail (team_key, match_date);
+      -- Matches the feed does not carry detail for. Remembered so a queue pass does
+      -- not ask again, and so coverage can say "read, nothing there" instead of
+      -- looking like a read that never happened.
+      CREATE TABLE IF NOT EXISTS team_match_empty (
+        fixture_id INTEGER NOT NULL,
+        team_key TEXT NOT NULL,
+        match_date TEXT NOT NULL,
+        fetched_at INTEGER NOT NULL,
+        PRIMARY KEY (fixture_id, team_key)
+      );
+      CREATE INDEX IF NOT EXISTS team_match_empty_team ON team_match_empty (team_key, match_date);
       CREATE TABLE IF NOT EXISTS dna_queue (
         team_key TEXT PRIMARY KEY,
         team_name TEXT NOT NULL,
@@ -447,21 +458,36 @@ function storeDetails(rows: DetailRow[]): number {
 }
 
 /** How much of a team's fifty matches the detail table actually holds. */
-export function dnaCoverage(team: string, asOf: string, depth = DEFAULT_DEPTH): { expected: number; stored: number } {
+export function dnaCoverage(
+  team: string,
+  asOf: string,
+  depth = DEFAULT_DEPTH,
+): { expected: number; stored: number; empty: number } {
   const handle = archiveDatabase();
   const expected = historyForTeam(team, asOf, depth).length;
-  if (!handle) return { expected, stored: 0 };
+  if (!handle) return { expected, stored: 0, empty: 0 };
   schema();
   try {
+    const key = normalizeTeamName(team);
     const row = handle
       .prepare(
         `SELECT COUNT(*) AS stored FROM team_match_detail
          WHERE team_key = ? AND match_date < ?`,
       )
-      .get(normalizeTeamName(team), asOf) as { stored: number } | undefined;
-    return { expected, stored: Math.min(expected, Number(row?.stored ?? 0)) };
+      .get(key, asOf) as { stored: number } | undefined;
+    const emptyRow = handle
+      .prepare(
+        `SELECT COUNT(*) AS empty FROM team_match_empty
+         WHERE team_key = ? AND match_date < ?`,
+      )
+      .get(key, asOf) as { empty: number } | undefined;
+    return {
+      expected,
+      stored: Math.min(expected, Number(row?.stored ?? 0)),
+      empty: Math.min(expected, Number(emptyRow?.empty ?? 0)),
+    };
   } catch {
-    return { expected, stored: 0 };
+    return { expected, stored: 0, empty: 0 };
   }
 }
 
@@ -574,13 +600,16 @@ function enqueueTeam(team: string, asOf: string, depth: number): boolean {
   if (!handle || !team.trim()) return false;
   schema();
   try {
+    // Re-queued rather than skipped even when the team was read before: the window
+    // can have grown since (a fresh fixture list), and a pass that finds nothing
+    // missing costs one query and no feed call.
     const result = handle
       .prepare(
         `INSERT INTO dna_queue (team_key, team_name, as_of, depth, state, attempts, note, updated_at)
          VALUES (?, ?, ?, ?, 'queued', 0, NULL, ?)
          ON CONFLICT(team_key) DO UPDATE SET
            as_of = excluded.as_of, depth = MAX(dna_queue.depth, excluded.depth),
-           state = CASE WHEN dna_queue.state = 'done' THEN 'done' ELSE 'queued' END,
+           state = 'queued', attempts = 0,
            updated_at = excluded.updated_at`,
       )
       .run(normalizeTeamName(team), team, asOf, depth, Date.now()) as { changes?: number };
@@ -648,6 +677,23 @@ function markTeam(teamKey: string, state: DnaQueueState, note: string, bumpAttem
   }
 }
 
+function markEmpty(fixtureId: number, matchDate: string, teamKey: string): void {
+  const handle = archiveDatabase();
+  if (!handle) return;
+  schema();
+  try {
+    handle
+      .prepare(
+        `INSERT INTO team_match_empty (fixture_id, team_key, match_date, fetched_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(fixture_id, team_key) DO UPDATE SET fetched_at = excluded.fetched_at`,
+      )
+      .run(fixtureId, teamKey, matchDate, Date.now());
+  } catch {
+    // Bookkeeping only.
+  }
+}
+
 function missingMatches(
   team: string,
   asOf: string,
@@ -665,8 +711,11 @@ function missingMatches(
     const statement = handle.prepare(
       'SELECT 1 FROM team_match_detail WHERE fixture_id = ? AND team_key = ? LIMIT 1',
     );
+    const empty = handle.prepare(
+      'SELECT 1 FROM team_match_empty WHERE fixture_id = ? AND team_key = ? LIMIT 1',
+    );
     const key = normalizeTeamName(team);
-    return history.filter((part) => !statement.get(part.fixtureId, key));
+    return history.filter((part) => !statement.get(part.fixtureId, key) && !empty.get(part.fixtureId, key));
   } catch {
     return [];
   }
@@ -687,7 +736,11 @@ async function tick(): Promise<void> {
     for (const part of pending) {
       try {
         const snapshot = await getHistoricalMatchSnapshot(part.fixtureId);
-        read += storeDetails(detailRowsForMatch(part.fixtureId, snapshot, part.matchDate, part.competition));
+        const rows = detailRowsForMatch(part.fixtureId, snapshot, part.matchDate, part.competition);
+        read += storeDetails(rows);
+        // A match with no statistics is a dead end, not an unfinished read: marking
+        // it keeps the queue from asking again and lets the panel say so.
+        if (!rows.length) markEmpty(part.fixtureId, part.matchDate, job.team_key);
       } catch {
         // A match the feed will not give back is skipped, not fatal.
       }

@@ -37,8 +37,9 @@ function DnaColumn({ data }: { data: DnaResponse }) {
         <p className="truncate text-[12px] font-extrabold text-[#2b3e49]" data-testid="text-dna-team">
           {dna.team}
         </p>
-        <p className="mono text-[8px] uppercase tracking-[.12em] text-[#9a9c93]">
+        <p className="mono text-[8px] uppercase tracking-[.12em] text-[#9a9c93]" data-testid="text-dna-coverage">
           {coverage.stored}/{coverage.expected || dna.matches} matches read
+          {coverage.empty ? ` · ${coverage.empty} without detail` : ''}
         </p>
       </div>
       <p className="mono mt-0.5 text-[8.5px] uppercase tracking-[.1em] text-[#9a9c93]">
@@ -130,9 +131,12 @@ export function TeamDnaSection({ home, away, asOf }: { home: string; away: strin
     }
   };
 
-  const missing =
-    (data[0] ? data[0].coverage.expected - data[0].coverage.stored : 0) +
-    (data[1] ? data[1].coverage.expected - data[1].coverage.stored : 0);
+  // What is left to read across both sides, leaving out the matches the feed has no
+  // detail for: those are not waiting on the queue, and promising them would make the
+  // button look stuck when it is finished.
+  const outstanding = (side?: DnaResponse | null): number =>
+    side ? Math.max(0, side.coverage.expected - side.coverage.stored - (side.coverage.empty ?? 0)) : 0;
+  const missing = outstanding(data[0]) + outstanding(data[1]);
 
   return (
     <section className="mt-4 overflow-hidden rounded-[17px] border border-[#d6d5cc] bg-[#f9f8f3]" data-testid="section-team-dna">

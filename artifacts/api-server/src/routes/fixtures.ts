@@ -38,6 +38,7 @@ import { engineProfile, settleDecisionCard } from "../lib/decision-card";
 import { backfillStatus, enqueueBackfill, startBackfill, stopBackfill } from "../lib/backfill";
 import { historyCoverage, historyForTeam } from "../lib/match-history";
 import { dnaCoverage, dnaStatus, enqueueTeamDna, startDna, teamDna } from "../lib/team-dna";
+import { ingestTeamResults } from "../lib/team-results";
 import { summarizeTeamShape } from "../lib/team-shape";
 import {
   loadFixturePlayerForm,
@@ -726,8 +727,10 @@ router.get("/football/teams/:name/dna", (req, res): void => {
 });
 
 // Starts (or continues) reading that team's matches. Safe to call again: matches
-// already read are never fetched twice.
-router.post("/football/teams/:name/dna/start", (req, res): void => {
+// already read are never fetched twice, and the team's own fixture list is asked for
+// first so the window is fifty matches from the source rather than whatever dates
+// the app happened to sweep.
+router.post("/football/teams/:name/dna/start", async (req, res): Promise<void> => {
   const name = decodeURIComponent(String(req.params.name ?? "")).trim();
   if (name.length < 2 || name.length > 80) {
     res.status(400).json({ error: "Choose a team name." });
@@ -737,8 +740,9 @@ router.post("/football/teams/:name/dna/start", (req, res): void => {
     ? String(req.query.asOf)
     : new Date().toISOString().slice(0, 10);
   const depth = Math.min(60, Math.max(5, Number(req.query.depth) || 50));
+  const discovery = await ingestTeamResults(name, asOf, depth);
   const enqueued = enqueueTeamDna([name], asOf, depth);
-  res.json({ enqueued, ...startDna() });
+  res.json({ discovery, enqueued, ...startDna() });
 });
 
 router.get("/football/history", (_req, res): void => {

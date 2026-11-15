@@ -4,6 +4,7 @@ import { readStoredCard, writeStoredCard } from './decision-store';
 import { recordCardLines } from './decision-ledger';
 import { applyPlayerForm } from './player-form-apply';
 import { enqueueTeamDna, goalShape } from './team-dna';
+import { prepareTeamWindows } from './team-results';
 import { getSimFormProfile } from './sim-form-profile';
 
 // Settling one card, in one place.
@@ -147,7 +148,12 @@ export async function settleDecisionCard(fixtureId: number, matchDate: string): 
   });
   // Opening a card is also the moment to start the deeper read: both sides' last
   // fifty matches, queued rather than waited for, so the DNA is ready when asked for.
-  enqueueTeamDna([tree.teams[0] ?? '', tree.teams[1] ?? ''], matchDate || new Date().toISOString().slice(0, 10));
+  enqueueTeamDna([tree.teams[0] ?? '', tree.teams[1] ?? ''], asOf);
+  // And the window is filled from the source, not from whichever dates happened to
+  // be ingested: the feed's own list of each team's last hundred matches is what
+  // turns "three matches read" into fifty. Queued in the background, because a card
+  // must not wait on two fixture lists to be shown.
+  void prepareTeamWindows([tree.teams[0] ?? '', tree.teams[1] ?? ''], asOf).catch(() => {});
 
   return { tree, source: 'fresh', elapsedMs };
 }
