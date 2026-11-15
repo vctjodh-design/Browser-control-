@@ -4,7 +4,8 @@ import { readStoredCard, writeStoredCard } from './decision-store';
 import { recordCardLines } from './decision-ledger';
 import { applyPlayerForm } from './player-form-apply';
 import { dnaMatchesWithOpponents, enqueueTeamDna, goalShape } from './team-dna';
-import { buildScenarios } from './scenario-math';
+import { buildScenarios, readSide } from './scenario-math';
+import { contestScorelines, translateBoard, worthsFromContest } from './market-translation';
 import { prepareTeamWindows } from './team-results';
 import { getSimFormProfile } from './sim-form-profile';
 
@@ -151,7 +152,64 @@ export async function settleDecisionCard(fixtureId: number, matchDate: string): 
     // A card without the scenario block is still a card; never fail the settle on it.
     scenarios = null;
   }
-  const tree = buildDecisionTree(profile, verdict, dna, scenarios);
+  // The baseline comes first: the board translated into the scorelines it implies,
+  // draws included. Only then is anything allowed to argue with it.
+  const homeMatches = dnaMatchesWithOpponents(homeName, asOf);
+  const awayMatches = dnaMatchesWithOpponents(awayName, asOf);
+  const market = translateBoard(verdict.expectedGoals.home, verdict.expectedGoals.away);
+  const homeRead = readSide(homeName, homeMatches);
+  const awayRead = readSide(awayName, awayMatches);
+  const contest = contestScorelines(
+    market,
+    {
+      team: homeName,
+      short: homeShort,
+      matches: homeRead.matches,
+      led: homeRead.led,
+      leadsDropped: homeRead.leadsDropped,
+      trailed: homeRead.trailed,
+      rescued: homeRead.cameBackToWin + homeRead.cameBackToDraw,
+      xg: homeRead.xg,
+      xga: homeRead.xga,
+    },
+    {
+      team: awayName,
+      short: awayShort,
+      matches: awayRead.matches,
+      led: awayRead.led,
+      leadsDropped: awayRead.leadsDropped,
+      trailed: awayRead.trailed,
+      rescued: awayRead.cameBackToWin + awayRead.cameBackToDraw,
+      xg: awayRead.xg,
+      xga: awayRead.xga,
+    },
+    // The window's own scoreline: what the home side scores at home against what the
+    // away side concedes on the road, and the reverse — the same paired estimate the
+    // window's vote is built on.
+    dna &&
+    dna.home.scoredAtHome !== null &&
+    dna.away.concededAway !== null &&
+    dna.away.scoredAway !== null &&
+    dna.home.concededAtHome !== null
+      ? {
+          home: Math.max(0, Math.round((dna.home.scoredAtHome + dna.away.concededAway) / 2)),
+          away: Math.max(0, Math.round((dna.away.scoredAway + dna.home.concededAtHome) / 2)),
+        }
+      : null,
+  );
+  const contestWorths = worthsFromContest(contest, {
+    home: verdict.expectedGoals.home,
+    away: verdict.expectedGoals.away,
+  });
+  const tree = buildDecisionTree(
+    profile,
+    verdict,
+    dna,
+    scenarios,
+    market,
+    contest,
+    contest.moved ? contestWorths : null,
+  );
   const elapsedMs = Date.now() - startedAt;
   writeDecisionMemo(fixtureId, tree);
   writeStoredCard({

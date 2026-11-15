@@ -72,6 +72,43 @@ export type DecisionResistanceLine = {
 };
 
 /** The two engines behind a settled card, plus where the structure breaks. */
+export type DecisionScoreline = {
+  home: number;
+  away: number;
+  label: string;
+  /** What the prices imply for this exact score, 0..1. */
+  implied: number;
+  drawn: boolean;
+};
+
+export type DecisionMarketTranslation = {
+  homeGoals: number;
+  awayGoals: number;
+  total: number;
+  rows: DecisionScoreline[];
+  shares: { home: number; draw: number; away: number; over25: number; bothScore: number };
+  baseline: DecisionScoreline;
+};
+
+export type DecisionContender = {
+  scoreline: string;
+  implied: number;
+  support: number;
+  role: 'baseline' | 'challenger';
+  reasons: string[];
+  agreement: number;
+};
+
+export type DecisionContest = {
+  contenders: DecisionContender[];
+  baseline: string;
+  winner: string;
+  margin: number;
+  moved: boolean;
+  drawCandidate: string | null;
+  note: string;
+};
+
 export type DecisionScenarios = {
   whatIf: DecisionScenario[];
   evenIf: { statement: string; resistance: DecisionResistanceLine[] } | null;
@@ -109,6 +146,10 @@ export type DecisionTree = {
   withheld: DecisionWithheld[];
   trace: string[];
   referenceSource: string | null;
+  /** The board translated into scorelines, draws included. */
+  market?: DecisionMarketTranslation | null;
+  /** The scorelines fighting for the spot, and which one took it. */
+  contest?: DecisionContest | null;
   /** What-if and even-if, read from the sides' own matches as behaviour in states. */
   scenarios?: DecisionScenarios | null;
   /** The question asked before the card is final, and how many lines survive it. */

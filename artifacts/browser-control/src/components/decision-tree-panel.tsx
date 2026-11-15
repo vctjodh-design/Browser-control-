@@ -308,6 +308,83 @@ export function DecisionTreePanel({ fixtureId }: { fixtureId: number }) {
         <p className="border-t border-[#dde3d6] px-4 py-2.5 text-[9px] leading-[1.7] text-[#6f7d71]">{tree.note}</p>
       </header>
 
+      {tree.market && (
+        <section className="space-y-2" data-testid="market-translation">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-[11px] font-extrabold uppercase tracking-[.12em] text-[#4a5c5e]">The board, translated</h3>
+            <p className="text-[9px] text-[#9a9d94]">
+              what the prices imply, not a forecast · {tree.market.homeGoals.toFixed(2)}–{tree.market.awayGoals.toFixed(2)} goals
+            </p>
+          </div>
+          <div className="rounded-xl border border-[#deddd4] bg-white/70 p-2.5">
+            <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6">
+              {tree.market.rows.slice(0, 12).map((row) => {
+                const isWinner = tree.contest?.winner === row.label;
+                return (
+                  <div
+                    key={row.label}
+                    className={`rounded-lg border px-1.5 py-1 ${
+                      isWinner
+                        ? 'border-[#7f9a7f] bg-[#eaf2e6]'
+                        : row.drawn
+                          ? 'border-[#dcd3c5] bg-[#faf6ee]'
+                          : 'border-[#e6e4db] bg-[#fbfaf6]'
+                    }`}
+                    data-testid={`scoreline-${row.label}`}
+                  >
+                    <p className="mono text-[10px] font-extrabold text-[#33454f]">{row.label}</p>
+                    <p className="mono text-[8.5px] text-[#8b8f86]">{(row.implied * 100).toFixed(1)}%</p>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mono mt-2 text-[8px] uppercase tracking-[.1em] text-[#9a9d94]">
+              home {Math.round(tree.market.shares.home * 100)}% · draw {Math.round(tree.market.shares.draw * 100)}% · away{' '}
+              {Math.round(tree.market.shares.away * 100)}% · over 2.5 {Math.round(tree.market.shares.over25 * 100)}% · both score{' '}
+              {Math.round(tree.market.shares.bothScore * 100)}%
+            </p>
+            <p className="mt-1.5 text-[9px] leading-[1.6] text-[#6b7670]" data-testid="market-versus-call">
+              The card calls <span className="font-extrabold text-[#33454f]">{tree.scoreline}</span>; the prices&apos; likeliest single score is{' '}
+              <span className="font-extrabold text-[#33454f]">{tree.market.baseline.label}</span> (
+              {(tree.market.baseline.implied * 100).toFixed(1)}%). A draw carrying the most mass and a side being favoured are both true at once.
+            </p>
+          </div>
+          {tree.contest && (
+            <div className="rounded-xl border border-[#deddd4] bg-[#fbfaf6] px-3 py-2.5" data-testid="contest">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h4 className="text-[10px] font-extrabold uppercase tracking-[.12em] text-[#4a5c5e]">Contenders</h4>
+                <span className={`mono text-[8.5px] ${tree.contest.moved ? 'text-[#4d6a55]' : 'text-[#9a9d94]'}`}>
+                  {tree.contest.moved ? 'a challenger took the spot' : 'the board keeps the spot'}
+                </span>
+              </div>
+              <ol className="mt-1.5 space-y-1.5">
+                {tree.contest.contenders.map((row) => (
+                  <li key={row.scoreline} className="flex gap-2" data-testid={`contender-${row.scoreline}`}>
+                    <span
+                      className={`mono mt-[1px] w-[42px] shrink-0 rounded px-1 py-[1px] text-center text-[9px] ${
+                        row.scoreline === tree.contest?.winner
+                          ? 'bg-[#dcebd5] font-extrabold text-[#3f6248]'
+                          : 'bg-[#f0eee6] text-[#7c8179]'
+                      }`}
+                    >
+                      {row.scoreline}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="mono text-[8.5px] text-[#8b8f86]">
+                        prices {(row.implied * 100).toFixed(1)}% · support {row.support.toFixed(3)} · {row.role}
+                        {row.scoreline === tree.contest?.winner ? ' · the spot' : ''}
+                      </p>
+                      <p className="text-[9px] leading-[1.55] text-[#5c6f63]">{row.reasons[0]}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              <p className="mt-1.5 border-t border-[#ecebe3] pt-1.5 text-[9px] leading-[1.6] text-[#6b7670]">{tree.contest.note}</p>
+            </div>
+          )}
+        </section>
+      )}
+
       {tree.scenarios && tree.scenarios.whatIf.length > 0 && (
         <section className="space-y-2.5" data-testid="scenarios-whatif">
           <div className="flex flex-wrap items-baseline justify-between gap-2">

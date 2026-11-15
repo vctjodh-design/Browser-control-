@@ -21,6 +21,7 @@
 // check them.
 
 import type { InevitabilityVerdict } from "./inevitability-engine";
+import type { Contest, MarketTranslation } from "./market-translation";
 import type { ScenarioRead } from "./scenario-math";
 import type { SimFormProfile } from "./sim-form-profile";
 
@@ -295,7 +296,7 @@ export type DnaReading = {
  * Bumped whenever a settled card gains a field. Saved cards carry it, so a card
  * written by an older build is re-read rather than served half-filled.
  */
-export const DECISION_CARD_VERSION = 9;
+export const DECISION_CARD_VERSION = 11;
 
 export type DecisionCardSummary = {
   version: number;
@@ -329,6 +330,13 @@ export type DecisionCardSummary = {
   /** The same hold count weighted by how much each line matters. */
   holdWeight: number;
   holdWeightOf: number;
+  /** The scoreline the board's prices imply, before anything argues with it. */
+  marketBaseline: string;
+  /** The scoreline the evidence settled on, and whether it beat the baseline. */
+  contestWinner: string;
+  contestMoved: boolean;
+  /** The draw the evidence favoured, when one did. */
+  drawCandidate: string | null;
 };
 
 /** Reads a settled card down to its summary. Pure, so the row and the store agree. */
@@ -337,6 +345,8 @@ export function summarizeDecisionTree(tree: {
   worth: { home: number; away: number };
   markets: DecisionMarket[];
   challenge?: DecisionTree["challenge"];
+  market?: DecisionTree["market"];
+  contest?: DecisionTree["contest"];
 }): DecisionCardSummary {
   const upsetOfCall = (market: DecisionMarket | undefined) => market?.upset.level ?? null;
   const find = (id: string) => tree.markets.find((market) => market.id === id);
@@ -371,6 +381,10 @@ export function summarizeDecisionTree(tree: {
     dnaVote: tree.challenge?.vote ?? false,
     holdWeight: tree.challenge?.weightHeld ?? 0,
     holdWeightOf: tree.challenge?.weightAsked ?? 0,
+    marketBaseline: tree.market?.baseline.label ?? tree.scoreline,
+    contestWinner: tree.contest?.winner ?? tree.scoreline,
+    contestMoved: tree.contest?.moved ?? false,
+    drawCandidate: tree.contest?.drawCandidate ?? null,
   };
 }
 
@@ -414,6 +428,10 @@ export type DecisionTree = {
   } | null;
   /** The what-if scenarios, the resistance reading and where the structure breaks. */
   scenarios: ScenarioRead | null;
+  /** The board translated into scorelines, including the draws. */
+  market: MarketTranslation | null;
+  /** The scorelines fighting for the spot, and which one took it. */
+  contest: Contest | null;
   /** The two windows behind the challenge, and whether they were allowed a vote. */
   dna: {
     home: DnaSide;
@@ -1029,6 +1047,9 @@ export function buildDecisionTree(
   verdict: InevitabilityVerdict,
   dna: DnaReading | null = null,
   scenarios: ScenarioRead | null = null,
+  market: MarketTranslation | null = null,
+  contest: Contest | null = null,
+  contestWorths: { home: number; away: number } | null = null,
 ): DecisionTree {
   const [home, away] = profile.teams;
   const boardWorth = {
@@ -1036,8 +1057,11 @@ export function buildDecisionTree(
     away: round2(verdict.expectedGoals.away),
   };
   const vote = dnaVoteOf(dna, boardWorth.home, boardWorth.away);
-  const homeWorth = vote.home;
-  const awayWorth = vote.away;
+  // A challenger that beat the prices decisively rewrites the two worths here, before
+  // a single line is settled, so the card can never print one scoreline and settle the
+  // lines off another.
+  const homeWorth = contestWorths ? round2(contestWorths.home) : vote.home;
+  const awayWorth = contestWorths ? round2(contestWorths.away) : vote.away;
   const facts: BoardFacts = {
     homeWorth,
     awayWorth,
@@ -1423,6 +1447,20 @@ export function buildDecisionTree(
     ),
   ];
 
+  // The exact score is a distribution question, not a crossing: the likeliest single
+  // score the board's own means imply is the honest call for that line, and it is the
+  // one score a reader keeps expecting the card to forget — 1–1, 0–0, 2–2.
+  const exactScore = contest?.winner ?? market?.baseline.label ?? null;
+  if (exactScore) {
+    const line = markets.find((entry) => entry.id === "correct-score");
+    if (line) {
+      line.call = exactScore;
+      line.reads = contest?.moved
+        ? `The prices' likeliest score was ${market?.baseline.label ?? exactScore}, but the evidence moved the spot to ${exactScore}.`
+        : `The board's two means make ${exactScore} the likeliest exact score, which is not the same as its likeliest winner — a draw can carry the most mass in a match somebody is favoured to win.`;
+    }
+  }
+
   // Every line carries its weight, so "how much of the card survived" cannot be
   // carried by a handful of derivative lines while the result itself turns over.
   for (const market of markets) market.importance = lineImportance(market.id);
@@ -1493,6 +1531,16 @@ export function buildDecisionTree(
 
   const trace = [
     `Board: ${home.short} ${boardWorth.home.toFixed(2)} – ${away.short} ${boardWorth.away.toFixed(2)} (${separation.toFixed(2)} apart, ${verdict.confidence.tier}).`,
+    ...(market
+      ? [
+          `Board translated: ${market.baseline.label} is its likeliest score (${Math.round(
+            market.baseline.implied * 100,
+          )}%), with the draw at ${Math.round(market.shares.draw * 100)}% and both scoring at ${Math.round(
+            market.shares.bothScore * 100,
+          )}%.`,
+        ]
+      : []),
+    ...(contest ? [`Contenders: ${contest.note}`] : []),
     ...(vote.active ? [`Last fifty matches: ${vote.note}`] : []),
     ...(challenge ? [`Even if: ${challenge.question} ${held} of ${challenged.length} lines survive it.`] : []),
     `Scoreline: ${verdict.scoreline}.`,
@@ -1517,6 +1565,8 @@ export function buildDecisionTree(
     referenceSource: profile.expectations?.source ?? null,
     challenge,
     scenarios,
+    market,
+    contest,
     dna: dna
       ? { home: dna.home, away: dna.away, note: vote.note, vote: vote.active, boardWorth }
       : null,
