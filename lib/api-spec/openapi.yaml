@@ -1446,7 +1446,44 @@ components:
           minimum: 4
           maximum: 64
           default: 16
+        upsetWeighting:
+          $ref: "#/components/schemas/FootballUpsetWeighting"
       required: [modelType]
+    FootballUpsetWeighting:
+      type: object
+      description: >-
+        Extra loss weight for the outcomes each market's archive shows rarely.
+        Zero trains on the plain mix; one gives an outcome half as common as the
+        most common one 1.5x the loss weight and an outcome the window never
+        showed 2x.
+      properties:
+        result:
+          type: number
+          minimum: 0
+          maximum: 3
+          default: 0
+        bothTeamsToScore:
+          type: number
+          minimum: 0
+          maximum: 3
+          default: 0
+        overUnder25:
+          type: number
+          minimum: 0
+          maximum: 3
+          default: 0
+        overUnder35:
+          type: number
+          minimum: 0
+          maximum: 3
+          default: 0
+        correctScore:
+          type: number
+          minimum: 0
+          maximum: 3
+          default: 0
+      required: [result, bothTeamsToScore, overUnder25, overUnder35, correctScore]
+      additionalProperties: false
     FootballModelTrainingStatus:
       type: string
       enum: [queued, training, completed, failed]

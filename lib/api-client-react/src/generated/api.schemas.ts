@@ -77,6 +77,37 @@ export const FootballModelType = {
   xgboost: 'xgboost',
 } as const;
 
+/**
+ * Extra loss weight for the outcomes each market's archive shows rarely. Zero trains on the plain mix; one gives an outcome half as common as the most common one 1.5x the loss weight and an outcome the window never showed 2x.
+ */
+export interface FootballUpsetWeighting {
+  /**
+     * @minimum 0
+     * @maximum 3
+     */
+  result: number;
+  /**
+     * @minimum 0
+     * @maximum 3
+     */
+  bothTeamsToScore: number;
+  /**
+     * @minimum 0
+     * @maximum 3
+     */
+  overUnder25: number;
+  /**
+     * @minimum 0
+     * @maximum 3
+     */
+  overUnder35: number;
+  /**
+     * @minimum 0
+     * @maximum 3
+     */
+  correctScore: number;
+}
+
 export interface FootballModelTrainingInput {
   modelType: FootballModelType;
   /**
@@ -94,6 +125,7 @@ export interface FootballModelTrainingInput {
      * @maximum 64
      */
   hiddenUnits?: number;
+  upsetWeighting?: FootballUpsetWeighting;
 }
 
 export type FootballModelTrainingStatus = typeof FootballModelTrainingStatus[keyof typeof FootballModelTrainingStatus];

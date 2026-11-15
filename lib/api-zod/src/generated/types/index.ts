@@ -169,6 +169,7 @@ export * from './footballTesterMatchPredictions';
 export * from './footballTesterMatchSummary';
 export * from './footballTesterMatchSummaryAverageSource';
 export * from './footballTesterMatchSummaryCompleteness';
+export * from './footballUpsetWeighting';
 export * from './footballYesNoProbabilities';
 export * from './getFootballFairAiTeamsParams';
 export * from './getFootballFixturesParams';

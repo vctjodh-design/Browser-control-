@@ -1585,13 +1585,40 @@ export const startFootballModelTrainingBodyHiddenUnitsDefault = 16;
 export const startFootballModelTrainingBodyHiddenUnitsMin = 4;
 export const startFootballModelTrainingBodyHiddenUnitsMax = 64;
 
+export const startFootballModelTrainingBodyUpsetWeightingResultDefault = 0;
+export const startFootballModelTrainingBodyUpsetWeightingResultMin = 0;
+export const startFootballModelTrainingBodyUpsetWeightingResultMax = 3;
+
+export const startFootballModelTrainingBodyUpsetWeightingBothTeamsToScoreDefault = 0;
+export const startFootballModelTrainingBodyUpsetWeightingBothTeamsToScoreMin = 0;
+export const startFootballModelTrainingBodyUpsetWeightingBothTeamsToScoreMax = 3;
+
+export const startFootballModelTrainingBodyUpsetWeightingOverUnder25Default = 0;
+export const startFootballModelTrainingBodyUpsetWeightingOverUnder25Min = 0;
+export const startFootballModelTrainingBodyUpsetWeightingOverUnder25Max = 3;
+
+export const startFootballModelTrainingBodyUpsetWeightingOverUnder35Default = 0;
+export const startFootballModelTrainingBodyUpsetWeightingOverUnder35Min = 0;
+export const startFootballModelTrainingBodyUpsetWeightingOverUnder35Max = 3;
+
+export const startFootballModelTrainingBodyUpsetWeightingCorrectScoreDefault = 0;
+export const startFootballModelTrainingBodyUpsetWeightingCorrectScoreMin = 0;
+export const startFootballModelTrainingBodyUpsetWeightingCorrectScoreMax = 3;
+
 
 
 export const StartFootballModelTrainingBody = zod.object({
   "modelType": zod.enum(['lstm', 'gru', 'transformer', 'gnn', 'dynamic-graph', 'catboost', 'xgboost']),
   "epochs": zod.number().int().min(startFootballModelTrainingBodyEpochsMin).max(startFootballModelTrainingBodyEpochsMax).default(startFootballModelTrainingBodyEpochsDefault),
   "sequenceLength": zod.number().int().min(startFootballModelTrainingBodySequenceLengthMin).max(startFootballModelTrainingBodySequenceLengthMax).default(startFootballModelTrainingBodySequenceLengthDefault),
-  "hiddenUnits": zod.number().int().min(startFootballModelTrainingBodyHiddenUnitsMin).max(startFootballModelTrainingBodyHiddenUnitsMax).default(startFootballModelTrainingBodyHiddenUnitsDefault)
+  "hiddenUnits": zod.number().int().min(startFootballModelTrainingBodyHiddenUnitsMin).max(startFootballModelTrainingBodyHiddenUnitsMax).default(startFootballModelTrainingBodyHiddenUnitsDefault),
+  "upsetWeighting": zod.object({
+  "result": zod.number().min(startFootballModelTrainingBodyUpsetWeightingResultMin).max(startFootballModelTrainingBodyUpsetWeightingResultMax).default(startFootballModelTrainingBodyUpsetWeightingResultDefault),
+  "bothTeamsToScore": zod.number().min(startFootballModelTrainingBodyUpsetWeightingBothTeamsToScoreMin).max(startFootballModelTrainingBodyUpsetWeightingBothTeamsToScoreMax).default(startFootballModelTrainingBodyUpsetWeightingBothTeamsToScoreDefault),
+  "overUnder25": zod.number().min(startFootballModelTrainingBodyUpsetWeightingOverUnder25Min).max(startFootballModelTrainingBodyUpsetWeightingOverUnder25Max).default(startFootballModelTrainingBodyUpsetWeightingOverUnder25Default),
+  "overUnder35": zod.number().min(startFootballModelTrainingBodyUpsetWeightingOverUnder35Min).max(startFootballModelTrainingBodyUpsetWeightingOverUnder35Max).default(startFootballModelTrainingBodyUpsetWeightingOverUnder35Default),
+  "correctScore": zod.number().min(startFootballModelTrainingBodyUpsetWeightingCorrectScoreMin).max(startFootballModelTrainingBodyUpsetWeightingCorrectScoreMax).default(startFootballModelTrainingBodyUpsetWeightingCorrectScoreDefault)
+}).optional().describe('Extra loss weight for the outcomes each market\'s archive shows rarely. Zero trains on the plain mix; one gives an outcome half as common as the most common one 1.5x the loss weight and an outcome the window never showed 2x.')
 })
 
 export const StartFootballModelTrainingResponse = zod.object({

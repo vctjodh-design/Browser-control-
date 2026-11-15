@@ -139,6 +139,27 @@ function ConfusionMatrix({ matrix }: { matrix: number[][] }) {
   );
 }
 
+// The five markets every model predicts. Each one takes its own upset weight, because
+// a rarity in the correct-score grid is a different thing from a draw in 1X2.
+const UPSET_MARKETS = [
+  { id: 'result', label: '1X2' },
+  { id: 'bothTeamsToScore', label: 'BTTS' },
+  { id: 'overUnder25', label: 'O/U 2.5' },
+  { id: 'overUnder35', label: 'O/U 3.5' },
+  { id: 'correctScore', label: 'Correct score' },
+] as const;
+
+type UpsetMarket = (typeof UPSET_MARKETS)[number]['id'];
+type UpsetWeightingState = Record<UpsetMarket, number>;
+
+const DEFAULT_UPSET_WEIGHTING: UpsetWeightingState = {
+  result: 1,
+  bothTeamsToScore: 1,
+  overUnder25: 1,
+  overUnder35: 1,
+  correctScore: 1,
+};
+
 export default function ModelTrainingPage() {
   const client = useQueryClient();
   const fairAiPanelRef = useRef<HTMLDivElement>(null);
@@ -152,6 +173,7 @@ export default function ModelTrainingPage() {
   const [epochs, setEpochs] = useState(30);
   const [sequenceLength, setSequenceLength] = useState(5);
   const [hiddenUnits, setHiddenUnits] = useState(32);
+  const [upsetWeighting, setUpsetWeighting] = useState<UpsetWeightingState>(DEFAULT_UPSET_WEIGHTING);
   const [activeRunId, setActiveRunId] = useState('');
   // One button, every architecture. The runs still go one at a time — the server
   // trains a single model at once and two at once would compete for the same CPU —
@@ -186,6 +208,7 @@ export default function ModelTrainingPage() {
     epochs,
     sequenceLength,
     hiddenUnits: type === 'catboost' || type === 'xgboost' ? 16 : hiddenUnits,
+    upsetWeighting,
   });
 
   const startAll = () => {
@@ -251,7 +274,7 @@ export default function ModelTrainingPage() {
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canTrain || activeTraining || startTraining.isPending) return;
-    startTraining.mutate({ data: { modelType, epochs, sequenceLength, hiddenUnits: boostedTreeModel ? 16 : hiddenUnits } }, {
+    startTraining.mutate({ data: { modelType, epochs, sequenceLength, hiddenUnits: boostedTreeModel ? 16 : hiddenUnits, upsetWeighting } }, {
       onSuccess: (created) => {
         setActiveRunId(created.id);
         client.setQueryData(getGetFootballModelTrainingRunQueryKey(created.id), created);
@@ -413,6 +436,40 @@ export default function ModelTrainingPage() {
                 <label className="block"><span className="mb-1.5 block text-[9px] font-extrabold text-[#5f6e69]">{boostedTreeModel ? 'Boosting rounds' : 'Epochs'}</span><input type="number" min={5} max={100} step={1} value={epochs} onChange={(event) => setEpochs(Number(event.target.value))} disabled={!canTrain || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending} className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[11px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none disabled:opacity-50" aria-label={boostedTreeModel ? 'Boosting rounds, from 5 to 100' : 'Training epochs, from 5 to 100'} data-testid="input-training-epochs" /><span className="mt-1 block text-[7px] text-[#92948b]">{boostedTreeModel ? '5–100 tree rounds' : '5–100 epochs'}</span></label>
                 <label className="block"><span className="mb-1.5 block text-[9px] font-extrabold text-[#5f6e69]">{boostedTreeModel ? 'Feature history length' : 'Sequence length'}</span><input type="number" min={3} max={15} step={1} value={sequenceLength} onChange={(event) => setSequenceLength(Number(event.target.value))} disabled={!canTrain || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending} className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[11px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none disabled:opacity-50" aria-label={boostedTreeModel ? 'Feature history length, from 3 to 15' : 'Sequence length, from 3 to 15'} data-testid="input-sequence-length" /><span className="mt-1 block text-[7px] text-[#92948b]">{boostedTreeModel ? '3–15 recent matches in features' : '3–15 matches'}</span></label>
                 {!boostedTreeModel && <label className="block"><span className="mb-1.5 block text-[9px] font-extrabold text-[#5f6e69]">Hidden units</span><input type="number" min={4} max={64} step={1} value={hiddenUnits} onChange={(event) => setHiddenUnits(Number(event.target.value))} disabled={!canTrain || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending} className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[11px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none disabled:opacity-50" aria-label="Hidden units, from 4 to 64" data-testid="input-hidden-units" /><span className="mt-1 block text-[7px] text-[#92948b]">4–64</span></label>}
+              </div>
+              <div className="mt-4 rounded-lg border border-[#e1dfd7] bg-[#fbfaf6] px-3 py-3" data-testid="section-upset-weighting">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="text-[9px] font-extrabold text-[#4f5f5b]">Upset weighting, per market</p>
+                  <span className="mono text-[7px] text-[#92948b]">0 = plain mix</span>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                  {UPSET_MARKETS.map((market) => (
+                    <label key={market.id} className="block">
+                      <span className="mb-1 block text-[8px] font-bold text-[#6a7973]">{market.label}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={3}
+                        step={0.25}
+                        value={upsetWeighting[market.id]}
+                        onChange={(event) => {
+                          const next = Number(event.target.value);
+                          setUpsetWeighting((previous) => ({
+                            ...previous,
+                            [market.id]: Number.isFinite(next) ? Math.max(0, Math.min(3, next)) : 0,
+                          }));
+                        }}
+                        disabled={!canTrain || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending}
+                        className="h-9 w-full rounded-lg border border-[#d8d7ce] bg-white px-2 text-[10px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none disabled:opacity-50"
+                        aria-label={`${market.label} upset weight, from 0 to 3`}
+                        data-testid={`input-upset-${market.id}`}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <p className="mt-2 text-[7.5px] leading-[1.6] text-[#92948b]">
+                  Each market weights the outcomes this archive shows rarely, using the training window's own class frequencies. At 1, an outcome half as common as the commonest one carries 1.5× the loss weight, and one the window never showed carries 2×. Validation loss stays unweighted, so it is still comparable with a run at 0.
+                </p>
               </div>
               <div className="mt-4 flex items-start gap-2 rounded-lg border border-[#d9e0d6] bg-[#f0f4ed] px-3 py-2.5 text-[8px] leading-[1.65] text-[#6f7e70]"><ShieldCheck size={13} className="mt-0.5 shrink-0 text-[#5d806a]" /><p><strong className="text-[#4f6e5a]">No future peeking.</strong> For each target match, features are restricted to archived information dated before that match. Odds coverage is reported separately; missing odds are not treated as verified.</p></div>
                 <button type="submit" disabled={!canTrain || Boolean(activeTraining) || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending} className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#d96f51] px-4 text-[10px] font-extrabold text-white shadow-[0_5px_12px_rgba(173,79,52,.13)] transition hover:bg-[#c95f43] disabled:cursor-not-allowed disabled:opacity-45" data-testid="button-start-training">

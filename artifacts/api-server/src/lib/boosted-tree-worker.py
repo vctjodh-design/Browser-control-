@@ -74,7 +74,7 @@ def make_classifier(algorithm, class_count, rounds):
     raise ValueError("Unsupported boosted-tree algorithm.")
 
 
-def fit_head(algorithm, features, train_labels, validation_features, validation_labels, class_count, rounds):
+def fit_head(algorithm, features, train_labels, validation_features, validation_labels, class_count, rounds, class_weights=None):
     train_labels = np.asarray(train_labels, dtype=np.int64)
     validation_labels = np.asarray(validation_labels, dtype=np.int64)
     labels, counts = np.unique(train_labels, return_counts=True)
@@ -91,6 +91,12 @@ def fit_head(algorithm, features, train_labels, validation_features, validation_
 
     label_to_index = {int(label): index for index, label in enumerate(labels)}
     encoded_train = np.asarray([label_to_index[int(label)] for label in train_labels], dtype=np.int32)
+    sample_weights = None
+    if class_weights is not None:
+        weight_table = np.asarray(class_weights, dtype=np.float64)
+        if weight_table.shape != (class_count,):
+            raise ValueError("A class-weight table does not match its market's class count.")
+        sample_weights = weight_table[np.asarray(train_labels, dtype=np.int64)]
     validation_mask = np.isin(validation_labels, labels)
     encoded_validation = np.asarray(
         [label_to_index[int(label)] for label in validation_labels[validation_mask]],
@@ -106,6 +112,8 @@ def fit_head(algorithm, features, train_labels, validation_features, validation_
         fit_options = {}
         if encoded_validation.size:
             fit_options["eval_set"] = (known_validation_features, encoded_validation)
+        if sample_weights is not None:
+            fit_options["sample_weight"] = sample_weights
         model.fit(features, encoded_train, **fit_options)
         raw_train = model.predict_proba(features)
         raw_validation = model.predict_proba(validation_features)
@@ -121,7 +129,7 @@ def fit_head(algorithm, features, train_labels, validation_features, validation_
         model_artifact = {"kind": "model", "classLabels": labels.astype(int).tolist(), "modelJson": model_json}
     else:
         xgb = make_classifier(algorithm, int(labels.size), rounds)
-        train_matrix = xgb.DMatrix(features, label=encoded_train)
+        train_matrix = xgb.DMatrix(features, label=encoded_train, weight=sample_weights)
         evaluations = {}
         eval_sets = [(train_matrix, "train")]
         if encoded_validation.size:
@@ -179,6 +187,7 @@ def train(request):
     validation_features = features[training_count:]
     rounds = max(1, min(100, int(request["rounds"])))
     algorithm = request["algorithm"]
+    class_weights_by_head = request.get("classWeights") or {}
     head_artifacts = {}
     result_training_loss = []
     result_validation_loss = []
@@ -197,6 +206,7 @@ def train(request):
             labels[training_count:],
             class_count,
             rounds,
+            class_weights_by_head.get(head_name),
         )
         head_artifacts[head_name] = head_artifact
 

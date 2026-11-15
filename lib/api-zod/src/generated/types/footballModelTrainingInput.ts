@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { FootballModelType } from './footballModelType';
+import type { FootballUpsetWeighting } from './footballUpsetWeighting';
 
 export interface FootballModelTrainingInput {
   modelType: FootballModelType;
@@ -24,4 +25,5 @@ export interface FootballModelTrainingInput {
      * @maximum 64
      */
   hiddenUnits?: number;
+  upsetWeighting?: FootballUpsetWeighting;
 }

@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import * as tf from "@tensorflow/tfjs";
@@ -32,6 +34,39 @@ const MARKET_HEADS = [
 ] as const;
 
 type MarketHeadName = (typeof MARKET_HEADS)[number]["name"];
+
+/** Extra loss weight for each market's rarer outcomes. */
+export type UpsetWeighting = Record<MarketHeadName, number>;
+export const NO_UPSET_WEIGHTING: UpsetWeighting = {
+  result: 0,
+  bothTeamsToScore: 0,
+  overUnder25: 0,
+  overUnder35: 0,
+  correctScore: 0,
+};
+
+/**
+ * Per-class loss weights from how often each outcome actually happened in the training
+ * window. Zero leaves the raw mix alone. At one, an outcome half as common as the most
+ * common one carries 1.5x the loss weight, and an outcome the window never showed
+ * carries 2x. Half a match is added to every class so a rare class is not treated as
+ * impossible and every class keeps a weight.
+ */
+export function upsetClassWeights(
+  labels: number[],
+  classes: number,
+  strength: number,
+): number[] {
+  const counts = Array.from({ length: classes }, () => 0);
+  for (const label of labels) counts[label] += 1;
+  if (strength <= 0 || !labels.length) {
+    return Array.from({ length: classes }, () => 1);
+  }
+  const total = labels.length + 0.5 * classes;
+  const smoothed = counts.map((count) => (count + 0.5) / total);
+  const top = Math.max(...smoothed);
+  return smoothed.map((probability) => 1 + strength * (1 - probability / top));
+}
 
 type VerifiedOdds = {
   home: number;
@@ -792,6 +827,7 @@ type BoostedTreeTrainRequest = {
   trainingSampleCount: number;
   features: number[][];
   labels: Record<MarketHeadName, number[]>;
+  classWeights: Record<MarketHeadName, number[]>;
 };
 
 type BoostedTreePredictRequest = {
@@ -817,6 +853,24 @@ type BoostedTreeWorkerMessage =
   | { type: "result"; result: unknown }
   | { type: "error"; error: string };
 
+/**
+ * The boosted-tree worker needs xgboost or catboost, which the VM's system interpreter
+ * does not have. scripts/setup-python-models.sh builds a project-local environment;
+ * PYTHON still wins so another interpreter can be pointed at explicitly.
+ */
+function pythonCommand(workerPath: string): string {
+  if (process.env.PYTHON) return process.env.PYTHON;
+  let directory = dirname(workerPath);
+  for (let depth = 0; depth < 5; depth += 1) {
+    const candidate = join(directory, ".venv", "bin", "python");
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+  return "python3";
+}
+
 function isBoostedTreeModelType(
   modelType: FootballModelType,
 ): modelType is BoostedTreeModelType {
@@ -831,7 +885,7 @@ function runBoostedTreeWorker<Result>(
     const workerPath = fileURLToPath(
       new URL("./boosted-tree-worker.py", import.meta.url),
     );
-    const child = spawn(process.env.PYTHON ?? "python3", [workerPath], {
+    const child = spawn(pythonCommand(workerPath), [workerPath], {
       stdio: ["pipe", "pipe", "pipe"],
     });
     const output = createInterface({ input: child.stdout, crlfDelay: Infinity });
@@ -862,7 +916,12 @@ function runBoostedTreeWorker<Result>(
       } else if (message.type === "result") {
         result = message.result;
       } else if (message.type === "error") {
-        workerError = new Error(message.error);
+        const missingModule = /No module named|ModuleNotFoundError/.test(message.error);
+        workerError = new Error(
+          missingModule
+            ? `${message.error}. Run scripts/setup-python-models.sh to install the Python model packages.`
+            : message.error,
+        );
         child.kill();
       }
     });
@@ -905,6 +964,12 @@ export async function trainArchivedModel(
 
   const trainingSampleCount = Math.floor(examples.length * 0.8);
   const validationSampleCount = examples.length - trainingSampleCount;
+  const upsetWeighting: UpsetWeighting = {
+    ...NO_UPSET_WEIGHTING,
+    ...(input.upsetWeighting ?? {}),
+  };
+  const trainingLabelsFor = (name: MarketHeadName) =>
+    examples.slice(0, trainingSampleCount).map((example) => example.labels[name]);
   if (isBoostedTreeModelType(modelType)) {
     const labels: Record<MarketHeadName, number[]> = {
       result: examples.map((example) => example.labels.result),
@@ -913,6 +978,12 @@ export async function trainArchivedModel(
       overUnder35: examples.map((example) => example.labels.overUnder35),
       correctScore: examples.map((example) => example.labels.correctScore),
     };
+    const classWeights = Object.fromEntries(
+      MARKET_HEADS.map(({ name, classes }) => [
+        name,
+        upsetClassWeights(trainingLabelsFor(name), classes, upsetWeighting[name]),
+      ]),
+    ) as Record<MarketHeadName, number[]>;
     const result = await runBoostedTreeWorker<ModelTrainingResult>({
       mode: "train",
       algorithm: modelType,
@@ -920,6 +991,7 @@ export async function trainArchivedModel(
       trainingSampleCount,
       features: examples.map((example) => example.tabular),
       labels,
+      classWeights,
     }, onEpoch);
     return {
       ...result,
@@ -995,6 +1067,18 @@ export async function trainArchivedModel(
   const trainingLoss: number[] = [];
   const validationLoss: number[] = [];
   let predictionTensors: tf.Tensor[] = [];
+  // tfjs has no per-sample weights, but it does weight each class, and every market's
+  // upset weight is a class weight, so the five markets stay separately tunable.
+  const classWeight: Record<string, Record<number, number>> = {};
+  for (const { name, classes } of MARKET_HEADS) {
+    const strength = upsetWeighting[name];
+    if (strength <= 0) continue;
+    const weights = upsetClassWeights(trainingLabelsFor(name), classes, strength);
+    classWeight[name] = weights.reduce<Record<number, number>>((map, weight, index) => {
+      map[index] = weight;
+      return map;
+    }, {});
+  }
 
   try {
     model.compile({
@@ -1006,6 +1090,7 @@ export async function trainArchivedModel(
       batchSize: Math.min(32, trainingSampleCount),
       shuffle: false,
       validationData: [modelValidationInputs, validationTargets],
+      classWeight: Object.keys(classWeight).length ? classWeight : undefined,
       verbose: 0,
       callbacks: [{
         onEpochEnd: async (epoch: number, logs?: { [key: string]: number }) => {
