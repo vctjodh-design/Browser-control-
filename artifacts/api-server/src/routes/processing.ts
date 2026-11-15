@@ -132,11 +132,14 @@ async function runProcessing(
   const counts = { processed: 0, saved: 0, skipped: 0, failed: 0 };
   const failedMatches: string[] = [];
   let stopMessage: string | null = null;
+  // Fixtures this date already holds. Counting them as saved is what made a second run
+  // of a finished date report the whole day as newly stored.
+  let alreadySaved = 0;
   for (const fixture of fixtures) {
     const fixtureId = fixtureIdFromUrl(fixture.matchUrl);
     if (fixtureId !== null && alreadySavedFixtureIds.has(fixtureId)) {
       counts.processed += 1;
-      counts.saved += 1;
+      alreadySaved += 1;
     } else if (
       fixtureId === null ||
       (targetDataset === "archive" && !isFinal(fixture))
@@ -145,13 +148,16 @@ async function runProcessing(
       counts.skipped += 1;
     }
   }
+  const alreadySavedNote = alreadySaved
+    ? `${alreadySaved} fixture(s) were already stored for this date and were not fetched again.`
+    : null;
   writeProgress(
     job.id,
     "running",
     counts,
     counts.skipped
       ? `${counts.skipped} fixture(s) skipped: no final score was available.`
-      : null,
+      : alreadySavedNote,
   );
 
   for (const fixture of fixtures) {
@@ -287,12 +293,14 @@ async function runProcessing(
     }
 
     counts.processed += 1;
-    const progressError = stopMessage ??
-      (counts.failed
+    const progressNotes = [
+      counts.failed
         ? `${counts.failed} match(es) failed to load all analysis data${failedMatches.length ? `: ${failedMatches.slice(0, 3).join("; ")}` : ""}.`
-        : counts.skipped
-          ? `${counts.skipped} fixture(s) skipped: no final score was available.`
-          : null);
+        : null,
+      counts.skipped ? `${counts.skipped} fixture(s) skipped: no final score was available.` : null,
+      alreadySavedNote,
+    ].filter((note): note is string => note !== null);
+    const progressError = stopMessage ?? (progressNotes.length ? progressNotes.join(" ") : null);
     writeProgress(job.id, "running", counts, progressError);
     if (stopMessage) break;
   }
@@ -301,17 +309,18 @@ async function runProcessing(
   const status: FootballProcessingJobStatus =
     counts.failed === 0 && counts.skipped === 0 && notAttempted === 0
       ? "completed"
-      : counts.saved > 0
+      : counts.saved > 0 || alreadySaved > 0
         ? "partial"
         : "failed";
-  const error = stopMessage ??
-    (counts.failed
+  const finalNotes = [
+    counts.failed
       ? `${counts.failed} match(es) failed to load all analysis data${failedMatches.length ? `: ${failedMatches.slice(0, 3).join("; ")}` : ""}.`
-      : counts.skipped
-        ? `${counts.skipped} fixture(s) skipped: no final score was available.`
-        : notAttempted
-          ? `Processing ended before ${notAttempted} fixture(s) could be attempted.`
-          : null);
+      : null,
+    counts.skipped ? `${counts.skipped} fixture(s) skipped: no final score was available.` : null,
+    alreadySavedNote,
+    notAttempted ? `Processing ended before ${notAttempted} fixture(s) could be attempted.` : null,
+  ].filter((note): note is string => note !== null);
+  const error = stopMessage ?? (finalNotes.length ? finalNotes.join(" ") : null);
   writeProgress(job.id, status, counts, error);
 }
 
@@ -371,11 +380,11 @@ router.post("/football/processings", async (req, res): Promise<void> => {
       res.status(202).json(StartFootballBulkProcessingResponse.parse(activeAfterFetch));
       return;
     }
-    const previousJob = getLatestProcessingJob(date, "archive");
-    const shouldResume = previousJob?.status === "failed" || previousJob?.status === "partial";
-    const alreadySavedFixtureIds = shouldResume
-      ? new Set(listProcessedFixtureIds(date, "archive"))
-      : new Set<number>();
+    // Whatever this date already holds stays as it is. A second run of a finished date
+    // used to re-fetch and re-write every fixture, because the guard only applied when
+    // the previous job had failed or stopped part way. Only fixtures this date has never
+    // stored are fetched now.
+    const alreadySavedFixtureIds = new Set(listProcessedFixtureIds(date, "archive"));
     const job = createProcessingJob(date, fixtures.length);
     res.status(202).json(StartFootballBulkProcessingResponse.parse(job));
     setImmediate(() => {
@@ -432,11 +441,7 @@ router.post("/football/tester-processings", async (req, res): Promise<void> => {
       res.status(202).json(StartFootballTesterProcessingResponse.parse(activeAfterFetch));
       return;
     }
-    const previousJob = getLatestProcessingJob(date, "tester");
-    const shouldResume = previousJob?.status === "failed" || previousJob?.status === "partial";
-    const alreadySavedFixtureIds = shouldResume
-      ? new Set(listProcessedFixtureIds(date, "tester"))
-      : new Set<number>();
+    const alreadySavedFixtureIds = new Set(listProcessedFixtureIds(date, "tester"));
     const job = createProcessingJob(date, fixtures.length, "tester");
     res.status(202).json(StartFootballTesterProcessingResponse.parse(job));
     setImmediate(() => {
