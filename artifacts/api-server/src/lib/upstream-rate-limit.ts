@@ -60,6 +60,7 @@ async function fetchAtPoliteRate(
   origin: string,
   input: string | URL,
   init: RequestInit,
+  timeoutMs?: number,
 ): Promise<Response> {
   const previous = requestTails.get(origin) ?? Promise.resolve();
   let release = () => {};
@@ -79,7 +80,16 @@ async function fetchAtPoliteRate(
     }
 
     lastRequestAt.set(origin, Date.now());
-    return await fetch(input, init);
+    // The timeout has to cover the request itself, not the wait for a polite turn. An
+    // abort clock created before queueing expires while a burst of requests waits, which
+    // turned a run of calendar retries into a run of timeouts.
+    const signal =
+      timeoutMs === undefined
+        ? init.signal
+        : init.signal
+          ? AbortSignal.any([init.signal, AbortSignal.timeout(timeoutMs)])
+          : AbortSignal.timeout(timeoutMs);
+    return await fetch(input, { ...init, signal });
   } finally {
     release();
     if (requestTails.get(origin) === tail) requestTails.delete(origin);
@@ -89,6 +99,7 @@ async function fetchAtPoliteRate(
 export async function fetchRespectingRateLimits(
   input: string | URL,
   init: RequestInit,
+  options?: { timeoutMs?: number },
 ): Promise<Response> {
   const origin = new URL(input).origin;
   const now = Date.now();
@@ -98,7 +109,12 @@ export async function fetchRespectingRateLimits(
     throw rateLimitError(existing);
   }
 
-  const response = await fetchAtPoliteRate(origin, input, init);
+  const response = await fetchAtPoliteRate(
+    origin,
+    input,
+    init,
+    options?.timeoutMs,
+  );
 
   const remainingHeader =
     response.headers.get("x-ratelimit-remaining") ??

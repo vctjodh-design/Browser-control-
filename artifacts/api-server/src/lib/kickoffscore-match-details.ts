@@ -120,14 +120,17 @@ export async function fetchKickoffScoreJson(
 
   let response: Response;
   try {
-    response = await fetchRespectingRateLimits(url, {
-      headers: {
-        accept: "application/json",
-        "user-agent": "BrowserControl/1.0",
+    response = await fetchRespectingRateLimits(
+      url,
+      {
+        headers: {
+          accept: "application/json",
+          "user-agent": "BrowserControl/1.0",
+        },
+        redirect: "error",
       },
-      redirect: "error",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
+      { timeoutMs: REQUEST_TIMEOUT_MS },
+    );
   } catch (error) {
     if (error instanceof UpstreamRateLimitError) throw error;
     throw new KickoffScoreApiError("KickoffScore could not be reached.");

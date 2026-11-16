@@ -360,23 +360,43 @@ function parseFixturePage(
   return { date, sourceUrl, fixtures: [...fixturesByUrl.values()] };
 }
 
+const inflightFetches = new Map<string, Promise<FixturePage>>();
+
 export async function getKickoffScoreFixtures(
   date: string,
 ): Promise<FixturePage> {
   const cached = fixtureCache.get(date);
   if (cached && cached.expiresAt > Date.now()) return cached.page;
 
+  // Retrying the calendar used to start one upstream request per press. They queued behind
+  // the politeness gate (400ms apart) and every one of their timeouts expired while waiting,
+  // so a burst of retries came back as a burst of 502s. One fetch per date now, shared by
+  // every caller waiting on it.
+  const inflight = inflightFetches.get(date);
+  if (inflight) return inflight;
+
+  const request = loadFixturePage(date).finally(() => {
+    if (inflightFetches.get(date) === request) inflightFetches.delete(date);
+  });
+  inflightFetches.set(date, request);
+  return request;
+}
+
+async function loadFixturePage(date: string): Promise<FixturePage> {
   // The host is fixed and the date is validated before this function is called.
   // No user-supplied URL is ever fetched here.
   const sourceUrl = `${KICKOFFSCORE_ORIGIN}/matches/${date}`;
-  const response = await fetchRespectingRateLimits(sourceUrl, {
-    headers: {
-      accept: "text/html",
-      "user-agent": "FixturesCalendar/1.0",
+  const response = await fetchRespectingRateLimits(
+    sourceUrl,
+    {
+      headers: {
+        accept: "text/html",
+        "user-agent": "FixturesCalendar/1.0",
+      },
+      redirect: "error",
     },
-    redirect: "error",
-    signal: AbortSignal.timeout(15_000),
-  });
+    { timeoutMs: 20_000 },
+  );
 
   if (!response.ok) {
     throw new Error(`KickoffScore returned HTTP ${response.status}.`);
