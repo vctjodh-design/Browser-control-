@@ -360,9 +360,17 @@ function matchContextFeatures(
   // An absent statistic stays absent for every model: a booster splits on NaN, and the
   // neural path turns it into the training mean at normalization time. Zero-filling here
   // instead made an unknown statistic look like a value far below the mean.
+  //
+  // The vector counts matches first, so an all-zero vector means the matches themselves are
+  // missing rather than measured at zero. Imported history rows carry no per-half source
+  // statistics, and reading their zeros as data taught every model that "no stats" was the
+  // typical match.
+  const hasStats = Array.isArray(historyStats)
+    && historyStats.some((value) => typeof value === "number" && Number.isFinite(value) && value !== 0);
   const historyFeatures = Array.from(
     { length: RECENT_MATCH_STAT_FEATURE_COUNT },
     (_, index) => {
+      if (!hasStats) return Number.NaN;
       const value = historyStats?.[index];
       return typeof value === "number" && Number.isFinite(value)
         ? Math.max(0, Math.min(1, value))
@@ -577,6 +585,7 @@ function buildTrainingExamples(
   matches: ModelTrainingMatch[],
   modelType: FootballModelType,
   sequenceLength: number,
+  onlyFixtureId?: number,
 ): TrainingExample[] {
   const oddsByFixture = parseVerifiedOdds(matches);
   const histories = new Map<string, TeamGame[]>();
@@ -594,6 +603,9 @@ function buildTrainingExamples(
       const awayKey = normalizeTeamName(match.awayTeamName);
       const homeHistory = histories.get(homeKey) ?? [];
       const awayHistory = histories.get(awayKey) ?? [];
+      // Prediction needs one row, but the histories above every row have to be replayed to
+      // get it. Skipping the feature build for the rest keeps that cheap at 30,000 matches.
+      if (onlyFixtureId !== undefined && match.fixtureId !== onlyFixtureId) continue;
       const oddsInPriorForm = [...homeHistory, ...awayHistory]
         .some((game) => game.odds !== null);
       const graph = graphFeatures(
@@ -1444,6 +1456,7 @@ export async function predictArchivedFixture(input: {
     [...historyMatches, targetMatch],
     input.modelType,
     input.sequenceLength,
+    input.target.fixtureId,
   );
   const example = examples.at(-1);
   if (!example) {

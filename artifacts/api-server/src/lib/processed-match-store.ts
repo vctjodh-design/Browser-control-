@@ -1381,9 +1381,9 @@ export function listHistoryResults(limit = 100_000): HistoryResultRow[] {
   }));
 }
 
-export function listModelTrainingMatches(limit = 10_000): ModelTrainingMatch[] {
+export function listModelTrainingMatches(limit = 50_000): ModelTrainingMatch[] {
   ensureModelTrainingMatchIndex();
-  const safeLimit = Math.min(10_000, Math.max(1, Math.trunc(limit)));
+  const safeLimit = Math.min(50_000, Math.max(1, Math.trunc(limit)));
   const rows = database
     .prepare(
       `SELECT fixture_id, calendar_date, match_date, competition, season,
