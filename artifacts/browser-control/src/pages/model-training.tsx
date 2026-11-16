@@ -6,6 +6,8 @@ import ModelPredictionsTab from '@/components/model-predictions-tab';
 import {
   getGetFootballModelTrainingDashboardQueryKey,
   getGetFootballModelTrainingRunQueryKey,
+  useBackfillHistoryTrainingIndex,
+  useFitFootballDixonColes,
   useGetFootballModelTrainingDashboard,
   useGetFootballModelTrainingRun,
   useStartFootballModelTraining,
@@ -174,6 +176,18 @@ export default function ModelTrainingPage() {
   const [sequenceLength, setSequenceLength] = useState(5);
   const [hiddenUnits, setHiddenUnits] = useState(32);
   const [upsetWeighting, setUpsetWeighting] = useState<UpsetWeightingState>(DEFAULT_UPSET_WEIGHTING);
+  const [walkForwardFolds, setWalkForwardFolds] = useState(3);
+  const [dcHome, setDcHome] = useState('');
+  const [dcAway, setDcAway] = useState('');
+  const [dcAsOf, setDcAsOf] = useState('');
+  const backfill = useBackfillHistoryTrainingIndex({
+    mutation: {
+      onSuccess: () => {
+        void client.invalidateQueries({ queryKey: getGetFootballModelTrainingDashboardQueryKey() });
+      },
+    },
+  });
+  const baseline = useFitFootballDixonColes();
   const [activeRunId, setActiveRunId] = useState('');
   // One button, every architecture. The runs still go one at a time — the server
   // trains a single model at once and two at once would compete for the same CPU —
@@ -209,6 +223,7 @@ export default function ModelTrainingPage() {
     sequenceLength,
     hiddenUnits: type === 'catboost' || type === 'xgboost' ? 16 : hiddenUnits,
     upsetWeighting,
+    walkForwardFolds,
   });
 
   const startAll = () => {
@@ -274,7 +289,7 @@ export default function ModelTrainingPage() {
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canTrain || activeTraining || startTraining.isPending) return;
-    startTraining.mutate({ data: { modelType, epochs, sequenceLength, hiddenUnits: boostedTreeModel ? 16 : hiddenUnits, upsetWeighting } }, {
+    startTraining.mutate({ data: { modelType, epochs, sequenceLength, hiddenUnits: boostedTreeModel ? 16 : hiddenUnits, upsetWeighting, walkForwardFolds } }, {
       onSuccess: (created) => {
         setActiveRunId(created.id);
         client.setQueryData(getGetFootballModelTrainingRunQueryKey(created.id), created);
@@ -406,6 +421,58 @@ export default function ModelTrainingPage() {
                 <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-full bg-[#567d69]" /> <strong className="text-[#52615e]">{verifiedOdds.toLocaleString()} verified odds</strong> · confirmed historical coverage</span>
                 <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-full border border-[#c6bca9] bg-[#f2f0e8]" /> <strong className="text-[#52615e]">{missingOdds.toLocaleString()} without verified odds</strong> · coverage gap, not inferred data</span>
               </div>
+              <div className="border-t border-[#e8e6de] px-4 py-3 sm:px-5" data-testid="section-history-import">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="mr-auto min-w-0">
+                    <p className="text-[9px] font-extrabold text-[#4f5f5b]">History outside the index</p>
+                    <p className="mt-0.5 text-[8px] leading-4 text-[#92948b]">Completed matches collected for team windows. Importing them reads form and league averages only from earlier matches, and leaves processed fixtures untouched.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => backfill.mutate()}
+                    disabled={backfill.isPending}
+                    className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-[#c9d4ca] bg-[#eef3ea] px-3 text-[9px] font-extrabold text-[#41654f] transition hover:bg-[#e2ecdf] disabled:opacity-45"
+                    data-testid="button-backfill-history"
+                  >
+                    {backfill.isPending ? <><RefreshCw size={12} className="animate-spin" /> Importing</> : <><Database size={12} /> Import history</>}
+                  </button>
+                </div>
+                {backfill.data && <p className="mt-2 text-[8px] leading-4 text-[#6f7e70]" data-testid="status-backfill-result">
+                  <strong className="text-[#4f6e5a]">{backfill.data.added.toLocaleString()} added</strong> · {backfill.data.alreadyIndexed.toLocaleString()} already indexed · {backfill.data.withLeagueAverage.toLocaleString()} with a prior league average · {backfill.data.withSeason.toLocaleString()} with a season.
+                </p>}
+                {backfill.isError && <p className="mt-2 text-[8px] text-[#a55242]" role="alert" data-testid="status-backfill-error">{errorText(backfill.error)}</p>}
+              </div>
+              <div className="border-t border-[#e8e6de] px-4 py-3 sm:px-5" data-testid="section-dixon-coles">
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="mr-auto min-w-0">
+                    <p className="text-[9px] font-extrabold text-[#4f5f5b]">Dixon-Coles baseline</p>
+                    <p className="mt-0.5 text-[8px] leading-4 text-[#92948b]">Fitted on every completed match before the date, with recent form weighted more heavily. It needs no engineered features, so it covers matches the index never sees.</p>
+                  </div>
+                  <label className="block"><span className="mb-1 block text-[7px] font-extrabold uppercase tracking-[.08em] text-[#8e9187]">Home</span><input value={dcHome} onChange={(event) => setDcHome(event.target.value)} placeholder="Cerro Porteño" className="h-8 w-32 rounded-md border border-[#d8d7ce] bg-white px-2 text-[9px] text-[#354750] focus:border-[#d96f51] focus:outline-none" aria-label="Dixon-Coles home team" data-testid="input-dc-home" /></label>
+                  <label className="block"><span className="mb-1 block text-[7px] font-extrabold uppercase tracking-[.08em] text-[#8e9187]">Away</span><input value={dcAway} onChange={(event) => setDcAway(event.target.value)} placeholder="Recoleta" className="h-8 w-32 rounded-md border border-[#d8d7ce] bg-white px-2 text-[9px] text-[#354750] focus:border-[#d96f51] focus:outline-none" aria-label="Dixon-Coles away team" data-testid="input-dc-away" /></label>
+                  <label className="block"><span className="mb-1 block text-[7px] font-extrabold uppercase tracking-[.08em] text-[#8e9187]">Before</span><input type="date" value={dcAsOf} onChange={(event) => setDcAsOf(event.target.value)} className="h-8 w-32 rounded-md border border-[#d8d7ce] bg-white px-2 text-[9px] text-[#354750] focus:border-[#d96f51] focus:outline-none" aria-label="Dixon-Coles cut-off date" data-testid="input-dc-as-of" /></label>
+                  <button
+                    type="button"
+                    onClick={() => baseline.mutate({ data: { homeTeam: dcHome.trim(), awayTeam: dcAway.trim(), asOf: dcAsOf || undefined } })}
+                    disabled={!dcHome.trim() || !dcAway.trim() || baseline.isPending}
+                    className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-[#253746] px-3 text-[9px] font-extrabold text-[#f8f2e7] transition hover:bg-[#1d2b37] disabled:opacity-45"
+                    data-testid="button-fit-dixon-coles"
+                  >
+                    {baseline.isPending ? <><RefreshCw size={12} className="animate-spin" /> Fitting</> : 'Fit baseline'}
+                  </button>
+                </div>
+                {baseline.isError && <p className="mt-2 text-[8px] leading-4 text-[#a55242]" role="alert" data-testid="status-dixon-coles-error">{errorText(baseline.error)}</p>}
+                {baseline.data && <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5" data-testid="status-dixon-coles-result">
+                  {[
+                    ['1X2', `${(baseline.data.result.home * 100).toFixed(1)} / ${(baseline.data.result.draw * 100).toFixed(1)} / ${(baseline.data.result.away * 100).toFixed(1)}`],
+                    ['BTTS yes', `${(baseline.data.bothTeamsToScore.yes * 100).toFixed(1)}%`],
+                    ['Over 2.5', `${(baseline.data.overUnder25.over * 100).toFixed(1)}%`],
+                    ['Over 3.5', `${(baseline.data.overUnder35.over * 100).toFixed(1)}%`],
+                    ['Scoreline', baseline.data.scorelineTop[0] ? `${baseline.data.scorelineTop[0].scoreline} ${(baseline.data.scorelineTop[0].probability * 100).toFixed(1)}%` : '—'],
+                  ].map(([label, value]) => <div key={label} className="rounded-md border border-[#e3e2d9] bg-[#faf9f4] px-2 py-1.5"><p className="text-[7px] font-extrabold uppercase tracking-[.08em] text-[#90938a]">{label}</p><p className="mono mt-0.5 text-[10px] text-[#344c43]">{value}</p></div>)}
+                  <p className="col-span-2 text-[7.5px] leading-[1.6] text-[#92948b] sm:col-span-5">Expected goals {baseline.data.homeExpectedGoals.toFixed(2)}–{baseline.data.awayExpectedGoals.toFixed(2)} · ρ {baseline.data.rho.toFixed(3)} · home edge ×{baseline.data.homeAdvantage.toFixed(2)} · {baseline.data.matchesUsed.toLocaleString()} matches, {baseline.data.teamsFitted.toLocaleString()} teams.</p>
+                </div>}
+              </div>
               {!canTrain && <div className="flex items-start gap-2.5 border-t border-[#ead9c4] bg-[#fbf3e9] px-4 py-3 text-[9px] leading-5 text-[#84684f] sm:px-5" role="status" data-testid="status-insufficient-data"><AlertTriangle size={14} className="mt-0.5 shrink-0" /><p><strong>Not enough completed matches to train.</strong> At least 30 archived matches are required; the archive currently has {dashboard.matchCount}. Save more completed matches in Database, then return here.</p></div>}
             </>
           ) : null}
@@ -436,6 +503,10 @@ export default function ModelTrainingPage() {
                 <label className="block"><span className="mb-1.5 block text-[9px] font-extrabold text-[#5f6e69]">{boostedTreeModel ? 'Boosting rounds' : 'Epochs'}</span><input type="number" min={5} max={100} step={1} value={epochs} onChange={(event) => setEpochs(Number(event.target.value))} disabled={!canTrain || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending} className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[11px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none disabled:opacity-50" aria-label={boostedTreeModel ? 'Boosting rounds, from 5 to 100' : 'Training epochs, from 5 to 100'} data-testid="input-training-epochs" /><span className="mt-1 block text-[7px] text-[#92948b]">{boostedTreeModel ? '5–100 tree rounds' : '5–100 epochs'}</span></label>
                 <label className="block"><span className="mb-1.5 block text-[9px] font-extrabold text-[#5f6e69]">{boostedTreeModel ? 'Feature history length' : 'Sequence length'}</span><input type="number" min={3} max={15} step={1} value={sequenceLength} onChange={(event) => setSequenceLength(Number(event.target.value))} disabled={!canTrain || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending} className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[11px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none disabled:opacity-50" aria-label={boostedTreeModel ? 'Feature history length, from 3 to 15' : 'Sequence length, from 3 to 15'} data-testid="input-sequence-length" /><span className="mt-1 block text-[7px] text-[#92948b]">{boostedTreeModel ? '3–15 recent matches in features' : '3–15 matches'}</span></label>
                 {!boostedTreeModel && <label className="block"><span className="mb-1.5 block text-[9px] font-extrabold text-[#5f6e69]">Hidden units</span><input type="number" min={4} max={64} step={1} value={hiddenUnits} onChange={(event) => setHiddenUnits(Number(event.target.value))} disabled={!canTrain || dashboardQuery.isLoading || dashboardQuery.isError || startTraining.isPending} className="h-10 w-full rounded-lg border border-[#d8d7ce] bg-[#fbfaf6] px-3 text-[11px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none disabled:opacity-50" aria-label="Hidden units, from 4 to 64" data-testid="input-hidden-units" /><span className="mt-1 block text-[7px] text-[#92948b]">4–64</span></label>}
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-[#e1dfd7] bg-[#fbfaf6] px-3 py-2.5" data-testid="section-walk-forward">
+                <label className="flex items-center gap-2"><span className="text-[9px] font-extrabold text-[#5f6e69]">Walk-forward folds</span><input type="number" min={2} max={6} step={1} value={walkForwardFolds} onChange={(event) => setWalkForwardFolds(Math.max(2, Math.min(6, Number(event.target.value) || 2)))} disabled={!canTrain || startTraining.isPending} className="h-8 w-14 rounded-lg border border-[#d8d7ce] bg-white px-2 text-[10px] font-bold text-[#354750] focus:border-[#d96f51] focus:outline-none disabled:opacity-50" aria-label="Walk-forward folds, from 2 to 6" data-testid="input-walk-forward-folds" /></label>
+                <span className="text-[7.5px] leading-4 text-[#92948b]">Each fold trains on everything before its block and scores on that block, so the metrics below are out-of-fold averages rather than one 20% slice.</span>
               </div>
               <div className="mt-4 rounded-lg border border-[#e1dfd7] bg-[#fbfaf6] px-3 py-3" data-testid="section-upset-weighting">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">

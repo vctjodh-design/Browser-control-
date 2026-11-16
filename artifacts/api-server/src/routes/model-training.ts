@@ -5,6 +5,9 @@ import {
   GetFootballMatchModelPredictionsParams,
   GetFootballMatchModelPredictionsResponse,
   GetFootballModelTrainingDashboardResponse,
+  BackfillHistoryTrainingIndexResponse,
+  FitFootballDixonColesBody,
+  FitFootballDixonColesResponse,
   GetFootballModelTrainingRunParams,
   GetFootballModelTrainingRunResponse,
   PredictFootballTesterMatchParams,
@@ -16,7 +19,9 @@ import {
   StartFootballModelTrainingResponse,
 } from "@workspace/api-zod";
 import {
+  backfillTrainingIndexFromHistory,
   createModelTrainingRun,
+  listHistoryResults,
   findActiveModelTrainingRun,
   getModelTrainingArtifact,
   getModelTrainingRun,
@@ -34,6 +39,7 @@ import {
 } from "../lib/processed-match-store";
 import {
   countVerifiedOddsFixtures,
+  fitDixonColesBaseline,
   isModelPredictorArtifact,
   predictArchivedFixture,
   trainArchivedModel,
@@ -517,6 +523,59 @@ router.get("/football/model-training/runs/:runId", (req, res): void => {
     return;
   }
   res.json(GetFootballModelTrainingRunResponse.parse(run));
+});
+
+router.post("/football/model-training/dixon-coles", async (req, res): Promise<void> => {
+  const input = FitFootballDixonColesBody.safeParse(req.body);
+  if (!input.success) {
+    res.status(400).json({ error: "Choose both teams for the baseline fit." });
+    return;
+  }
+  const asOf = input.data.asOf && /^\d{4}-\d{2}-\d{2}$/.test(input.data.asOf)
+    ? input.data.asOf
+    : new Date().toISOString().slice(0, 10);
+  try {
+    // Strictly earlier than the target day, so the fit never sees the fixture itself.
+    const matches = listHistoryResults().filter((match) => match.date < asOf);
+    if (!matches.length) {
+      res.status(400).json({ error: "The archive holds no completed matches before that date." });
+      return;
+    }
+    const fit = await fitDixonColesBaseline({
+      asOf,
+      homeTeam: input.data.homeTeam,
+      awayTeam: input.data.awayTeam,
+      matches,
+    });
+    res.json(FitFootballDixonColesResponse.parse(fit));
+  } catch (error) {
+    req.log.warn(
+      { errorName: error instanceof Error ? error.name : "UnknownError" },
+      "Could not fit the Dixon-Coles baseline",
+    );
+    res.status(400).json({
+      error: error instanceof Error
+        ? error.message
+        : "The Dixon-Coles baseline could not be fitted.",
+    });
+  }
+});
+
+router.post("/football/model-training/backfill-history", (req, res): void => {
+  try {
+    const summary = backfillTrainingIndexFromHistory();
+    req.log.info(
+      { added: summary.added, alreadyIndexed: summary.alreadyIndexed },
+      "Imported completed history into the training index",
+    );
+    res.json(BackfillHistoryTrainingIndexResponse.parse(summary));
+  } catch (error) {
+    req.log.error(
+      { errorName: error instanceof Error ? error.name : "UnknownError" },
+      "Could not import history into the training index",
+    );
+    res.status(500).json({ error: "The history import could not finish." });
+  }
 });
 
 router.post("/football/model-training/runs", (req, res): void => {

@@ -1167,6 +1167,220 @@ export function listModelPredictionsForFixture(
   return rows.map(modelPredictionFromRow);
 }
 
+type HistoryBackfillRow = {
+  fixtureId: number;
+  matchDate: string;
+  competition: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeKey: string;
+  awayKey: string;
+  homeScore: number;
+  awayScore: number;
+  season: number | null;
+  hasDetail: boolean;
+};
+
+export type HistoryBackfillSummary = {
+  historyMatches: number;
+  alreadyIndexed: number;
+  added: number;
+  withDetail: number;
+  withSeason: number;
+  withLeagueAverage: number;
+  withStandings: number;
+  firstDate: string | null;
+  lastDate: string | null;
+};
+
+function sqliteTableExists(name: string): boolean {
+  return Boolean(
+    database
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(name),
+  );
+}
+
+function historyBackfillRows(): HistoryBackfillRow[] {
+  const hasSeasons = sqliteTableExists("fair_ai_matches");
+  const hasDetail = sqliteTableExists("team_match_detail");
+  const rows = database
+    .prepare(
+      `SELECT h.fixture_id, h.match_date, h.competition, h.home_team, h.away_team,
+              h.home_key, h.away_key, h.home_score, h.away_score,
+              ${hasSeasons ? "m.season" : "NULL"} AS season,
+              ${hasDetail ? "CASE WHEN d.fixture_id IS NULL THEN 0 ELSE 1 END" : "0"} AS has_detail
+       FROM match_history h
+       ${hasSeasons ? "LEFT JOIN fair_ai_matches m ON m.fixture_id = h.fixture_id" : ""}
+       ${hasDetail ? "LEFT JOIN (SELECT DISTINCT fixture_id FROM team_match_detail) d ON d.fixture_id = h.fixture_id" : ""}
+       ORDER BY h.match_date ASC, h.fixture_id ASC`,
+    )
+    .all() as SqlRow[];
+  return rows.map((row) => ({
+    fixtureId: numberValue(row.fixture_id),
+    matchDate: stringValue(row.match_date),
+    competition: stringValue(row.competition),
+    homeTeam: stringValue(row.home_team),
+    awayTeam: stringValue(row.away_team),
+    homeKey: stringValue(row.home_key),
+    awayKey: stringValue(row.away_key),
+    homeScore: numberValue(row.home_score),
+    awayScore: numberValue(row.away_score),
+    season: nullableNumber(row.season),
+    hasDetail: numberValue(row.has_detail) === 1,
+  }));
+}
+
+/**
+ * Writes the completed matches collected for team windows into the training index, which
+ * otherwise only ever holds fixtures processed through Database. Windows and league
+ * averages are read strictly from matches dated before the target, and each match day is
+ * written before any of it becomes visible to the next, so no fixture sees a result
+ * published the same afternoon.
+ *
+ * Two limits are deliberate rather than accidental. The provider's per-half statistics
+ * cannot be rebuilt from the stored aggregates, so those fourteen fields stay zero on
+ * imported rows. Standings stay empty: the snapshot table keys teams as `id:<n>` and
+ * history keys them as name slugs, and there is no honest join between the two.
+ */
+export function backfillTrainingIndexFromHistory(): HistoryBackfillSummary {
+  ensureModelTrainingMatchIndex();
+  const rows = historyBackfillRows();
+  const indexed = new Set(
+    (database
+      .prepare("SELECT fixture_id FROM model_training_match_index")
+      .all() as SqlRow[]).map((row) => numberValue(row.fixture_id)),
+  );
+  const insert = database.prepare(
+    `INSERT INTO model_training_match_index (
+       fixture_id, calendar_date, match_date, competition, season,
+       home_team_name, away_team_name, home_score, away_score,
+       odds_history_json, league_average_goals, training_context_json
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?)
+     ON CONFLICT(fixture_id) DO NOTHING`,
+  );
+  const histories = new Map<string, ModelFormMatch[]>();
+  const leagueGoals = new Map<string, { goals: number; matches: number }>();
+  const emptyStats = Array.from(
+    { length: RECENT_MATCH_STAT_FEATURE_COUNT },
+    () => 0,
+  );
+  const summary: HistoryBackfillSummary = {
+    historyMatches: rows.length,
+    alreadyIndexed: 0,
+    added: 0,
+    withDetail: 0,
+    withSeason: 0,
+    withLeagueAverage: 0,
+    withStandings: 0,
+    firstDate: rows[0]?.matchDate ?? null,
+    lastDate: rows.at(-1)?.matchDate ?? null,
+  };
+
+  // Newest first, because the feature builder slices the last five without sorting.
+  const form = (key: string, limit: number) =>
+    (histories.get(key) ?? []).slice(-limit).reverse();
+  const contextFor = (row: HistoryBackfillRow) => ({
+    homeTeamName: row.homeTeam,
+    awayTeamName: row.awayTeam,
+    homeRecent: form(row.homeKey, 15),
+    awayRecent: form(row.awayKey, 15),
+    homeLastFive: form(row.homeKey, 5),
+    awayLastFive: form(row.awayKey, 5),
+    homeHistoricalStats: emptyStats,
+    awayHistoricalStats: emptyStats,
+    homeStanding: null,
+    awayStanding: null,
+    standingTeamCount: 0,
+  });
+
+  for (let start = 0; start < rows.length;) {
+    const date = rows[start].matchDate;
+    let end = start + 1;
+    while (end < rows.length && rows[end].matchDate === date) end += 1;
+    const day = rows.slice(start, end);
+
+    for (const row of day) {
+      if (row.hasDetail) summary.withDetail += 1;
+      if (row.season !== null) summary.withSeason += 1;
+      const tally = leagueGoals.get(row.competition);
+      const leagueAverageGoals = tally && tally.matches
+        ? tally.goals / tally.matches
+        : null;
+      if (leagueAverageGoals !== null) summary.withLeagueAverage += 1;
+      if (indexed.has(row.fixtureId)) {
+        summary.alreadyIndexed += 1;
+        continue;
+      }
+      insert.run(
+        row.fixtureId,
+        date,
+        `${date}T00:00:00.000Z`,
+        row.competition,
+        row.season,
+        row.homeTeam,
+        row.awayTeam,
+        row.homeScore,
+        row.awayScore,
+        leagueAverageGoals,
+        JSON.stringify(contextFor(row)),
+      );
+      summary.added += 1;
+    }
+
+    for (const row of day) {
+      const match: ModelFormMatch = {
+        fixtureId: row.fixtureId,
+        date: row.matchDate,
+        homeTeamName: row.homeTeam,
+        awayTeamName: row.awayTeam,
+        homeScore: row.homeScore,
+        awayScore: row.awayScore,
+      };
+      const home = histories.get(row.homeKey) ?? [];
+      home.push(match);
+      histories.set(row.homeKey, home);
+      const away = histories.get(row.awayKey) ?? [];
+      away.push(match);
+      histories.set(row.awayKey, away);
+      const tally = leagueGoals.get(row.competition) ?? { goals: 0, matches: 0 };
+      tally.goals += row.homeScore + row.awayScore;
+      tally.matches += 1;
+      leagueGoals.set(row.competition, tally);
+    }
+    start = end;
+  }
+
+  return summary;
+}
+
+export type HistoryResultRow = {
+  date: string;
+  home: string;
+  away: string;
+  homeScore: number;
+  awayScore: number;
+};
+
+/** Every completed match in the archive, in date order, for models that need no features. */
+export function listHistoryResults(limit = 100_000): HistoryResultRow[] {
+  const rows = database
+    .prepare(
+      `SELECT match_date, home_team, away_team, home_score, away_score
+       FROM match_history
+       ORDER BY match_date ASC, fixture_id ASC
+       LIMIT ?`,
+    )
+    .all(limit) as SqlRow[];
+  return rows.map((row) => ({
+    date: stringValue(row.match_date),
+    home: stringValue(row.home_team),
+    away: stringValue(row.away_team),
+    homeScore: numberValue(row.home_score),
+    awayScore: numberValue(row.away_score),
+  }));
+}
+
 export function listModelTrainingMatches(limit = 10_000): ModelTrainingMatch[] {
   ensureModelTrainingMatchIndex();
   const safeLimit = Math.min(10_000, Math.max(1, Math.trunc(limit)));

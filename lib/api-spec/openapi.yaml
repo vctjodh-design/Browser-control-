@@ -339,6 +339,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootballFairAiDataSummary"
+  /football/model-training/backfill-history:
+    post:
+      operationId: backfillHistoryTrainingIndex
+      tags: [model-training]
+      summary: Add completed history matches to the training index
+      description: >-
+        Reads the completed matches stored for team windows and writes the ones that
+        have a result into the training index, with form and league averages read only
+        from earlier matches. Fixtures already in the index are left untouched.
+      responses:
+        "200":
+          description: What the import changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballTrainingBackfillSummary"
+  /football/model-training/dixon-coles:
+    post:
+      operationId: fitFootballDixonColes
+      tags: [model-training]
+      summary: Fit a time-decayed Dixon-Coles baseline
+      description: >-
+        Fits attack, defence and home advantage across every completed match before the
+        given date with an exponential time decay, then returns the joint scoreline grid
+        and the five market probabilities it implies.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FootballDixonColesRequest"
+      responses:
+        "200":
+          description: The fitted baseline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballDixonColesFit"
+        "400":
+          description: The fit could not be produced from these teams
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FootballFixtureError"
   /football/model-training/runs:
     post:
       operationId: startFootballModelTraining
@@ -1448,7 +1492,124 @@ components:
           default: 16
         upsetWeighting:
           $ref: "#/components/schemas/FootballUpsetWeighting"
+        walkForwardFolds:
+          type: integer
+          minimum: 2
+          maximum: 6
+          default: 3
+          description: >-
+            Expanding-window folds used to score the run. Each fold trains on
+            everything before its block and scores on that block.
       required: [modelType]
+    FootballDixonColesRequest:
+      type: object
+      properties:
+        homeTeam:
+          type: string
+          minLength: 1
+        awayTeam:
+          type: string
+          minLength: 1
+        asOf:
+          type: string
+          description: Only matches dated strictly before this day are used.
+      required: [homeTeam, awayTeam]
+    FootballDixonColesFit:
+      type: object
+      properties:
+        homeTeam:
+          type: string
+        awayTeam:
+          type: string
+        matchesUsed:
+          type: integer
+        teamsFitted:
+          type: integer
+        homeAttack:
+          type: number
+        homeDefence:
+          type: number
+        awayAttack:
+          type: number
+        awayDefence:
+          type: number
+        homeAdvantage:
+          type: number
+        rho:
+          type: number
+        homeExpectedGoals:
+          type: number
+        awayExpectedGoals:
+          type: number
+        result:
+          type: object
+          properties:
+            home: { type: number }
+            draw: { type: number }
+            away: { type: number }
+          required: [home, draw, away]
+        bothTeamsToScore:
+          type: object
+          properties:
+            yes: { type: number }
+            no: { type: number }
+          required: [yes, no]
+        overUnder25:
+          type: object
+          properties:
+            over: { type: number }
+            under: { type: number }
+          required: [over, under]
+        overUnder35:
+          type: object
+          properties:
+            over: { type: number }
+            under: { type: number }
+          required: [over, under]
+        scorelineTop:
+          type: array
+          items:
+            type: object
+            properties:
+              scoreline: { type: string }
+              probability: { type: number }
+            required: [scoreline, probability]
+        scorelineGrid:
+          type: array
+          items:
+            type: array
+            items:
+              type: number
+      required:
+        [homeTeam, awayTeam, matchesUsed, teamsFitted, homeAdvantage, rho,
+         homeExpectedGoals, awayExpectedGoals, result, bothTeamsToScore,
+         overUnder25, overUnder35, scorelineTop, scorelineGrid]
+    FootballTrainingBackfillSummary:
+      type: object
+      properties:
+        historyMatches:
+          type: integer
+        alreadyIndexed:
+          type: integer
+        added:
+          type: integer
+        withDetail:
+          type: integer
+        withSeason:
+          type: integer
+        withLeagueAverage:
+          type: integer
+        withStandings:
+          type: integer
+        firstDate:
+          type: string
+          nullable: true
+        lastDate:
+          type: string
+          nullable: true
+      required:
+        [historyMatches, alreadyIndexed, added, withDetail, withSeason,
+         withLeagueAverage, withStandings]
     FootballUpsetWeighting:
       type: object
       description: >-

@@ -28,6 +28,8 @@ import type {
   DeleteFootballProcessedMatchesResponse,
   DeleteFootballTesterMatchesResponse,
   FootballBulkProcessingInput,
+  FootballDixonColesFit,
+  FootballDixonColesRequest,
   FootballFairAiDataSummary,
   FootballFairAiForensicsInput,
   FootballFairAiSimulation,
@@ -56,6 +58,7 @@ import type {
   FootballTesterMatchPredictions,
   FootballTesterMatchSummary,
   FootballTesterMatches,
+  FootballTrainingBackfillSummary,
   GetFootballFairAiTeamsParams,
   GetFootballFixturesParams,
   GetFootballLiveActionParams,
@@ -1170,6 +1173,170 @@ export const useStartFootballFairAiDataIngestion = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getStartFootballFairAiDataIngestionMutationOptions(options));
+    }
+
+export const getBackfillHistoryTrainingIndexUrl = () => {
+
+
+
+
+  return `/api/football/model-training/backfill-history`
+}
+
+/**
+ * Reads the completed matches stored for team windows and writes the ones that have a result into the training index, with form and league averages read only from earlier matches. Fixtures already in the index are left untouched.
+ * @summary Add completed history matches to the training index
+ */
+export const backfillHistoryTrainingIndex = async ( options?: Parameters<typeof customFetch>[1]): Promise<FootballTrainingBackfillSummary> => {
+
+  return customFetch<FootballTrainingBackfillSummary>(getBackfillHistoryTrainingIndexUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getBackfillHistoryTrainingIndexMutationKey = () => ['backfillHistoryTrainingIndex'] as const;
+
+export const getBackfillHistoryTrainingIndexMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof backfillHistoryTrainingIndex>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof backfillHistoryTrainingIndex>>, TError,void, TContext> => {
+
+const mutationKey = getBackfillHistoryTrainingIndexMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof backfillHistoryTrainingIndex>>, void> = () => {
+
+
+          return  backfillHistoryTrainingIndex(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BackfillHistoryTrainingIndexMutationResult = NonNullable<Awaited<ReturnType<typeof backfillHistoryTrainingIndex>>>
+
+    export type BackfillHistoryTrainingIndexMutationError = ErrorType<unknown>
+
+
+    /**
+ * @summary Add completed history matches to the training index
+ */
+export const useBackfillHistoryTrainingIndex = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof backfillHistoryTrainingIndex>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof backfillHistoryTrainingIndex>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getBackfillHistoryTrainingIndexMutationOptions(options));
+    }
+
+export const getFitFootballDixonColesUrl = () => {
+
+
+
+
+  return `/api/football/model-training/dixon-coles`
+}
+
+/**
+ * Fits attack, defence and home advantage across every completed match before the given date with an exponential time decay, then returns the joint scoreline grid and the five market probabilities it implies.
+ * @summary Fit a time-decayed Dixon-Coles baseline
+ */
+export const fitFootballDixonColes = async (footballDixonColesRequest: FootballDixonColesRequest, options?: Parameters<typeof customFetch>[1]): Promise<FootballDixonColesFit> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<FootballDixonColesFit>(getFitFootballDixonColesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(footballDixonColesRequest)
+  }
+);}
+
+
+
+
+
+export const getFitFootballDixonColesMutationKey = () => ['fitFootballDixonColes'] as const;
+
+export const getFitFootballDixonColesMutationOptions = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof fitFootballDixonColes>>, TError,FitFootballDixonColesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof fitFootballDixonColes>>, TError,FitFootballDixonColesMutationVariables, TContext> => {
+
+const mutationKey = getFitFootballDixonColesMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof fitFootballDixonColes>>, FitFootballDixonColesMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  fitFootballDixonColes(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type FitFootballDixonColesMutationResult = NonNullable<Awaited<ReturnType<typeof fitFootballDixonColes>>>
+    export type FitFootballDixonColesMutationBody = BodyType<FootballDixonColesRequest>
+    export type FitFootballDixonColesMutationError = ErrorType<FootballFixtureError>
+    export type FitFootballDixonColesMutationVariables = {data: BodyType<FootballDixonColesRequest>}
+
+    /**
+ * @summary Fit a time-decayed Dixon-Coles baseline
+ */
+export const useFitFootballDixonColes = <TError = ErrorType<FootballFixtureError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof fitFootballDixonColes>>, TError,FitFootballDixonColesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof fitFootballDixonColes>>,
+        TError,
+        FitFootballDixonColesMutationVariables,
+        TContext
+      > => {
+      return useMutation(getFitFootballDixonColesMutationOptions(options));
     }
 
 export const getStartFootballModelTrainingUrl = () => {

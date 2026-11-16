@@ -295,6 +295,7 @@ function modelContextMatches(
 function matchContextFeatures(
   match: ModelTrainingMatch,
   side: "home" | "away",
+  missingStatsAsNaN = false,
 ): number[] {
   const recent = modelContextMatches(match.trainingContext, side, match.matchDate, 15);
   const lastFiveRaw = side === "home"
@@ -357,13 +358,16 @@ function matchContextFeatures(
   const historyStats = side === "home"
     ? match.trainingContext.homeHistoricalStats
     : match.trainingContext.awayHistoricalStats;
+  // A booster splits on NaN, so an absent statistic can stay absent. tfjs cannot carry
+  // NaN through normalization, so the neural models keep the zero fill.
   const historyFeatures = Array.from(
     { length: RECENT_MATCH_STAT_FEATURE_COUNT },
     (_, index) => {
       const value = historyStats?.[index];
-      return typeof value === "number" && Number.isFinite(value)
-        ? Math.max(0, Math.min(1, value))
-        : 0;
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.max(0, Math.min(1, value));
+      }
+      return missingStatsAsNaN ? Number.NaN : 0;
     },
   );
   return [...baseFeatures, ...historyFeatures];
@@ -374,6 +378,7 @@ function sequenceFeatures(
   awayHistory: TeamGame[],
   sequenceLength: number,
   match: ModelTrainingMatch,
+  missingStatsAsNaN = false,
 ): number[] {
   const home = homeHistory.slice(-sequenceLength);
   const away = awayHistory.slice(-sequenceLength);
@@ -387,11 +392,11 @@ function sequenceFeatures(
     features.push(
       ...teamEventFeatures(homeGame),
       ...(index === sequenceLength - 1
-        ? matchContextFeatures(match, "home")
+        ? matchContextFeatures(match, "home", missingStatsAsNaN)
         : Array(MATCH_CONTEXT_FEATURES).fill(0)),
       ...teamEventFeatures(awayGame),
       ...(index === sequenceLength - 1
-        ? matchContextFeatures(match, "away")
+        ? matchContextFeatures(match, "away", missingStatsAsNaN)
         : Array(MATCH_CONTEXT_FEATURES).fill(0)),
       (index + 1) / sequenceLength,
     );
@@ -484,16 +489,17 @@ function graphFeatures(
   scopeEdges: Map<string, NeighborEdge[]>,
   sequenceLength: number,
   dynamic: boolean,
+  missingStatsAsNaN = false,
 ): { nodes: number[]; adjacency: number[] } {
   const homeNodeKey = `${match.competition.toLocaleLowerCase()}|${match.season ?? "unknown"}|${normalizeTeamName(match.homeTeamName)}`;
   const awayNodeKey = `${match.competition.toLocaleLowerCase()}|${match.season ?? "unknown"}|${normalizeTeamName(match.awayTeamName)}`;
   const home = [
     ...teamSummary(homeHistory, sequenceLength),
-    ...matchContextFeatures(match, "home"),
+    ...matchContextFeatures(match, "home", missingStatsAsNaN),
   ];
   const away = [
     ...teamSummary(awayHistory, sequenceLength),
-    ...matchContextFeatures(match, "away"),
+    ...matchContextFeatures(match, "away", missingStatsAsNaN),
   ];
   const homeNeighbors = neighborSummary(
     homeNodeKey,
@@ -576,6 +582,7 @@ function buildTrainingExamples(
   sequenceLength: number,
 ): TrainingExample[] {
   const oddsByFixture = parseVerifiedOdds(matches);
+  const missingStatsAsNaN = isBoostedTreeModelType(modelType);
   const histories = new Map<string, TeamGame[]>();
   const scopeEdges = new Map<string, NeighborEdge[]>();
   const examples: TrainingExample[] = [];
@@ -601,8 +608,15 @@ function buildTrainingExamples(
         scopeEdges,
         sequenceLength,
         modelType === "dynamic-graph",
+        missingStatsAsNaN,
       );
-      const sequence = sequenceFeatures(homeHistory, awayHistory, sequenceLength, match);
+      const sequence = sequenceFeatures(
+        homeHistory,
+        awayHistory,
+        sequenceLength,
+        match,
+        missingStatsAsNaN,
+      );
       examples.push({
         sequence,
         graph: graph.nodes,
@@ -877,13 +891,14 @@ function isBoostedTreeModelType(
   return modelType === "catboost" || modelType === "xgboost";
 }
 
-function runBoostedTreeWorker<Result>(
-  request: BoostedTreeWorkerRequest,
+function runModelWorker<Result>(
+  scriptName: string,
+  request: unknown,
   onEpoch?: EpochProgress,
 ): Promise<Result> {
   return new Promise((resolve, reject) => {
     const workerPath = fileURLToPath(
-      new URL("./boosted-tree-worker.py", import.meta.url),
+      new URL(`./${scriptName}`, import.meta.url),
     );
     const child = spawn(pythonCommand(workerPath), [workerPath], {
       stdio: ["pipe", "pipe", "pipe"],
@@ -948,6 +963,114 @@ function runBoostedTreeWorker<Result>(
   });
 }
 
+function runBoostedTreeWorker<Result>(
+  request: BoostedTreeWorkerRequest,
+  onEpoch?: EpochProgress,
+): Promise<Result> {
+  return runModelWorker<Result>("boosted-tree-worker.py", request, onEpoch);
+}
+
+export type DixonColesFit = {
+  homeTeam: string;
+  awayTeam: string;
+  matchesUsed: number;
+  teamsFitted: number;
+  homeAttack: number;
+  homeDefence: number;
+  awayAttack: number;
+  awayDefence: number;
+  homeAdvantage: number;
+  rho: number;
+  homeExpectedGoals: number;
+  awayExpectedGoals: number;
+  result: { home: number; draw: number; away: number };
+  bothTeamsToScore: { yes: number; no: number };
+  overUnder25: { over: number; under: number };
+  overUnder35: { over: number; under: number };
+  scorelineTop: Array<{ scoreline: string; probability: number }>;
+  scorelineGrid: number[][];
+};
+
+/**
+ * A time-decayed Dixon-Coles fit over every completed match in the archive. It needs no
+ * engineered features, so it covers matches that never went through processing, and it
+ * returns the joint scoreline grid rather than two independent means.
+ */
+export async function fitDixonColesBaseline(input: {
+  asOf: string;
+  homeTeam: string;
+  awayTeam: string;
+  matches: Array<{ date: string; home: string; away: string; homeScore: number; awayScore: number }>;
+}): Promise<DixonColesFit> {
+  // The worker's envelope is unwrapped by runModelWorker, so what arrives here is the fit
+  // itself. Note it has its own `result` field (the 1X2 probabilities) — unwrapping twice
+  // used to hand back those three numbers instead of the model.
+  const fit = await runModelWorker<DixonColesFit>("dixon-coles-worker.py", {
+    mode: "fit",
+    asOf: input.asOf,
+    homeTeam: input.homeTeam,
+    awayTeam: input.awayTeam,
+    matches: input.matches,
+  });
+  if (!fit || typeof fit !== "object" || !fit.homeTeam) {
+    throw new Error("The Dixon-Coles worker returned no fit.");
+  }
+  return fit;
+}
+
+type FoldScore = {
+  count: number;
+  accuracy: number;
+  baselineAccuracy: number;
+  logLoss: number;
+  brierScore: number;
+  confusionMatrix: number[][];
+};
+
+/**
+ * Expanding-window folds. Each fold trains on everything before its block and scores on
+ * that block, so every reported number is an out-of-fold prediction from a model that
+ * could not have seen it.
+ */
+export function walkForwardFolds(
+  sampleCount: number,
+  folds: number,
+): Array<{ trainEnd: number; testEnd: number }> {
+  const requested = Math.max(1, Math.min(6, Math.trunc(folds)));
+  const initial = Math.max(1, Math.floor(sampleCount * 0.5));
+  const remaining = sampleCount - initial;
+  if (remaining < 2) return [{ trainEnd: sampleCount - 1, testEnd: sampleCount }];
+  const blocks = Math.max(1, Math.min(requested, remaining));
+  const plans: Array<{ trainEnd: number; testEnd: number }> = [];
+  for (let index = 0; index < blocks; index += 1) {
+    const from = initial + Math.round((remaining * index) / blocks);
+    const to = initial + Math.round((remaining * (index + 1)) / blocks);
+    if (to > from) plans.push({ trainEnd: from, testEnd: to });
+  }
+  return plans.length ? plans : [{ trainEnd: sampleCount - 1, testEnd: sampleCount }];
+}
+
+function combineFoldScores(scores: FoldScore[]) {
+  const total = Math.max(1, scores.reduce((sum, score) => sum + score.count, 0));
+  const confusionMatrix = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (const score of scores) {
+    for (let actual = 0; actual < 3; actual += 1) {
+      for (let predicted = 0; predicted < 3; predicted += 1) {
+        confusionMatrix[actual][predicted] += score.confusionMatrix[actual]?.[predicted] ?? 0;
+      }
+    }
+  }
+  const weighted = (value: (score: FoldScore) => number) =>
+    scores.reduce((sum, score) => sum + value(score) * score.count, 0) / total;
+  return {
+    accuracy: weighted((score) => score.accuracy),
+    baselineAccuracy: weighted((score) => score.baselineAccuracy),
+    logLoss: weighted((score) => score.logLoss),
+    brierScore: weighted((score) => score.brierScore),
+    confusionMatrix,
+  };
+}
+
 export async function trainArchivedModel(
   modelType: FootballModelType,
   input: FootballModelTrainingInput,
@@ -962,40 +1085,73 @@ export async function trainArchivedModel(
     throw new Error("At least 30 completed archive matches are needed to train and evaluate a model.");
   }
 
-  const trainingSampleCount = Math.floor(examples.length * 0.8);
-  const validationSampleCount = examples.length - trainingSampleCount;
   const upsetWeighting: UpsetWeighting = {
     ...NO_UPSET_WEIGHTING,
     ...(input.upsetWeighting ?? {}),
   };
-  const trainingLabelsFor = (name: MarketHeadName) =>
-    examples.slice(0, trainingSampleCount).map((example) => example.labels[name]);
-  if (isBoostedTreeModelType(modelType)) {
-    const labels: Record<MarketHeadName, number[]> = {
-      result: examples.map((example) => example.labels.result),
-      bothTeamsToScore: examples.map((example) => example.labels.bothTeamsToScore),
-      overUnder25: examples.map((example) => example.labels.overUnder25),
-      overUnder35: examples.map((example) => example.labels.overUnder35),
-      correctScore: examples.map((example) => example.labels.correctScore),
-    };
-    const classWeights = Object.fromEntries(
+  // A single 80/20 cut made every comparison a coin toss: the holdout was a few hundred
+  // matches, so about five of them decided which architecture looked better. The folds
+  // below train on everything before each block and score on that block, so the reported
+  // numbers average across the recent archive instead of resting on one slice.
+  const plans = walkForwardFolds(examples.length, input.walkForwardFolds ?? 3);
+  const validationSampleCount = plans.reduce(
+    (sum, plan) => sum + (plan.testEnd - plan.trainEnd),
+    0,
+  );
+  const trainingSampleCount = plans.at(-1)?.trainEnd ?? examples.length - 1;
+  const verifiedOddsFixtureCount = examples.filter(
+    (example) => example.hasPriorVerifiedOdds,
+  ).length;
+  const labelsForHead = (name: MarketHeadName, start: number, end: number) =>
+    examples.slice(start, end).map((example) => example.labels[name]);
+  const classWeightsFor = (trainCount: number) =>
+    Object.fromEntries(
       MARKET_HEADS.map(({ name, classes }) => [
         name,
-        upsetClassWeights(trainingLabelsFor(name), classes, upsetWeighting[name]),
+        upsetClassWeights(labelsForHead(name, 0, trainCount), classes, upsetWeighting[name]),
       ]),
     ) as Record<MarketHeadName, number[]>;
-    const result = await runBoostedTreeWorker<ModelTrainingResult>({
-      mode: "train",
-      algorithm: modelType,
-      rounds: epochs,
-      trainingSampleCount,
-      features: examples.map((example) => example.tabular),
-      labels,
-      classWeights,
-    }, onEpoch);
+
+  if (isBoostedTreeModelType(modelType)) {
+    const foldScores: FoldScore[] = [];
+    let lastResult: ModelTrainingResult | null = null;
+    for (const plan of plans) {
+      const labels: Record<MarketHeadName, number[]> = {
+        result: labelsForHead("result", 0, plan.testEnd),
+        bothTeamsToScore: labelsForHead("bothTeamsToScore", 0, plan.testEnd),
+        overUnder25: labelsForHead("overUnder25", 0, plan.testEnd),
+        overUnder35: labelsForHead("overUnder35", 0, plan.testEnd),
+        correctScore: labelsForHead("correctScore", 0, plan.testEnd),
+      };
+      const result = await runBoostedTreeWorker<ModelTrainingResult>({
+        mode: "train",
+        algorithm: modelType,
+        rounds: epochs,
+        trainingSampleCount: plan.trainEnd,
+        features: examples.slice(0, plan.testEnd).map((example) => example.tabular),
+        labels,
+        classWeights: classWeightsFor(plan.trainEnd),
+      }, onEpoch);
+      lastResult = result;
+      foldScores.push({
+        count: result.validationSampleCount,
+        accuracy: result.accuracy,
+        baselineAccuracy: result.baselineAccuracy,
+        logLoss: result.logLoss,
+        brierScore: result.brierScore,
+        confusionMatrix: result.confusionMatrix,
+      });
+    }
+    if (!lastResult) {
+      throw new Error("Walk-forward training produced no boosted-tree fold results.");
+    }
     return {
-      ...result,
-      verifiedOddsFixtureCount: examples.filter((example) => example.hasPriorVerifiedOdds).length,
+      ...lastResult,
+      sampleCount: examples.length,
+      trainingSampleCount,
+      validationSampleCount,
+      verifiedOddsFixtureCount,
+      ...combineFoldScores(foldScores),
     };
   }
 
@@ -1004,22 +1160,15 @@ export async function trainArchivedModel(
   const sequenceModel = modelType === "lstm" || modelType === "gru" || modelType === "transformer";
   const graphModel = modelType === "gnn" || modelType === "dynamic-graph";
   const featureCount = sequenceModel ? SEQUENCE_FEATURES : TEAM_EVENT_FEATURES;
+  const positionsPerSample = sequenceModel ? sequenceLength : GRAPH_NODE_COUNT;
   const rawRows = examples.map((example) => sequenceModel ? example.sequence : example.graph);
-  const normalization = fitNormalization(
-    rawRows,
-    trainingSampleCount,
-    featureCount,
-    sequenceModel ? sequenceLength : graphModel ? GRAPH_NODE_COUNT : 1,
-  );
-  const normalizedRows = normalizeRows(rawRows, normalization);
-  const trainRows = normalizedRows.slice(0, trainingSampleCount);
-  const validationRows = normalizedRows.slice(trainingSampleCount);
-  const trainLabels = examples
-    .slice(0, trainingSampleCount)
-    .map((example) => example.labels.result);
-  const validationLabels = examples
-    .slice(trainingSampleCount)
-    .map((example) => example.labels.result);
+  const trainingLoss: number[] = [];
+  const validationLoss: number[] = [];
+  const foldScores: FoldScore[] = [];
+  const totalEpochs = epochs * plans.length;
+  let completedEpochs = 0;
+  let artifact: NeuralModelPredictorArtifact | null = null;
+
   const createTargets = (start: number, count: number) =>
     MARKET_HEADS.map(({ name, classes }) =>
       tf.tensor2d(
@@ -1029,113 +1178,144 @@ export async function trainArchivedModel(
         [count, classes],
       ),
     );
-  const trainTargets = createTargets(0, trainingSampleCount);
-  const validationTargets = createTargets(trainingSampleCount, validationSampleCount);
-  const inputSteps = sequenceModel ? sequenceLength : GRAPH_NODE_COUNT;
-  const inputFeatures = sequenceModel ? SEQUENCE_FEATURES : TEAM_EVENT_FEATURES;
-  const trainInputs = tf.tensor3d(
-    trainRows.flat(),
-    [trainingSampleCount, inputSteps, inputFeatures],
-  );
-  const validationInputs = tf.tensor3d(
-    validationRows.flat(),
-    [validationSampleCount, inputSteps, inputFeatures],
-  );
-  const trainAdjacency = graphModel
-    ? tf.tensor3d(
-      examples
-        .slice(0, trainingSampleCount)
-        .flatMap((example) => example.graphAdjacency),
-      [trainingSampleCount, GRAPH_NODE_COUNT, GRAPH_NODE_COUNT],
-    )
-    : undefined;
-  const validationAdjacency = graphModel
-    ? tf.tensor3d(
-      examples
-        .slice(trainingSampleCount)
-        .flatMap((example) => example.graphAdjacency),
-      [validationSampleCount, GRAPH_NODE_COUNT, GRAPH_NODE_COUNT],
-    )
-    : undefined;
-  const modelTrainInputs = graphModel
-    ? [trainInputs, trainAdjacency as tf.Tensor3D]
-    : trainInputs;
-  const modelValidationInputs = graphModel
-    ? [validationInputs, validationAdjacency as tf.Tensor3D]
-    : validationInputs;
-  const model = createModel(modelType, sequenceLength, hiddenUnits);
-  const trainingLoss: number[] = [];
-  const validationLoss: number[] = [];
-  let predictionTensors: tf.Tensor[] = [];
-  // tfjs has no per-sample weights, but it does weight each class, and every market's
-  // upset weight is a class weight, so the five markets stay separately tunable.
-  const classWeight: Record<string, Record<number, number>> = {};
-  for (const { name, classes } of MARKET_HEADS) {
-    const strength = upsetWeighting[name];
-    if (strength <= 0) continue;
-    const weights = upsetClassWeights(trainingLabelsFor(name), classes, strength);
-    classWeight[name] = weights.reduce<Record<number, number>>((map, weight, index) => {
-      map[index] = weight;
-      return map;
-    }, {});
-  }
 
-  try {
-    model.compile({
-      optimizer: tf.train.adam(0.008),
-      loss: MARKET_HEADS.map(() => "categoricalCrossentropy"),
-    });
-    await model.fit(modelTrainInputs, trainTargets, {
-      epochs,
-      batchSize: Math.min(32, trainingSampleCount),
-      shuffle: false,
-      validationData: [modelValidationInputs, validationTargets],
-      classWeight: Object.keys(classWeight).length ? classWeight : undefined,
-      verbose: 0,
-      callbacks: [{
-        onEpochEnd: async (epoch: number, logs?: { [key: string]: number }) => {
-          if (typeof logs?.loss === "number") trainingLoss.push(logs.loss);
-          if (typeof logs?.val_loss === "number") validationLoss.push(logs.val_loss);
-          onEpoch(epoch + 1, [...trainingLoss], [...validationLoss]);
-        },
-      }],
-    });
-
-    predictionTensors = model.predict(modelValidationInputs) as tf.Tensor[];
-    const predictionValues = Array.from(await predictionTensors[0].data());
-    const probabilityRows = Array.from({ length: validationSampleCount }, (_, index) =>
-      predictionValues.slice(index * 3, index * 3 + 3),
+  for (const plan of plans) {
+    const trainCount = plan.trainEnd;
+    const testCount = plan.testEnd - plan.trainEnd;
+    const normalization = fitNormalization(
+      rawRows.slice(0, trainCount),
+      trainCount,
+      featureCount,
+      positionsPerSample,
     );
-    const metrics = metricsFor(probabilityRows, validationLabels, trainLabels);
-    const weights: TrainingWeights = model.getWeights().map((weight) => ({
-      shape: [...weight.shape],
-      values: Array.from(weight.dataSync()),
-    }));
+    const trainRows = normalizeRows(rawRows.slice(0, trainCount), normalization);
+    const testRows = normalizeRows(rawRows.slice(trainCount, plan.testEnd), normalization);
+    const trainResultLabels = examples
+      .slice(0, trainCount)
+      .map((example) => example.labels.result);
+    const testResultLabels = examples
+      .slice(trainCount, plan.testEnd)
+      .map((example) => example.labels.result);
 
-    return {
-      sampleCount: examples.length,
-      trainingSampleCount,
-      validationSampleCount,
-      verifiedOddsFixtureCount: examples.filter((example) => example.hasPriorVerifiedOdds).length,
-      ...metrics,
-      trainingLoss,
-      validationLoss,
-      predictorArtifact: {
-        version: 2,
-        weights,
-        normalization,
-      },
-    };
-  } finally {
-    predictionTensors.forEach((tensor) => tensor.dispose());
-    trainInputs.dispose();
-    trainTargets.forEach((tensor) => tensor.dispose());
-    validationInputs.dispose();
-    validationTargets.forEach((tensor) => tensor.dispose());
-    trainAdjacency?.dispose();
-    validationAdjacency?.dispose();
-    model.dispose();
+    // tfjs has no per-sample weights, but it does weight each class, and every market's
+    // upset weight is a class weight, so the five markets stay separately tunable.
+    const classWeight: Record<string, Record<number, number>> = {};
+    for (const { name, classes } of MARKET_HEADS) {
+      const strength = upsetWeighting[name];
+      if (strength <= 0) continue;
+      const weights = upsetClassWeights(
+        labelsForHead(name, 0, trainCount),
+        classes,
+        strength,
+      );
+      classWeight[name] = weights.reduce<Record<number, number>>((map, weight, index) => {
+        map[index] = weight;
+        return map;
+      }, {});
+    }
+
+    const trainInputs = tf.tensor3d(
+      trainRows.flat(),
+      [trainCount, positionsPerSample, featureCount],
+    );
+    const testInputs = tf.tensor3d(
+      testRows.flat(),
+      [testCount, positionsPerSample, featureCount],
+    );
+    const trainAdjacency = graphModel
+      ? tf.tensor3d(
+        examples.slice(0, trainCount).flatMap((example) => example.graphAdjacency),
+        [trainCount, GRAPH_NODE_COUNT, GRAPH_NODE_COUNT],
+      )
+      : undefined;
+    const testAdjacency = graphModel
+      ? tf.tensor3d(
+        examples.slice(trainCount, plan.testEnd).flatMap((example) => example.graphAdjacency),
+        [testCount, GRAPH_NODE_COUNT, GRAPH_NODE_COUNT],
+      )
+      : undefined;
+    const trainTargets = createTargets(0, trainCount);
+    const testTargets = createTargets(trainCount, testCount);
+    const modelTrainInputs = graphModel
+      ? [trainInputs, trainAdjacency as tf.Tensor3D]
+      : trainInputs;
+    const modelTestInputs = graphModel
+      ? [testInputs, testAdjacency as tf.Tensor3D]
+      : testInputs;
+    const model = createModel(modelType, sequenceLength, hiddenUnits);
+    let predictionTensors: tf.Tensor[] = [];
+
+    try {
+      model.compile({
+        optimizer: tf.train.adam(0.008),
+        loss: MARKET_HEADS.map(() => "categoricalCrossentropy"),
+      });
+      await model.fit(modelTrainInputs, trainTargets, {
+        epochs,
+        batchSize: Math.min(32, trainCount),
+        shuffle: false,
+        validationData: [modelTestInputs, testTargets],
+        classWeight: Object.keys(classWeight).length ? classWeight : undefined,
+        verbose: 0,
+        callbacks: [{
+          onEpochEnd: async (_epoch: number, logs?: { [key: string]: number }) => {
+            if (typeof logs?.loss === "number") trainingLoss.push(logs.loss);
+            if (typeof logs?.val_loss === "number") validationLoss.push(logs.val_loss);
+            completedEpochs += 1;
+            // Folds multiply the epoch count, so report against the budget the run showed.
+            const reported = Math.max(
+              1,
+              Math.min(epochs, Math.round((completedEpochs / totalEpochs) * epochs)),
+            );
+            onEpoch(reported, [...trainingLoss], [...validationLoss]);
+          },
+        }],
+      });
+
+      predictionTensors = model.predict(modelTestInputs) as tf.Tensor[];
+      const predictionValues = Array.from(await predictionTensors[0].data());
+      const probabilityRows = Array.from({ length: testCount }, (_, index) =>
+        predictionValues.slice(index * 3, index * 3 + 3),
+      );
+      const metrics = metricsFor(probabilityRows, testResultLabels, trainResultLabels);
+      foldScores.push({ count: testCount, ...metrics });
+
+      if (plan === plans.at(-1)) {
+        artifact = {
+          version: 2,
+          weights: model.getWeights().map((weight) => ({
+            shape: [...weight.shape],
+            values: Array.from(weight.dataSync()),
+          })),
+          normalization,
+        };
+      }
+    } finally {
+      predictionTensors.forEach((tensor) => tensor.dispose());
+      trainInputs.dispose();
+      testInputs.dispose();
+      trainTargets.forEach((tensor) => tensor.dispose());
+      testTargets.forEach((tensor) => tensor.dispose());
+      trainAdjacency?.dispose();
+      testAdjacency?.dispose();
+      model.dispose();
+    }
   }
+
+  if (!artifact) {
+    throw new Error("Walk-forward training produced no neural artifact.");
+  }
+
+  return {
+    sampleCount: examples.length,
+    trainingSampleCount,
+    validationSampleCount,
+    verifiedOddsFixtureCount,
+    ...combineFoldScores(foldScores),
+    trainingLoss,
+    validationLoss,
+    predictorArtifact: artifact,
+  };
 }
 
 function isNeuralModelPredictorArtifact(

@@ -118,10 +118,12 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
-  await copyFile(
-    path.resolve(artifactDir, "src/lib/boosted-tree-worker.py"),
-    path.join(distDir, "boosted-tree-worker.py"),
-  );
+  for (const worker of ["boosted-tree-worker.py", "dixon-coles-worker.py"]) {
+    await copyFile(
+      path.resolve(artifactDir, `src/lib/${worker}`),
+      path.join(distDir, worker),
+    );
+  }
 }
 
 buildAll().catch((err) => {

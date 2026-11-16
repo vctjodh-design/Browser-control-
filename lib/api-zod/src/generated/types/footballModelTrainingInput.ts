@@ -26,4 +26,10 @@ export interface FootballModelTrainingInput {
      */
   hiddenUnits?: number;
   upsetWeighting?: FootballUpsetWeighting;
+  /**
+     * Expanding-window folds used to score the run. Each fold trains on everything before its block and scores on that block.
+     * @minimum 2
+     * @maximum 6
+     */
+  walkForwardFolds?: number;
 }

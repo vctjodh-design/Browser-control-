@@ -126,6 +126,80 @@ export interface FootballModelTrainingInput {
      */
   hiddenUnits?: number;
   upsetWeighting?: FootballUpsetWeighting;
+  /**
+     * Expanding-window folds used to score the run. Each fold trains on everything before its block and scores on that block.
+     * @minimum 2
+     * @maximum 6
+     */
+  walkForwardFolds?: number;
+}
+
+export interface FootballDixonColesRequest {
+  /** @minLength 1 */
+  homeTeam: string;
+  /** @minLength 1 */
+  awayTeam: string;
+  /** Only matches dated strictly before this day are used. */
+  asOf?: string;
+}
+
+export type FootballDixonColesFitResult = {
+  home: number;
+  draw: number;
+  away: number;
+};
+
+export type FootballDixonColesFitBothTeamsToScore = {
+  yes: number;
+  no: number;
+};
+
+export type FootballDixonColesFitOverUnder25 = {
+  over: number;
+  under: number;
+};
+
+export type FootballDixonColesFitOverUnder35 = {
+  over: number;
+  under: number;
+};
+
+export type FootballDixonColesFitScorelineTopItem = {
+  scoreline: string;
+  probability: number;
+};
+
+export interface FootballDixonColesFit {
+  homeTeam: string;
+  awayTeam: string;
+  matchesUsed: number;
+  teamsFitted: number;
+  homeAttack?: number;
+  homeDefence?: number;
+  awayAttack?: number;
+  awayDefence?: number;
+  homeAdvantage: number;
+  rho: number;
+  homeExpectedGoals: number;
+  awayExpectedGoals: number;
+  result: FootballDixonColesFitResult;
+  bothTeamsToScore: FootballDixonColesFitBothTeamsToScore;
+  overUnder25: FootballDixonColesFitOverUnder25;
+  overUnder35: FootballDixonColesFitOverUnder35;
+  scorelineTop: FootballDixonColesFitScorelineTopItem[];
+  scorelineGrid: number[][];
+}
+
+export interface FootballTrainingBackfillSummary {
+  historyMatches: number;
+  alreadyIndexed: number;
+  added: number;
+  withDetail: number;
+  withSeason: number;
+  withLeagueAverage: number;
+  withStandings: number;
+  firstDate?: string | null;
+  lastDate?: string | null;
 }
 
 export type FootballModelTrainingStatus = typeof FootballModelTrainingStatus[keyof typeof FootballModelTrainingStatus];

@@ -178,7 +178,9 @@ def train(request):
     features = np.asarray(request["features"], dtype=np.float32)
     if features.ndim != 2 or features.shape[0] < 30 or features.shape[1] == 0:
         raise ValueError("Training requires at least 30 examples with a consistent feature vector.")
-    features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+    # NaN means the archive never recorded that statistic, which is not the same as a
+    # measured zero. Both boosters split on missing values natively.
+    features = np.nan_to_num(features, nan=np.nan, posinf=0.0, neginf=0.0)
     sample_count = int(features.shape[0])
     training_count = int(request["trainingSampleCount"])
     if training_count < 1 or training_count >= sample_count:
@@ -303,7 +305,7 @@ def predict(request):
     artifact = request["artifact"]
     algorithm = request["algorithm"]
     features = np.asarray(request["features"], dtype=np.float32).reshape(1, -1)
-    features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+    features = np.nan_to_num(features, nan=np.nan, posinf=0.0, neginf=0.0)
     if (
         artifact.get("version") != 3
         or artifact.get("algorithm") != algorithm

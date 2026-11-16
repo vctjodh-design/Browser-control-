@@ -1570,6 +1570,75 @@ export const StartFootballFairAiDataIngestionResponse = zod.object({
 
 
 /**
+ * Reads the completed matches stored for team windows and writes the ones that have a result into the training index, with form and league averages read only from earlier matches. Fixtures already in the index are left untouched.
+ * @summary Add completed history matches to the training index
+ */
+export const BackfillHistoryTrainingIndexResponse = zod.object({
+  "historyMatches": zod.number().int(),
+  "alreadyIndexed": zod.number().int(),
+  "added": zod.number().int(),
+  "withDetail": zod.number().int(),
+  "withSeason": zod.number().int(),
+  "withLeagueAverage": zod.number().int(),
+  "withStandings": zod.number().int(),
+  "firstDate": zod.string().nullish(),
+  "lastDate": zod.string().nullish()
+})
+
+
+/**
+ * Fits attack, defence and home advantage across every completed match before the given date with an exponential time decay, then returns the joint scoreline grid and the five market probabilities it implies.
+ * @summary Fit a time-decayed Dixon-Coles baseline
+ */
+
+
+
+
+export const FitFootballDixonColesBody = zod.object({
+  "homeTeam": zod.string().min(1),
+  "awayTeam": zod.string().min(1),
+  "asOf": zod.string().optional().describe('Only matches dated strictly before this day are used.')
+})
+
+export const FitFootballDixonColesResponse = zod.object({
+  "homeTeam": zod.string(),
+  "awayTeam": zod.string(),
+  "matchesUsed": zod.number().int(),
+  "teamsFitted": zod.number().int(),
+  "homeAttack": zod.number().optional(),
+  "homeDefence": zod.number().optional(),
+  "awayAttack": zod.number().optional(),
+  "awayDefence": zod.number().optional(),
+  "homeAdvantage": zod.number(),
+  "rho": zod.number(),
+  "homeExpectedGoals": zod.number(),
+  "awayExpectedGoals": zod.number(),
+  "result": zod.object({
+  "home": zod.number(),
+  "draw": zod.number(),
+  "away": zod.number()
+}),
+  "bothTeamsToScore": zod.object({
+  "yes": zod.number(),
+  "no": zod.number()
+}),
+  "overUnder25": zod.object({
+  "over": zod.number(),
+  "under": zod.number()
+}),
+  "overUnder35": zod.object({
+  "over": zod.number(),
+  "under": zod.number()
+}),
+  "scorelineTop": zod.array(zod.object({
+  "scoreline": zod.string(),
+  "probability": zod.number()
+})),
+  "scorelineGrid": zod.array(zod.array(zod.number()))
+})
+
+
+/**
  * Starts chronological holdout training using only information available before each archived match
  * @summary Train a football outcome model from archived matches
  */
@@ -1605,6 +1674,10 @@ export const startFootballModelTrainingBodyUpsetWeightingCorrectScoreDefault = 0
 export const startFootballModelTrainingBodyUpsetWeightingCorrectScoreMin = 0;
 export const startFootballModelTrainingBodyUpsetWeightingCorrectScoreMax = 3;
 
+export const startFootballModelTrainingBodyWalkForwardFoldsDefault = 3;
+export const startFootballModelTrainingBodyWalkForwardFoldsMin = 2;
+export const startFootballModelTrainingBodyWalkForwardFoldsMax = 6;
+
 
 
 export const StartFootballModelTrainingBody = zod.object({
@@ -1618,7 +1691,8 @@ export const StartFootballModelTrainingBody = zod.object({
   "overUnder25": zod.number().min(startFootballModelTrainingBodyUpsetWeightingOverUnder25Min).max(startFootballModelTrainingBodyUpsetWeightingOverUnder25Max).default(startFootballModelTrainingBodyUpsetWeightingOverUnder25Default),
   "overUnder35": zod.number().min(startFootballModelTrainingBodyUpsetWeightingOverUnder35Min).max(startFootballModelTrainingBodyUpsetWeightingOverUnder35Max).default(startFootballModelTrainingBodyUpsetWeightingOverUnder35Default),
   "correctScore": zod.number().min(startFootballModelTrainingBodyUpsetWeightingCorrectScoreMin).max(startFootballModelTrainingBodyUpsetWeightingCorrectScoreMax).default(startFootballModelTrainingBodyUpsetWeightingCorrectScoreDefault)
-}).optional().describe('Extra loss weight for the outcomes each market\'s archive shows rarely. Zero trains on the plain mix; one gives an outcome half as common as the most common one 1.5x the loss weight and an outcome the window never showed 2x.')
+}).optional().describe('Extra loss weight for the outcomes each market\'s archive shows rarely. Zero trains on the plain mix; one gives an outcome half as common as the most common one 1.5x the loss weight and an outcome the window never showed 2x.'),
+  "walkForwardFolds": zod.number().int().min(startFootballModelTrainingBodyWalkForwardFoldsMin).max(startFootballModelTrainingBodyWalkForwardFoldsMax).default(startFootballModelTrainingBodyWalkForwardFoldsDefault).describe('Expanding-window folds used to score the run. Each fold trains on everything before its block and scores on that block.')
 })
 
 export const StartFootballModelTrainingResponse = zod.object({
