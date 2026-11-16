@@ -295,7 +295,6 @@ function modelContextMatches(
 function matchContextFeatures(
   match: ModelTrainingMatch,
   side: "home" | "away",
-  missingStatsAsNaN = false,
 ): number[] {
   const recent = modelContextMatches(match.trainingContext, side, match.matchDate, 15);
   const lastFiveRaw = side === "home"
@@ -358,16 +357,16 @@ function matchContextFeatures(
   const historyStats = side === "home"
     ? match.trainingContext.homeHistoricalStats
     : match.trainingContext.awayHistoricalStats;
-  // A booster splits on NaN, so an absent statistic can stay absent. tfjs cannot carry
-  // NaN through normalization, so the neural models keep the zero fill.
+  // An absent statistic stays absent for every model: a booster splits on NaN, and the
+  // neural path turns it into the training mean at normalization time. Zero-filling here
+  // instead made an unknown statistic look like a value far below the mean.
   const historyFeatures = Array.from(
     { length: RECENT_MATCH_STAT_FEATURE_COUNT },
     (_, index) => {
       const value = historyStats?.[index];
-      if (typeof value === "number" && Number.isFinite(value)) {
-        return Math.max(0, Math.min(1, value));
-      }
-      return missingStatsAsNaN ? Number.NaN : 0;
+      return typeof value === "number" && Number.isFinite(value)
+        ? Math.max(0, Math.min(1, value))
+        : Number.NaN;
     },
   );
   return [...baseFeatures, ...historyFeatures];
@@ -378,7 +377,6 @@ function sequenceFeatures(
   awayHistory: TeamGame[],
   sequenceLength: number,
   match: ModelTrainingMatch,
-  missingStatsAsNaN = false,
 ): number[] {
   const home = homeHistory.slice(-sequenceLength);
   const away = awayHistory.slice(-sequenceLength);
@@ -392,11 +390,11 @@ function sequenceFeatures(
     features.push(
       ...teamEventFeatures(homeGame),
       ...(index === sequenceLength - 1
-        ? matchContextFeatures(match, "home", missingStatsAsNaN)
+        ? matchContextFeatures(match, "home")
         : Array(MATCH_CONTEXT_FEATURES).fill(0)),
       ...teamEventFeatures(awayGame),
       ...(index === sequenceLength - 1
-        ? matchContextFeatures(match, "away", missingStatsAsNaN)
+        ? matchContextFeatures(match, "away")
         : Array(MATCH_CONTEXT_FEATURES).fill(0)),
       (index + 1) / sequenceLength,
     );
@@ -489,17 +487,16 @@ function graphFeatures(
   scopeEdges: Map<string, NeighborEdge[]>,
   sequenceLength: number,
   dynamic: boolean,
-  missingStatsAsNaN = false,
 ): { nodes: number[]; adjacency: number[] } {
   const homeNodeKey = `${match.competition.toLocaleLowerCase()}|${match.season ?? "unknown"}|${normalizeTeamName(match.homeTeamName)}`;
   const awayNodeKey = `${match.competition.toLocaleLowerCase()}|${match.season ?? "unknown"}|${normalizeTeamName(match.awayTeamName)}`;
   const home = [
     ...teamSummary(homeHistory, sequenceLength),
-    ...matchContextFeatures(match, "home", missingStatsAsNaN),
+    ...matchContextFeatures(match, "home"),
   ];
   const away = [
     ...teamSummary(awayHistory, sequenceLength),
-    ...matchContextFeatures(match, "away", missingStatsAsNaN),
+    ...matchContextFeatures(match, "away"),
   ];
   const homeNeighbors = neighborSummary(
     homeNodeKey,
@@ -582,7 +579,6 @@ function buildTrainingExamples(
   sequenceLength: number,
 ): TrainingExample[] {
   const oddsByFixture = parseVerifiedOdds(matches);
-  const missingStatsAsNaN = isBoostedTreeModelType(modelType);
   const histories = new Map<string, TeamGame[]>();
   const scopeEdges = new Map<string, NeighborEdge[]>();
   const examples: TrainingExample[] = [];
@@ -608,14 +604,12 @@ function buildTrainingExamples(
         scopeEdges,
         sequenceLength,
         modelType === "dynamic-graph",
-        missingStatsAsNaN,
       );
       const sequence = sequenceFeatures(
         homeHistory,
         awayHistory,
         sequenceLength,
         match,
-        missingStatsAsNaN,
       );
       examples.push({
         sequence,
@@ -653,27 +647,42 @@ function buildTrainingExamples(
   return examples;
 }
 
+// A z-score beyond this is almost always one unusual fixture against a feature the training
+// window barely varied. Clamping keeps a single input from driving a softmax head to 0/100%.
+const NORMALIZED_FEATURE_CLAMP = 5;
+
 function fitNormalization(
   rows: number[][],
   trainingSampleCount: number,
   featureCount: number,
   positionsPerSample: number,
 ): NeuralModelPredictorArtifact["normalization"] {
-  const means = Array(featureCount).fill(0) as number[];
+  const sums = Array(featureCount).fill(0) as number[];
   const squares = Array(featureCount).fill(0) as number[];
-  const divisor = Math.max(1, trainingSampleCount * positionsPerSample);
+  const counts = Array(featureCount).fill(0) as number[];
 
   for (let sample = 0; sample < trainingSampleCount; sample += 1) {
     for (let position = 0; position < positionsPerSample; position += 1) {
       for (let feature = 0; feature < featureCount; feature += 1) {
         const value = rows[sample][position * featureCount + feature];
-        means[feature] += value / divisor;
-        squares[feature] += value * value / divisor;
+        if (!Number.isFinite(value)) continue;
+        sums[feature] += value;
+        squares[feature] += value * value;
+        counts[feature] += 1;
       }
     }
   }
 
-  const scales = means.map((mean, index) => Math.sqrt(Math.max(1e-6, squares[index] - mean * mean)));
+  // Absent values are skipped so a feature that is unknown for most of the window is still
+  // described by the rows that do carry it, rather than by a column of zeros.
+  const means = sums.map((sum, index) =>
+    counts[index] ? sum / counts[index] : 0,
+  );
+  const scales = means.map((mean, index) => {
+    if (!counts[index]) return 1;
+    const variance = Math.max(0, squares[index] / counts[index] - mean * mean);
+    return Math.max(Math.sqrt(variance), 1e-3);
+  });
   return { means, scales, positionsPerSample };
 }
 
@@ -687,9 +696,19 @@ function normalizeRows(
     for (let position = 0; position < normalization.positionsPerSample; position += 1) {
       for (let feature = 0; feature < featureCount; feature += 1) {
         const index = position * featureCount + feature;
-        normalized[index] =
-          (row[index] - normalization.means[feature]) /
+        const value = row[index];
+        if (!Number.isFinite(value)) {
+          // Unknown becomes the training mean, which is zero once standardized.
+          normalized[index] = 0;
+          continue;
+        }
+        const scaled =
+          (value - normalization.means[feature]) /
           normalization.scales[feature];
+        normalized[index] = Math.max(
+          -NORMALIZED_FEATURE_CLAMP,
+          Math.min(NORMALIZED_FEATURE_CLAMP, scaled),
+        );
       }
     }
     return normalized;
